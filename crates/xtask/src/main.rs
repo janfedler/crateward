@@ -10,6 +10,7 @@
 mod diagram;
 mod docs_lint;
 mod elf;
+mod firecracker;
 mod guest_kernel;
 mod images;
 mod rootfs;
@@ -48,6 +49,8 @@ enum Task {
     GuestAgent,
     /// Vendor all dependencies into a reproducible tarball for a release.
     Vendor,
+    /// Download and verify the pinned Firecracker release.
+    Firecracker,
     /// Build the guest kernel from the pinned source in guest/kernel.
     GuestKernel,
     /// Build the guest root filesystem image from the pins in guest/rootfs.
@@ -88,6 +91,7 @@ fn main() -> ExitCode {
         Task::StateDiagram { write } => diagram::run(&workspace_root(), write),
         Task::GuestAgent => guest_agent(),
         Task::Vendor => vendor(),
+        Task::Firecracker => firecracker::run(&workspace_root()),
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
         Task::Rootfs => rootfs::run(&workspace_root()),
         Task::Soak => Err(TaskError::NotImplemented("M1")),

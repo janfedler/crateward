@@ -18,6 +18,7 @@ server.
 | Integration tests | Feed and fetcher against a mock crates.io; Postgres job store | M2 |
 | End to end tests | Canary crates through the whole pipeline with the fake VM backend | M5 |
 | Fuzz targets | Extraction, event decoding, DNS and HTTP sinks | M7 (`cargo fuzz`) |
+| Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default; run on the server with `--ignored` |
 | Soak test | 50 sequential real VM jobs without leaked resources | M1, on the server |
 
 ## State machine properties
@@ -32,6 +33,20 @@ arbitrary event sequences and checks:
 * transient failures end in `Failed` after at most `max_attempts`;
 * escalation to a full build happens at most once;
 * the coverage label is "dynamic on Linux" exactly when a VM run completed.
+
+## Real microVM tests
+
+These need `/dev/kvm`, so CI skips them. On the server:
+
+```sh
+cargo xtask firecracker     # pinned release, SHA-256 verified
+cargo xtask guest-kernel    # pinned source, fragment checked
+cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1
+cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-threads 1
+```
+
+The only programs these tests start inside the VM are the guest agent and
+standard tools of the guest image.
 
 ## Running the checks
 

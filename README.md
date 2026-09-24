@@ -121,7 +121,7 @@ cargo run -p crateward_cli -- state-machine diagram
 | Milestone | Scope | State |
 |-----------|-------|-------|
 | M0 | Foundation: workspace, CI, config, core types, state machine, docs | done |
-| M1 | Firecracker platform: guest kernel and rootfs, orchestrator, jailer, limits, cleanup | next |
+| M1 | Firecracker platform: guest kernel and rootfs, orchestrator, jailer, limits, cleanup | in progress |
 | M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | planned |
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | planned |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | planned |

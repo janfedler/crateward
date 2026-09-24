@@ -27,6 +27,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod firecracker;
+
 use crateward_core::app::ComponentError;
 use crateward_core::component::Component;
 use crateward_core::config::Config;

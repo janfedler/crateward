@@ -32,3 +32,22 @@ pub fn blake3_file(path: &Path) -> Result<String, TaskError> {
     }
     Ok(hasher.finalize().to_hex().to_string())
 }
+
+/// SHA-256 digest of a file, hex encoded. Used where an external party
+/// publishes SHA-256 checksums, such as Firecracker releases.
+///
+/// # Errors
+///
+/// Fails if the file cannot be read.
+pub fn sha256_file(path: &Path) -> Result<String, TaskError> {
+    use sha2::Digest as _;
+    let io = |e| TaskError::Io(path.to_path_buf(), e);
+    let mut file = std::fs::File::open(path).map_err(io)?;
+    let mut hasher = sha2::Sha256::new();
+    std::io::copy(&mut file, &mut hasher).map_err(io)?;
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}

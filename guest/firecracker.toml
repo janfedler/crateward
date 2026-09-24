@@ -1,0 +1,10 @@
+# Pinned Firecracker release. `cargo xtask firecracker` downloads it into
+# target/guest/bin and refuses anything whose SHA-256 differs.
+#
+# The digest was taken from the release's published checksum file and
+# confirmed against a download on 2026-09-24. Pinning it here means a later
+# change to the release asset cannot slip in unnoticed.
+
+version = "v1.17.0"
+url = "https://github.com/firecracker-microvm/firecracker/releases/download/v1.17.0/firecracker-v1.17.0-x86_64.tgz"
+sha256 = "06094a1108ae9e82aa4c23a775aa92758f53f1175d422270d9d6162cb9ade558"

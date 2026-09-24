@@ -18,6 +18,14 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `tracing` | core (`app` feature) | Structured logging facade used by the whole async ecosystem. |
 | `tracing-subscriber` | core (`app` feature) | JSON and human readable log output with environment based filters. |
 | `proptest` | core (tests) | Property tests for parsers and the state machine. |
+| `postcard` | core | Compact, schema driven encoding of the host and guest protocol; `no_std` friendly and strict about trailing bytes. |
+| `rustix` | guest agent | Safe wrappers for `mount`, `reboot`, `clock_settime` and process groups, so the agent needs no unsafe code. |
+| `vsock` | guest agent | Blocking `AF_VSOCK` listener for the agent; a small wrapper maintained by the `rust-vmm` community. |
+| `tokio` | orchestrator | Async runtime for supervising many VMs, timers and sockets at once. |
+| `hyper`, `hyper-util`, `http-body-util`, `bytes` | orchestrator | HTTP/1.1 client for the Firecracker API over its Unix socket, with bounded response bodies. |
+| `serde_json` | orchestrator | JSON bodies of the Firecracker API. |
+| `blake3` | xtask | Fast digests that identify every image Crateward builds. |
+| `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
 
 ## Tools
 

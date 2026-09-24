@@ -17,3 +17,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0008](0008-prewarmed-snapshot-and-shared-sccache.md) | Prewarmed base snapshot and read only sccache | Proposed |
 | [0009](0009-single-server-with-external-services.md) | One server; GitHub Pages, healthchecks.io and ntfy.sh instead of a VPS | Accepted |
 | [0010](0010-smt-off-and-ram-hot-path.md) | SMT disabled and the hot path in RAM | Accepted |
+| [0011](0011-guest-kernel-source.md) | Guest kernel from a pinned Amazon Linux 6.18 branch commit | Accepted |
