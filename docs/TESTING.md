@@ -19,7 +19,7 @@ server.
 | End to end tests | Canary crates through the whole pipeline with the fake VM backend | M5 |
 | Fuzz targets | Extraction, event decoding, DNS and HTTP sinks | M7 (`cargo fuzz`) |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default; run on the server with `--ignored` |
-| Soak test | 50 sequential real VM jobs without leaked resources | M1, on the server |
+| Soak test | Sequential jailed jobs, a host side timeout and crash reconciliation, then checks for leaked processes, cgroups, directories, network interfaces, file descriptors and memory | `cargo xtask soak --jobs 50`, on the server |
 
 ## State machine properties
 
@@ -43,7 +43,14 @@ cargo xtask firecracker     # pinned release, SHA-256 verified
 cargo xtask guest-kernel    # pinned source, fragment checked
 cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1
 cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-threads 1
+cargo xtask soak --jobs 50  # needs a delegated cgroup; xtask starts a systemd user scope
 ```
+
+Results on the production server (2026-09-24): boot to a ready agent in
+about 430 ms; restore of a snapshot into a new jail, including the jail
+setup and cgroup, to a ready agent in 60 to 68 ms at the median and at most
+92 ms; 50 jobs in about 12.5 seconds; resident memory of the test process
+grew by 4 KiB over 50 jobs, and nothing was left behind.
 
 The only programs these tests start inside the VM are the guest agent and
 standard tools of the guest image.

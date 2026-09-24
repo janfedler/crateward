@@ -75,12 +75,42 @@ publishes the share of versions with dynamic results.
 | Retention | daily |
 | Heartbeat | every minute |
 
+## Host setup done by hand (Ansible in M8)
+
+These steps were applied to the production server on 2026-09-24 and are the
+specification for the Ansible role.
+
+* Kernel command line: `nosmt mds=full,nosmt l1tf=full,force` in
+  `GRUB_CMDLINE_LINUX_DEFAULT`. Verified: SMT `forceoff`, L1TF "VMX: cache
+  flushes, SMT disabled", `kvm_intel.vmentry_l1d_flush=always`.
+* Swap disabled and removed from `/etc/fstab`; KSM off.
+* Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap`.
+* Development user `claude`: groups `kvm` and `systemd-journal`, lingering
+  enabled, subordinate IDs `100000:65536`, and
+  `/etc/systemd/system/user@1000.service.d/delegate.conf` with
+  `Delegate=cpu cpuset io memory pids`.
+
+For production the orchestrator gets its own user (see below) instead of
+the development account.
+
 ## Services and users
 
 Each component runs as its own system user under systemd with
 `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, and a minimal
 capability bounding set. Unit files arrive with the milestones that build
 the components.
+
+The orchestrator user has requirements of its own (ADR 0012):
+
+* its only supplementary group is `kvm`, because every jailed Firecracker
+  keeps the orchestrator's supplementary groups;
+* a subordinate UID and GID range in `/etc/subuid` and `/etc/subgid` that
+  covers `sandbox.slot_uid_base` plus the number of slots, and that no
+  other user shares;
+* its unit runs with `Delegate=yes`, so it owns a cgroup subtree for the
+  slot limits;
+* every other Crateward unit sets `RestrictNamespaces=yes`, since only the
+  orchestrator needs unprivileged user namespaces.
 
 ## External services
 

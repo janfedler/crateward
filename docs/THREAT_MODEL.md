@@ -61,11 +61,13 @@ test. Nothing is marked Built before the code exists.
 | Firecracker's default seccomp filters; never `--no-seccomp` | Tested | M1 |
 | No process runs as root for the sandbox; the orchestrator and the launcher are unprivileged | Built | M1 |
 | Serial console output rate limited, since it carries guest controlled text into the host log | Built | M1 |
-| Hard limits: `cpu.max`, `memory.max`, `pids.max`, drive and net rate limiters, fixed size scratch, wall clock with `cgroup.kill` | Planned | M1 |
-| SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Planned | M1 |
-| KSM disabled, no swap, as the Firecracker production guide recommends | Planned | M1 |
+| Per slot cgroup: `cpu.max`, `memory.max`, `memory.swap.max` 0, `pids.max`; host side wall clock that ends a slot with `cgroup.kill` | Tested | M1 |
+| Drive and network rate limiters, fixed size scratch disk | Planned | M4 |
+| SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Built (verified on the host) | M1 |
+| KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand; Ansible in M8) | M1 |
 | Guest kernel without module support, so guest root cannot load a rootkit module | Planned | M1 |
-| Check that guest visible CPU mitigations match the host; the stock Debian 6.12 host kernel is outside Firecracker's validated matrix | Planned | M1 |
+| Check that guest visible CPU mitigations are not weaker than the host's; the stock Debian 6.12 host kernel is outside Firecracker's validated matrix | Tested | M1 |
+| Startup reconciliation removes slot cgroups and directories left by a crash; namespaces and tap devices cannot outlive their process | Tested | M1 |
 | Unexpected VM exits, Firecracker crashes and seccomp violations raise a sandbox escape indicator | Planned | M5 |
 | Host honeytokens and integrity monitoring detect a successful escape | Planned | M7 |
 

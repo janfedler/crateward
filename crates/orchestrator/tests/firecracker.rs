@@ -267,3 +267,52 @@ async fn jailed_boots_runs_a_job_and_shuts_down() {
 async fn jailed_restores_the_same_snapshot_twice_with_fresh_state() {
     snapshot_and_restore_twice(true).await;
 }
+
+/// The host runs a kernel outside Firecracker's validated matrix (ADR 0007),
+/// and Firecracker 1.17 fixed a host kernel specific bug that hid eIBRS from
+/// guests. A guest must never report a CPU vulnerability as unmitigated
+/// where the host reports a mitigation.
+#[tokio::test]
+#[ignore = "needs /dev/kvm and the guest images"]
+async fn guest_cpu_mitigations_are_not_weaker_than_the_host() {
+    let dir = "/sys/devices/system/cpu/vulnerabilities";
+    let launch = launch("mitigations", true, 5);
+    let vm = Vm::boot(&launch, &boot_spec()).await.unwrap();
+    let mut agent = vm
+        .agent(Instant::now() + Duration::from_secs(20))
+        .await
+        .unwrap();
+    let outcome = agent
+        .run(job(&["/bin/sh", "-c", &format!("cd {dir} && grep . *")]))
+        .await
+        .unwrap();
+    drop(agent);
+    vm.destroy().await.unwrap();
+    let guest: std::collections::BTreeMap<String, String> =
+        String::from_utf8_lossy(&outcome.stdout)
+            .lines()
+            .filter_map(|l| l.split_once(':'))
+            .map(|(k, v)| (k.to_owned(), v.trim().to_owned()))
+            .collect();
+    assert!(!guest.is_empty(), "guest reported no vulnerability files");
+    let mut weaker = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let host = std::fs::read_to_string(entry.path())
+            .unwrap()
+            .trim()
+            .to_owned();
+        let in_guest = guest
+            .get(&name)
+            .cloned()
+            .unwrap_or_else(|| "missing".into());
+        eprintln!("{name:28} host: {host:60} guest: {in_guest}");
+        if !host.starts_with("Vulnerable") && in_guest.starts_with("Vulnerable") {
+            weaker.push(name);
+        }
+    }
+    assert!(
+        weaker.is_empty(),
+        "guest is weaker than the host for {weaker:?}"
+    );
+}

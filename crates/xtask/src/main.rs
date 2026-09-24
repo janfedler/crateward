@@ -20,9 +20,6 @@ use std::process::{Command, ExitCode};
 
 use clap::{Parser, Subcommand};
 
-/// `EX_UNAVAILABLE` from `sysexits.h`.
-const EXIT_UNAVAILABLE: u8 = 69;
-
 /// Target of the guest agent.
 const GUEST_TARGET: &str = "x86_64-unknown-linux-musl";
 
@@ -55,8 +52,12 @@ enum Task {
     GuestKernel,
     /// Build the guest root filesystem image from the pins in guest/rootfs.
     Rootfs,
-    /// Run sequential jobs and check for leaked resources (milestone M1).
-    Soak,
+    /// Run sequential jailed jobs on this host and check for leaked resources.
+    Soak {
+        /// Number of sequential jobs.
+        #[arg(long, default_value_t = 50)]
+        jobs: u32,
+    },
 }
 
 /// Why a task failed.
@@ -68,8 +69,6 @@ enum TaskError {
     Check(String),
     /// Reading or writing a file failed.
     Io(PathBuf, std::io::Error),
-    /// The task belongs to a later milestone.
-    NotImplemented(&'static str),
 }
 
 impl std::fmt::Display for TaskError {
@@ -77,9 +76,6 @@ impl std::fmt::Display for TaskError {
         match self {
             Self::Command(message) | Self::Check(message) => f.write_str(message),
             Self::Io(path, error) => write!(f, "{}: {error}", path.display()),
-            Self::NotImplemented(milestone) => {
-                write!(f, "not implemented yet (planned for milestone {milestone})")
-            }
         }
     }
 }
@@ -94,14 +90,10 @@ fn main() -> ExitCode {
         Task::Firecracker => firecracker::run(&workspace_root()),
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
         Task::Rootfs => rootfs::run(&workspace_root()),
-        Task::Soak => Err(TaskError::NotImplemented("M1")),
+        Task::Soak { jobs } => soak(jobs),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error @ TaskError::NotImplemented(_)) => {
-            eprintln!("xtask: {error}");
-            ExitCode::from(EXIT_UNAVAILABLE)
-        }
         Err(error) => {
             eprintln!("xtask: {error}");
             ExitCode::FAILURE
@@ -234,6 +226,35 @@ fn guest_agent() -> Result<(), TaskError> {
         ))),
         Err(message) => Err(TaskError::Check(format!("{}: {message}", binary.display()))),
     }
+}
+
+/// Runs the soak test in a systemd user scope with `Delegate=yes`, which
+/// gives it a cgroup subtree for the slot limits. Needs `/dev/kvm`, the
+/// guest images and subordinate IDs, so it only runs on the server.
+fn soak(jobs: u32) -> Result<(), TaskError> {
+    let jobs = jobs.to_string();
+    run(
+        "systemd-run",
+        &[
+            "--user",
+            "--scope",
+            "--quiet",
+            "-p",
+            "Delegate=yes",
+            "cargo",
+            "test",
+            "--release",
+            "--locked",
+            "--package",
+            "crateward_orchestrator",
+            "--test",
+            "soak",
+            "--",
+            "--ignored",
+            "--nocapture",
+        ],
+        &[("CRATEWARD_SOAK_JOBS", jobs.as_str())],
+    )
 }
 
 fn vendor() -> Result<(), TaskError> {

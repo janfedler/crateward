@@ -28,6 +28,8 @@
 // system call and documents why it is sound.
 #![deny(unsafe_code)]
 
+pub mod backend;
+pub mod cgroup;
 pub mod firecracker;
 pub mod jail;
 

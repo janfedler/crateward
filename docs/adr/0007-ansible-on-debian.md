@@ -43,6 +43,15 @@ outside Firecracker's validated host kernel matrix.
   hosts; functional tests would not have noticed it.
 * Revisit this decision at every Debian point release and every change of
   Firecracker's kernel support policy.
+* Measured on 2026-09-24 (Debian 6.12.107 host, guest 6.18.51, Firecracker
+  1.17.0): no CPU vulnerability that the host reports as mitigated shows as
+  unmitigated in the guest. The guest reports "Not affected" for iTLB
+  multihit, VMScape, TSX asynchronous abort and GDS, which the host handles,
+  and "BHI: Vulnerable" inside its Spectre v2 line where the host says "Not
+  affected": the guest kernel lacks the capability bits to know, and the
+  host, which sees the real CPU, reports the Kaby Lake part as not
+  affected. The test `guest_cpu_mitigations_are_not_weaker_than_the_host`
+  repeats the comparison.
 
 ## Sources
 
