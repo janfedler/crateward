@@ -45,6 +45,25 @@ jobs:
   test:
     name: tests
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        # postgres:17, pinned by digest.
+        image: postgres@sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f
+        env:
+          POSTGRES_USER: crateward
+          POSTGRES_PASSWORD: crateward-ci-only
+          POSTGRES_DB: crateward_test
+          POSTGRES_INITDB_ARGS: --data-checksums
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U crateward"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      CRATEWARD_TEST_DATABASE_URL: host=localhost port=5432 user=crateward password=crateward-ci-only dbname=crateward_test
+      CRATEWARD_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -62,6 +62,20 @@ impl Stage {
         Self::Finalize,
     ];
 
+    /// The states a worker of this stage claims rows in. `Running` is not
+    /// among them: a sandbox worker keeps its lease from `ReadyForSandbox`
+    /// through the whole run.
+    #[must_use]
+    pub const fn claimable_states(self) -> &'static [JobState] {
+        match self {
+            Self::Fetch => &[JobState::Discovered],
+            Self::StaticAnalysis => &[JobState::Fetched],
+            Self::Sandbox => &[JobState::ReadyForSandbox],
+            Self::Analysis => &[JobState::StaticallyAnalyzed, JobState::DynamicallyAnalyzed],
+            Self::Finalize => &[JobState::Scored],
+        }
+    }
+
     /// Short name used in logs, metrics and configuration.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -908,6 +922,24 @@ mod tests {
                 job.apply(event, &LIMITS),
                 Err(TransitionError::Terminal { .. })
             ));
+        }
+    }
+
+    #[test]
+    fn every_non_terminal_state_except_running_is_claimable_by_its_stage() {
+        for state in JobState::ALL {
+            let claimable = Stage::ALL
+                .iter()
+                .any(|stage| stage.claimable_states().contains(&state));
+            let expected = !state.is_terminal() && state != JobState::Running;
+            assert_eq!(claimable, expected, "{state}");
+            if claimable {
+                assert!(
+                    state
+                        .stage()
+                        .is_some_and(|s| s.claimable_states().contains(&state))
+                );
+            }
         }
     }
 

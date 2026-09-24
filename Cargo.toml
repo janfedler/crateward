@@ -21,6 +21,7 @@ http-body-util = "0.1"
 hyper = { version = "1.11", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 serde_json = "1.0"
+semver = "1.0"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "process", "time", "io-util", "fs", "sync"] }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 proptest = "1.11"
@@ -31,6 +32,7 @@ serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 thiserror = "2.0"
 toml = "1.1"
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 url = { version = "2.5", features = ["serde"] }

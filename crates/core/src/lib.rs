@@ -9,9 +9,10 @@
 //! ([`escalation`]), the typed configuration ([`config`]) and the wire
 //! protocol between host and guest ([`protocol`]).
 //!
-//! The package is pure: no I/O besides reading the configuration file, no
-//! async runtime and no database. That keeps it cheap to test exhaustively
-//! and safe to link into the guest agent.
+//! By default the package is pure: no I/O besides reading the configuration
+//! file, no async runtime and no database. That keeps it cheap to test
+//! exhaustively and safe to link into the guest agent. Host services opt
+//! into the process harness (`app`) and the Postgres job store (`store`).
 
 #![forbid(unsafe_code)]
 
@@ -26,4 +27,6 @@ pub mod job;
 pub mod name;
 pub mod protocol;
 pub mod retry;
+#[cfg(feature = "store")]
+pub mod store;
 pub mod verdict;
