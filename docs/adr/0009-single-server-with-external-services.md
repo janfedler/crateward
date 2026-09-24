@@ -35,9 +35,9 @@ must still produce an alert.
   Details stay on the dashboard behind WireGuard.
 * A compromised external service can deface the site or suppress or forge
   alerts. It cannot reach the server or undisclosed findings.
-* Remote unlock of the encrypted disks has no helper host. The M8 ADR
-  evaluates dropbear in the initramfs reachable only through WireGuard in
-  the initramfs, with the Hetzner rescue system as fallback.
+* Remote unlock of encrypted disks would have had no helper host; since
+  [ADR 0013](0013-ext4-on-md-raid-without-encryption.md) the disks are not
+  encrypted, so the question no longer arises.
 * Egress now includes `github.com`, `ntfy.sh` and `hc-ping.com`, each
   allowlisted for one service user.
 

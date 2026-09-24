@@ -27,9 +27,11 @@ consequences shape everything below.
 * **The hot path lives in RAM.** Spinning disks cannot serve the random reads
   of snapshot memory files or the writes of scratch disks. Promoted images
   and per job scratch disks live in tmpfs; the HDDs hold durable data.
-* **No ECC.** Every durable byte gets an end to end checksum: btrfs checksums
-  with native raid1, PostgreSQL data checksums, and BLAKE3 manifests for
-  images and evidence.
+* **No ECC, plain ext4.** The disks are an md RAID1 with ext4, unencrypted
+  ([ADR 0013](adr/0013-ext4-on-md-raid-without-encryption.md)). Neither
+  checksums data, so Crateward does: content addressed blobs are verified
+  by their BLAKE3 digest on every read, images by BLAKE3 manifests, crate
+  files by the index SHA-256, and PostgreSQL pages by data checksums.
 
 ## Zones
 
@@ -256,7 +258,7 @@ the prewarmed target directory carries most of the benefit. See
 | Location | Medium | Contents |
 |----------|--------|----------|
 | `/boot` | md RAID1 | kernel and initramfs |
-| `/` and `/var/lib` | LUKS2, btrfs raid1, `compress=zstd:1` | Postgres, content addressed store, evidence, logs, image archive |
+| `/` and `/var/lib` | ext4 on md RAID1, unencrypted | Postgres, content addressed store, evidence, logs, image archive |
 | `/run/crateward/images` | tmpfs | promoted images, verified by BLAKE3 on copy |
 | `/run/crateward/scratch` | tmpfs with a hard cap | per job scratch disks (sparse files) |
 

@@ -33,8 +33,7 @@ failed for an infrastructure problem.
 filling, the sandbox stage stops claiming jobs.
 
 **What to do.**
-1. `btrfs filesystem usage /` and `df -h /run/crateward` show which
-   filesystem is affected.
+1. `df -h / /run/crateward` shows which filesystem is affected.
 2. Check the storage budget table in [OPERATIONS.md](OPERATIONS.md) for the
    component that grew.
 3. Shorten `storage.raw_log_retention_days` or prune the image archive to
@@ -99,6 +98,16 @@ running is failed and will not be retried automatically.
 5. Report a Firecracker or KVM escape to the respective project's security
    contact.
 6. Lift quarantine from the CLI only after the cause is understood (M5).
+
+## Decommissioning the server
+
+The disks are not encrypted (ADR 0013), so before the server is cancelled
+or a disk is replaced:
+
+1. Revoke the GitHub deploy key and the read token, and rotate the ntfy
+   topic and the healthchecks.io ping URL.
+2. Boot the Hetzner rescue system and overwrite both disks completely, for
+   example with `blkdiscard` where supported, otherwise `shred -n 1`.
 
 ## Heartbeat lost
 

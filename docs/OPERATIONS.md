@@ -24,7 +24,7 @@ KSM disabled, no swap.
 | Mount | Medium | Contents |
 |-------|--------|----------|
 | `/boot` | md RAID1 | kernel and initramfs |
-| `/` | LUKS2 on each disk, btrfs raid1, `compress=zstd:1`, `noatime` | system, Postgres, content addressed store, evidence, logs, image archive |
+| `/` | ext4 on md RAID1 (`md2`), unencrypted; monthly `mdcheck` scrub | system, Postgres, content addressed store, evidence, logs, image archive |
 | `/run/crateward/images` | tmpfs, 14 GiB | promoted images |
 | `/run/crateward/scratch` | tmpfs, capped | per job scratch disks |
 

@@ -19,3 +19,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0010](0010-smt-off-and-ram-hot-path.md) | SMT disabled and the hot path in RAM | Accepted |
 | [0011](0011-guest-kernel-source.md) | Guest kernel from a pinned Amazon Linux 6.18 branch commit | Accepted |
 | [0012](0012-rootless-jail.md) | A rootless jail instead of Firecracker's jailer | Accepted |
+| [0013](0013-ext4-on-md-raid-without-encryption.md) | ext4 on md RAID1, without disk encryption | Accepted |

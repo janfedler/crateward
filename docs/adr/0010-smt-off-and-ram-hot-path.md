@@ -42,7 +42,8 @@ untrusted guests continuously.
 * A power loss loses the tmpfs contents; they are rebuilt from the verified
   archive on the HDDs at startup.
 * Without ECC, bit flips in RAM are possible. Durable data carries end to end
-  checksums (btrfs, PostgreSQL data checksums, BLAKE3 manifests).
+  checksums (BLAKE3 digests of blobs and images, PostgreSQL data checksums);
+  see [ADR 0013](0013-ext4-on-md-raid-without-encryption.md).
 
 ## Sources
 

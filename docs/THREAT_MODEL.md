@@ -150,8 +150,9 @@ forge them. It cannot reach the server or read undisclosed findings.
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| btrfs raid1 checksums with repair from the good copy | Planned | M1 |
-| PostgreSQL data checksums | Planned | M2 |
+| md RAID1 with a monthly `mdcheck` scrub (detects, cannot choose the right copy) | Built | M1 |
+| Content addressed blobs verified by BLAKE3 on every read | Planned | M2 |
+| PostgreSQL data checksums (the Debian cluster needs `pg_checksums --enable`) | Planned | M2 |
 | BLAKE3 manifests for images and evidence, verified on read | Planned | M1.5 |
 
 ## Residual risks
@@ -169,3 +170,8 @@ forge them. It cannot reach the server or read undisclosed findings.
   vulnerability report and the RUNBOOK tracks it.
 * Without ECC, a memory error can corrupt a result in flight before any
   checksum covers it.
+* The disks are not encrypted ([ADR 0013](adr/0013-ext4-on-md-raid-without-encryption.md)).
+  A disk that leaves the data center carries Crateward's secrets, crate
+  files, evidence and undisclosed findings. Secrets are scoped and
+  rotatable, and the RUNBOOK wipes both disks before the server is
+  cancelled.
