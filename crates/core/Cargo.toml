@@ -14,12 +14,19 @@ default = []
 # The guest agent does not enable it.
 app = ["dep:clap", "dep:tracing", "dep:tracing-subscriber"]
 # The Postgres job store (ADR 0004). Host services only.
-store = ["dep:tokio-postgres", "dep:tokio", "dep:serde_json", "dep:semver", "dep:tracing"]
+store = ["dep:tokio-postgres", "dep:tokio", "cratesio", "dep:tracing"]
+# Parsers for crates.io data: sparse index lines and RSS feeds.
+cratesio = ["dep:serde_json", "dep:semver", "dep:quick-xml"]
+# The polite HTTP client for crates.io.
+http = ["dep:reqwest", "dep:tokio", "dep:bytes"]
 
 [dependencies]
+bytes = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 postcard.workspace = true
+quick-xml = { workspace = true, optional = true }
 rand.workspace = true
+reqwest = { workspace = true, optional = true }
 secrecy.workspace = true
 semver = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
@@ -35,7 +42,7 @@ url.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 serde_json.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 tokio-postgres.workspace = true
 
 [lints]

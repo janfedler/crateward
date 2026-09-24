@@ -129,6 +129,12 @@ pub struct CratesIoConfig {
     pub api_max_requests_per_second: f64,
     /// Parallel downloads from the CDN.
     pub static_max_concurrent_downloads: u32,
+    /// Request rate towards `static.crates.io` (feeds, crate files).
+    /// crates.io sets no limit there; this is our own courtesy.
+    pub static_requests_per_second: f64,
+    /// Request rate towards the sparse index. crates.io sets no limit there
+    /// either.
+    pub index_requests_per_second: f64,
     /// How often the RSS feeds are polled. The feeds cover the last 60
     /// minutes, so this must stay well below that.
     pub rss_poll_interval_secs: u64,
@@ -500,6 +506,22 @@ impl Config {
             "crates_io.static_max_concurrent_downloads",
             "must be between 1 and 16",
         );
+        for (rate, key) in [
+            (
+                c.static_requests_per_second,
+                "crates_io.static_requests_per_second",
+            ),
+            (
+                c.index_requests_per_second,
+                "crates_io.index_requests_per_second",
+            ),
+        ] {
+            v.check(
+                rate > 0.0 && rate <= 20.0,
+                key,
+                "must be above 0 and at most 20 (our own politeness bound)",
+            );
+        }
         v.check(
             (60..=1800).contains(&c.rss_poll_interval_secs),
             "crates_io.rss_poll_interval_secs",

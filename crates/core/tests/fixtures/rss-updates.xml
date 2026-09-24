@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:crates="https://crates.io/">
+    <channel>
+        <title>crates.io: recent updates</title>
+        <link>https://crates.io/</link>
+        <description>Recent version publishes on the crates.io package registry</description>
+        <language>en</language>
+        <atom:link href="https://static.crates.io/rss/updates.xml" rel="self" type="application/rss+xml"/>
+        <item>
+            <title>New crate version published: rustmc_core v0.13.0</title>
+            <link>https://crates.io/crates/rustmc_core/0.13.0</link>
+            <description><![CDATA[Structure-aware Bayesian inference engine]]></description>
+            <guid>https://crates.io/crates/rustmc_core/0.13.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:37:06 +0000</pubDate>
+            <crates:name>rustmc_core</crates:name>
+            <crates:version>0.13.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: ecat-data-neo4j v3.0.3</title>
+            <link>https://crates.io/crates/ecat-data-neo4j/3.0.3</link>
+            <description><![CDATA[Neo4j graph database client for e-cat]]></description>
+            <guid>https://crates.io/crates/ecat-data-neo4j/3.0.3</guid>
+            <pubDate>Thu, 24 Sep 2026 20:36:31 +0000</pubDate>
+            <crates:name>ecat-data-neo4j</crates:name>
+            <crates:version>3.0.3</crates:version>
+        </item>
+<item>
+            <title>New crate version published: gpui-unofficial v1.22.0-pre</title>
+            <link>https://crates.io/crates/gpui-unofficial/1.22.0-pre</link>
+            <description><![CDATA[Zed's GPU-accelerated UI framework]]></description>
+            <guid>https://crates.io/crates/gpui-unofficial/1.22.0-pre</guid>
+            <pubDate>Thu, 24 Sep 2026 20:36:21 +0000</pubDate>
+            <crates:name>gpui-unofficial</crates:name>
+            <crates:version>1.22.0-pre</crates:version>
+        </item>
+<item>
+            <title>New crate version published: ponyo v0.0.1</title>
+            <link>https://crates.io/crates/ponyo/0.0.1</link>
+            <description><![CDATA[Still cooking.]]></description>
+            <guid>https://crates.io/crates/ponyo/0.0.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:35:22 +0000</pubDate>
+            <crates:name>ponyo</crates:name>
+            <crates:version>0.0.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: loco-inertia v0.1.0</title>
+            <link>https://crates.io/crates/loco-inertia/0.1.0</link>
+            <description><![CDATA[Inertia.js v3 adapter for Loco.rs: typed pages, forms, Vite, SSR]]></description>
+            <guid>https://crates.io/crates/loco-inertia/0.1.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:35:10 +0000</pubDate>
+            <crates:name>loco-inertia</crates:name>
+            <crates:version>0.1.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: inertia-axum v0.1.0</title>
+            <link>https://crates.io/crates/inertia-axum/0.1.0</link>
+            <description><![CDATA[Inertia.js v3 server-side protocol for axum: props, partial reloads, flash, CSRF, SSR]]></description>
+            <guid>https://crates.io/crates/inertia-axum/0.1.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:35:07 +0000</pubDate>
+            <crates:name>inertia-axum</crates:name>
+            <crates:version>0.1.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-mcp v0.20.1</title>
+            <link>https://crates.io/crates/kmp-mcp/0.20.1</link>
+            <description><![CDATA[Local-first agent memory that preserves why, exposed as typed MCP tools]]></description>
+            <guid>https://crates.io/crates/kmp-mcp/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:34:53 +0000</pubDate>
+            <crates:name>kmp-mcp</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: onevcs-testing v0.8.1</title>
+            <link>https://crates.io/crates/onevcs-testing/0.8.1</link>
+            <description><![CDATA[In-memory and file-backed implementations of onevcs's Vcs and RemoteHost interfaces, for driving a real onevcs in a test.]]></description>
+            <guid>https://crates.io/crates/onevcs-testing/0.8.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:34:37 +0000</pubDate>
+            <crates:name>onevcs-testing</crates:name>
+            <crates:version>0.8.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: onevcs v0.32.1</title>
+            <link>https://crates.io/crates/onevcs/0.32.1</link>
+            <description><![CDATA[Version control and remote-host abstraction for agent workflows: host-neutral change requests, sessions, and a rules system.]]></description>
+            <guid>https://crates.io/crates/onevcs/0.32.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:34:28 +0000</pubDate>
+            <crates:name>onevcs</crates:name>
+            <crates:version>0.32.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-viewer v0.20.1</title>
+            <link>https://crates.io/crates/kmp-viewer/0.20.1</link>
+            <description><![CDATA[Local read-only web viewer for KMP memory: graph, notes, timeline and trace over the in-process kernel]]></description>
+            <guid>https://crates.io/crates/kmp-viewer/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:34:05 +0000</pubDate>
+            <crates:name>kmp-viewer</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-proto-mapping v0.20.1</title>
+            <link>https://crates.io/crates/kmp-proto-mapping/0.20.1</link>
+            <description><![CDATA[v1beta1 proto contract mapping shared by transports and the embedded backend]]></description>
+            <guid>https://crates.io/crates/kmp-proto-mapping/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:59 +0000</pubDate>
+            <crates:name>kmp-proto-mapping</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: rsyncer v0.1.1</title>
+            <link>https://crates.io/crates/rsyncer/0.1.1</link>
+            <description><![CDATA[Event-driven, priority-aware rsync mirroring daemon with a TOML config and healthcheck pings]]></description>
+            <guid>https://crates.io/crates/rsyncer/0.1.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:41 +0000</pubDate>
+            <crates:name>rsyncer</crates:name>
+            <crates:version>0.1.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-proto v0.20.1</title>
+            <link>https://crates.io/crates/kmp-proto/0.20.1</link>
+            <description><![CDATA[Protobuf and tonic bindings for KMP's versioned v1beta1 gRPC contract]]></description>
+            <guid>https://crates.io/crates/kmp-proto/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:41 +0000</pubDate>
+            <crates:name>kmp-proto</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: gpui-macros-gpui-unofficial v1.22.0-pre</title>
+            <link>https://crates.io/crates/gpui-macros-gpui-unofficial/1.22.0-pre</link>
+            <description><![CDATA[Macros used by gpui]]></description>
+            <guid>https://crates.io/crates/gpui-macros-gpui-unofficial/1.22.0-pre</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:37 +0000</pubDate>
+            <crates:name>gpui-macros-gpui-unofficial</crates:name>
+            <crates:version>1.22.0-pre</crates:version>
+        </item>
+<item>
+            <title>New crate version published: ferralk v1.0.0</title>
+            <link>https://crates.io/crates/ferralk/1.0.0</link>
+            <description><![CDATA[Glob matching and parallel filesystem walking, byte-first, with an unsafe-free matcher.]]></description>
+            <guid>https://crates.io/crates/ferralk/1.0.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:32 +0000</pubDate>
+            <crates:name>ferralk</crates:name>
+            <crates:version>1.0.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: ferralk-glob v1.0.0</title>
+            <link>https://crates.io/crates/ferralk-glob/1.0.0</link>
+            <description><![CDATA[Compiled, byte-first glob matching with explicit wildcard, brace, and extglob semantics.]]></description>
+            <guid>https://crates.io/crates/ferralk-glob/1.0.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:27 +0000</pubDate>
+            <crates:name>ferralk-glob</crates:name>
+            <crates:version>1.0.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-embedded v0.20.1</title>
+            <link>https://crates.io/crates/kmp-embedded/0.20.1</link>
+            <description><![CDATA[In-process KMP composition root over a stamped local SQLite store]]></description>
+            <guid>https://crates.io/crates/kmp-embedded/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:24 +0000</pubDate>
+            <crates:name>kmp-embedded</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: ringfire v0.4.0</title>
+            <link>https://crates.io/crates/ringfire/0.4.0</link>
+            <description><![CDATA[Zero-copy lock-free inter-process communication (IPC) ring buffer and shared memory bus in Rust]]></description>
+            <guid>https://crates.io/crates/ringfire/0.4.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:24 +0000</pubDate>
+            <crates:name>ringfire</crates:name>
+            <crates:version>0.4.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-adapter-embedded v0.20.1</title>
+            <link>https://crates.io/crates/kmp-adapter-embedded/0.20.1</link>
+            <description><![CDATA[Embedded SQLite storage adapters for every KMP persistence port]]></description>
+            <guid>https://crates.io/crates/kmp-adapter-embedded/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:19 +0000</pubDate>
+            <crates:name>kmp-adapter-embedded</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-observability v0.20.1</title>
+            <link>https://crates.io/crates/kmp-observability/0.20.1</link>
+            <description><![CDATA[OpenTelemetry wiring and quality observers for the KMP kernel]]></description>
+            <guid>https://crates.io/crates/kmp-observability/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:33:05 +0000</pubDate>
+            <crates:name>kmp-observability</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: linear-tui v0.6.0</title>
+            <link>https://crates.io/crates/linear-tui/0.6.0</link>
+            <description><![CDATA[A TUI client for Linear.app — manage issues, projects, and cycles from your terminal]]></description>
+            <guid>https://crates.io/crates/linear-tui/0.6.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:47 +0000</pubDate>
+            <crates:name>linear-tui</crates:name>
+            <crates:version>0.6.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-application v0.20.1</title>
+            <link>https://crates.io/crates/kmp-application/0.20.1</link>
+            <description><![CDATA[Application services behind KMP's ten memory moves and evidence-backed recall]]></description>
+            <guid>https://crates.io/crates/kmp-application/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:29 +0000</pubDate>
+            <crates:name>kmp-application</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-memory-api v0.20.1</title>
+            <link>https://crates.io/crates/kmp-memory-api/0.20.1</link>
+            <description><![CDATA[Published consumer contract of the embedded KMP kernel: versioned views, capabilities and errors]]></description>
+            <guid>https://crates.io/crates/kmp-memory-api/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:15 +0000</pubDate>
+            <crates:name>kmp-memory-api</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-ports v0.20.1</title>
+            <link>https://crates.io/crates/kmp-ports/0.20.1</link>
+            <description><![CDATA[Command and query ports the KMP kernel drives its adapters through]]></description>
+            <guid>https://crates.io/crates/kmp-ports/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:13 +0000</pubDate>
+            <crates:name>kmp-ports</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-domain v0.20.1</title>
+            <link>https://crates.io/crates/kmp-domain/0.20.1</link>
+            <description><![CDATA[Domain model of the Kernel Memory Protocol: aggregates, value objects, repositories and projections, with no IO]]></description>
+            <guid>https://crates.io/crates/kmp-domain/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:07 +0000</pubDate>
+            <crates:name>kmp-domain</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: vimp-engine-core v0.22.2</title>
+            <link>https://crates.io/crates/vimp-engine-core/0.22.2</link>
+            <description><![CDATA[VIMP — движковый каркас симуляции (физика, карта, снапшот-фрейминг, интерполяция/предикт/raycast-примитивы, нав-утилиты). Без wasm-bindgen — обёртки для WASM-ABI собирает game-crate.]]></description>
+            <guid>https://crates.io/crates/vimp-engine-core/0.22.2</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:04 +0000</pubDate>
+            <crates:name>vimp-engine-core</crates:name>
+            <crates:version>0.22.2</crates:version>
+        </item>
+<item>
+            <title>New crate version published: reqwest-client-gpui-unofficial v1.22.0-pre</title>
+            <link>https://crates.io/crates/reqwest-client-gpui-unofficial/1.22.0-pre</link>
+            <description><![CDATA[Unofficial release of Zed's reqwest_client crate]]></description>
+            <guid>https://crates.io/crates/reqwest-client-gpui-unofficial/1.22.0-pre</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:00 +0000</pubDate>
+            <crates:name>reqwest-client-gpui-unofficial</crates:name>
+            <crates:version>1.22.0-pre</crates:version>
+        </item>
+<item>
+            <title>New crate version published: kmp-plugin-api v0.20.1</title>
+            <link>https://crates.io/crates/kmp-plugin-api/0.20.1</link>
+            <description><![CDATA[Public plugin API for the KMP kernel: evidence value and derivation traits, free of kernel internals]]></description>
+            <guid>https://crates.io/crates/kmp-plugin-api/0.20.1</guid>
+            <pubDate>Thu, 24 Sep 2026 20:32:00 +0000</pubDate>
+            <crates:name>kmp-plugin-api</crates:name>
+            <crates:version>0.20.1</crates:version>
+        </item>
+<item>
+            <title>New crate version published: chroniclelabs v0.0.13</title>
+            <link>https://crates.io/crates/chroniclelabs/0.0.13</link>
+            <description><![CDATA[Chronicle public API SDK]]></description>
+            <guid>https://crates.io/crates/chroniclelabs/0.0.13</guid>
+            <pubDate>Thu, 24 Sep 2026 20:30:57 +0000</pubDate>
+            <crates:name>chroniclelabs</crates:name>
+            <crates:version>0.0.13</crates:version>
+        </item>
+<item>
+            <title>New crate version published: http-client-tls-gpui-unofficial v1.22.0-pre</title>
+            <link>https://crates.io/crates/http-client-tls-gpui-unofficial/1.22.0-pre</link>
+            <description><![CDATA[Unofficial release of Zed's http_client_tls crate]]></description>
+            <guid>https://crates.io/crates/http-client-tls-gpui-unofficial/1.22.0-pre</guid>
+            <pubDate>Thu, 24 Sep 2026 20:29:37 +0000</pubDate>
+            <crates:name>http-client-tls-gpui-unofficial</crates:name>
+            <crates:version>1.22.0-pre</crates:version>
+        </item>
+<item>
+            <title>New crate version published: blitzkit v0.5.0</title>
+            <link>https://crates.io/crates/blitzkit/0.5.0</link>
+            <description><![CDATA[A small 2D and 3D game engine over wgpu: meshes, textures, lighting, shadows, collision, text and sound]]></description>
+            <guid>https://crates.io/crates/blitzkit/0.5.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:29:24 +0000</pubDate>
+            <crates:name>blitzkit</crates:name>
+            <crates:version>0.5.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: bite-gp-util v1.20.203</title>
+            <link>https://crates.io/crates/bite-gp-util/1.20.203</link>
+            <description><![CDATA[A collection of utility structs and functions used by Zed and GPUI]]></description>
+            <guid>https://crates.io/crates/bite-gp-util/1.20.203</guid>
+            <pubDate>Thu, 24 Sep 2026 20:28:10 +0000</pubDate>
+            <crates:name>bite-gp-util</crates:name>
+            <crates:version>1.20.203</crates:version>
+        </item>
+<item>
+            <title>New crate version published: corgi-build v0.1.78</title>
+            <link>https://crates.io/crates/corgi-build/0.1.78</link>
+            <description><![CDATA[PoC: deterministic, content-addressed, lock-free cargo-compatible build tool]]></description>
+            <guid>https://crates.io/crates/corgi-build/0.1.78</guid>
+            <pubDate>Thu, 24 Sep 2026 20:28:08 +0000</pubDate>
+            <crates:name>corgi-build</crates:name>
+            <crates:version>0.1.78</crates:version>
+        </item>
+<item>
+            <title>New crate version published: pgroles-cli v0.13.0</title>
+            <link>https://crates.io/crates/pgroles-cli/0.13.0</link>
+            <description><![CDATA[CLI for pgroles — validate, diff, apply, inspect, and generate role policies]]></description>
+            <guid>https://crates.io/crates/pgroles-cli/0.13.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:28:00 +0000</pubDate>
+            <crates:name>pgroles-cli</crates:name>
+            <crates:version>0.13.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: http-client-gpui-unofficial v1.22.0-pre</title>
+            <link>https://crates.io/crates/http-client-gpui-unofficial/1.22.0-pre</link>
+            <description><![CDATA[A HTTP client library for Zed and GPUI]]></description>
+            <guid>https://crates.io/crates/http-client-gpui-unofficial/1.22.0-pre</guid>
+            <pubDate>Thu, 24 Sep 2026 20:27:39 +0000</pubDate>
+            <crates:name>http-client-gpui-unofficial</crates:name>
+            <crates:version>1.22.0-pre</crates:version>
+        </item>
+<item>
+            <title>New crate version published: pgroles-operator v0.13.0</title>
+            <link>https://crates.io/crates/pgroles-operator/0.13.0</link>
+            <description><![CDATA[Kubernetes operator for pgroles — reconciles PostgresPolicy CRDs]]></description>
+            <guid>https://crates.io/crates/pgroles-operator/0.13.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:27:27 +0000</pubDate>
+            <crates:name>pgroles-operator</crates:name>
+            <crates:version>0.13.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: trust-tasks v0.22.7</title>
+            <link>https://crates.io/crates/trust-tasks/0.22.7</link>
+            <description><![CDATA[One-dependency front door to the Trust Tasks framework: re-exports trust-tasks-rs plus the transport, proof, ceremony and capability crates behind Cargo features.]]></description>
+            <guid>https://crates.io/crates/trust-tasks/0.22.7</guid>
+            <pubDate>Thu, 24 Sep 2026 20:27:01 +0000</pubDate>
+            <crates:name>trust-tasks</crates:name>
+            <crates:version>0.22.7</crates:version>
+        </item>
+<item>
+            <title>New crate version published: pgroles-inspect v0.13.0</title>
+            <link>https://crates.io/crates/pgroles-inspect/0.13.0</link>
+            <description><![CDATA[Database introspection, version detection, and privilege checks for pgroles]]></description>
+            <guid>https://crates.io/crates/pgroles-inspect/0.13.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:26:54 +0000</pubDate>
+            <crates:name>pgroles-inspect</crates:name>
+            <crates:version>0.13.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: fluidattacks-gitlab-sdk-rs v0.1.0</title>
+            <link>https://crates.io/crates/fluidattacks-gitlab-sdk-rs/0.1.0</link>
+            <description><![CDATA[GitLab SDK: I/O layer built on the domain types]]></description>
+            <guid>https://crates.io/crates/fluidattacks-gitlab-sdk-rs/0.1.0</guid>
+            <pubDate>Thu, 24 Sep 2026 20:26:38 +0000</pubDate>
+            <crates:name>fluidattacks-gitlab-sdk-rs</crates:name>
+            <crates:version>0.1.0</crates:version>
+        </item>
+<item>
+            <title>New crate version published: ecat-data-s3 v3.0.3</title>
+            <link>https://crates.io/crates/ecat-data-s3/3.0.3</link>
+            <description><![CDATA[S3/MinIO object storage client for e-cat]]></description>
+            <guid>https://crates.io/crates/ecat-data-s3/3.0.3</guid>
+            <pubDate>Thu, 24 Sep 2026 20:26:30 +0000</pubDate>
+            <crates:name>ecat-data-s3</crates:name>
+            <crates:version>3.0.3</crates:version>
+        </item>
+    </channel>
+</rss>

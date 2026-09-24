@@ -9,7 +9,20 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-crateward_core = { workspace = true, features = ["app"] }
+crateward_core = { workspace = true, features = ["app", "cratesio", "http", "store"] }
+secrecy.workspace = true
+semver.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server"] }
+hyper-util.workspace = true
+tokio-postgres.workspace = true
 
 [lints]
 workspace = true

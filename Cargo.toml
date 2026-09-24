@@ -25,7 +25,9 @@ semver = "1.0"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "net", "process", "time", "io-util", "fs", "sync"] }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 proptest = "1.11"
+quick-xml = "0.42"
 rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 rustix = "1.1"
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }

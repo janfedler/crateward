@@ -20,9 +20,13 @@
 pub mod app;
 pub mod component;
 pub mod config;
+#[cfg(feature = "cratesio")]
+pub mod cratesio;
 pub mod digest;
 pub mod escalation;
 pub mod failure;
+#[cfg(feature = "http")]
+pub mod http;
 pub mod job;
 pub mod name;
 pub mod protocol;

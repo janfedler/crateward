@@ -33,6 +33,14 @@ pub enum ComponentError {
         /// The milestone that delivers it.
         milestone: &'static str,
     },
+    /// The component could not continue. systemd restarts it.
+    #[error("{component} stopped: {reason}")]
+    Fatal {
+        /// The component.
+        component: Component,
+        /// What went wrong.
+        reason: String,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -89,6 +97,10 @@ where
         Err(error @ ComponentError::NotImplemented { .. }) => {
             tracing::error!(component = component.name(), %error, "stopping");
             ExitCode::from(EXIT_UNAVAILABLE)
+        }
+        Err(error @ ComponentError::Fatal { .. }) => {
+            tracing::error!(component = component.name(), %error, "stopping");
+            ExitCode::FAILURE
         }
     }
 }
