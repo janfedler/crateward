@@ -92,9 +92,13 @@ fn rss(items: &[(&str, &str)]) -> String {
     let items: String = items
         .iter()
         .map(|(n, v)| {
-            format!(
-                "<item><crates:name>{n}</crates:name><crates:version>{v}</crates:version></item>"
-            )
+            // `crates.xml` items carry no version, like the real feed.
+            let version = if v.is_empty() {
+                String::new()
+            } else {
+                format!("<crates:version>{v}</crates:version>")
+            };
+            format!("<item><crates:name>{n}</crates:name>{version}</item>")
         })
         .collect();
     format!(
@@ -156,7 +160,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
             format!(r#"{{"dl":"{base}/crates"}}"#),
         );
         s.files
-            .insert("/rss/crates.xml".into(), rss(&[("brand-new", "0.1.0")]));
+            .insert("/rss/crates.xml".into(), rss(&[("brand-new", "")]));
         s.files.insert(
             "/rss/updates.xml".into(),
             rss(&[

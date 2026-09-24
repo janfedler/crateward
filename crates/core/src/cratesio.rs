@@ -356,8 +356,9 @@ pub fn download_url(dl: &str, name: &CrateName, version: &semver::Version) -> St
 pub struct FeedItem {
     /// The crate, as named in the feed.
     pub name: CrateName,
-    /// The version.
-    pub version: semver::Version,
+    /// The version. `updates.xml` always has one; `crates.xml` (new
+    /// crates) has none, as observed on 2026-09-24.
+    pub version: Option<semver::Version>,
 }
 
 /// Result of parsing a feed: valid items and the number of items dropped
@@ -370,8 +371,9 @@ pub struct Feed {
     pub rejected: usize,
 }
 
-/// Parses `updates.xml` or `crates.xml`: the `crates:name` and
-/// `crates:version` of every `item`.
+/// Parses `updates.xml` or `crates.xml`: the `crates:name` and, where
+/// present, `crates:version` of every `item`. An item is rejected when its
+/// name is missing or invalid, or its version is present but invalid.
 ///
 /// # Errors
 ///
@@ -421,10 +423,14 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
                 field = None;
                 if tag.name().as_ref() == "item" {
                     in_item = false;
-                    let item = name.take().zip(version.take()).and_then(|(n, v)| {
+                    let version = match version.take() {
+                        None => Some(None),
+                        Some(v) => semver::Version::parse(&v).ok().map(Some),
+                    };
+                    let item = name.take().zip(version).and_then(|(n, version)| {
                         Some(FeedItem {
                             name: CrateName::parse(&n).ok()?,
-                            version: semver::Version::parse(&v).ok()?,
+                            version,
                         })
                     });
                     match item {
@@ -529,10 +535,12 @@ mod tests {
 <crates:name>onevcs</crates:name><crates:version>0.32.1</crates:version></item>
 <item><crates:name>../evil</crates:name><crates:version>1.0.0</crates:version></item>
 <item><crates:name>novers</crates:name></item>
+<item><crates:name>badvers</crates:name><crates:version>one</crates:version></item>
 </channel></rss>"#;
         let feed = parse_feed(xml).unwrap();
-        assert_eq!(feed.items.len(), 1);
+        assert_eq!(feed.items.len(), 2);
         assert_eq!(feed.items[0].name.as_str(), "onevcs");
+        assert_eq!(feed.items[1].version, None);
         assert_eq!(feed.rejected, 2);
     }
 

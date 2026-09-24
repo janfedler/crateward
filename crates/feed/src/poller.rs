@@ -21,6 +21,9 @@ const GIVE_UP_AFTER: Duration = Duration::from_secs(2 * 60 * 60);
 /// Upper bound of versions waiting for their index entry.
 const MAX_PENDING: usize = 50_000;
 
+/// Index files fetched at the same time.
+const INDEX_CONCURRENCY: usize = 8;
+
 /// Why a poll failed.
 #[derive(Debug, thiserror::Error)]
 pub enum FeedError {
@@ -209,8 +212,13 @@ impl Feed {
     ) -> Result<(), FeedError> {
         let now = Instant::now();
         for item in items {
+            // New crate items carry no version; their first version arrives
+            // through `updates.xml`.
+            let Some(version) = item.version else {
+                continue;
+            };
             report.feed_items += 1;
-            let key = (item.name.canonical(), item.version.to_string());
+            let key = (item.name.canonical(), version.to_string());
             if self.pending.contains_key(&key) {
                 continue;
             }
@@ -227,7 +235,7 @@ impl Feed {
                 key,
                 Pending {
                     name: item.name,
-                    version: item.version,
+                    version,
                     new_crate,
                     first_seen: now,
                     next_try: now,
@@ -245,16 +253,32 @@ impl Feed {
             .filter(|(_, p)| p.next_try <= now)
             .map(|(k, _)| k.clone())
             .collect();
+        // Fetch index files concurrently; the client's pacer still bounds
+        // the request rate. Freshly published index files often miss the
+        // CDN cache, so latency, not rate, dominates.
+        let mut fetches = tokio::task::JoinSet::new();
+        let mut results = Vec::with_capacity(due.len());
         for key in due {
             let Some(pending) = self.pending.get(&key).cloned() else {
                 continue;
             };
-            let url = format!("{}{}", self.urls.index_root, pending.name.index_path());
-            let text = match self
-                .index
-                .get(&url, None, cratesio::MAX_INDEX_FILE_BYTES)
-                .await?
+            if fetches.len() >= INDEX_CONCURRENCY
+                && let Some(done) = fetches.join_next().await
             {
+                results.push(done.map_err(|e| FeedError::IndexConfig(e.to_string()))?);
+            }
+            let url = format!("{}{}", self.urls.index_root, pending.name.index_path());
+            let client = self.index.clone();
+            fetches.spawn(async move {
+                let fetched = client.get(&url, None, cratesio::MAX_INDEX_FILE_BYTES).await;
+                (key, pending, fetched)
+            });
+        }
+        while let Some(done) = fetches.join_next().await {
+            results.push(done.map_err(|e| FeedError::IndexConfig(e.to_string()))?);
+        }
+        for (key, pending, fetched) in results {
+            let text = match fetched? {
                 Fetched::Body { body, .. } => String::from_utf8_lossy(&body).into_owned(),
                 Fetched::Missing => {
                     // Deleted crates vanish from the index.
