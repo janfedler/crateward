@@ -10,6 +10,9 @@
 mod diagram;
 mod docs_lint;
 mod elf;
+mod guest_kernel;
+mod images;
+mod rootfs;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -45,9 +48,9 @@ enum Task {
     GuestAgent,
     /// Vendor all dependencies into a reproducible tarball for a release.
     Vendor,
-    /// Build the guest kernel (milestone M1).
+    /// Build the guest kernel from the pinned source in guest/kernel.
     GuestKernel,
-    /// Build the guest root filesystem (milestone M1).
+    /// Build the guest root filesystem image from the pins in guest/rootfs.
     Rootfs,
     /// Run sequential jobs and check for leaked resources (milestone M1).
     Soak,
@@ -85,7 +88,9 @@ fn main() -> ExitCode {
         Task::StateDiagram { write } => diagram::run(&workspace_root(), write),
         Task::GuestAgent => guest_agent(),
         Task::Vendor => vendor(),
-        Task::GuestKernel | Task::Rootfs | Task::Soak => Err(TaskError::NotImplemented("M1")),
+        Task::GuestKernel => guest_kernel::run(&workspace_root()),
+        Task::Rootfs => rootfs::run(&workspace_root()),
+        Task::Soak => Err(TaskError::NotImplemented("M1")),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -110,12 +115,22 @@ fn workspace_root() -> PathBuf {
 }
 
 fn run(program: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<(), TaskError> {
+    run_in(&workspace_root(), program, args, envs)
+}
+
+/// Runs a command in `dir` and fails unless it exits successfully.
+fn run_in(
+    dir: &Path,
+    program: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<(), TaskError> {
     let rendered = format!("{program} {}", args.join(" "));
     eprintln!("xtask: running {rendered}");
     let status = Command::new(program)
         .args(args)
         .envs(envs.iter().copied())
-        .current_dir(workspace_root())
+        .current_dir(dir)
         .status()
         .map_err(|error| TaskError::Command(format!("cannot start {rendered}: {error}")))?;
     if status.success() {

@@ -2,32 +2,63 @@
 //!
 //! Zone: guest. Everything in the guest, this agent included, is assumed to
 //! be under the control of the crate being analyzed once its code runs. The
-//! host therefore treats every byte from the agent as hostile input: frames
-//! are length limited, schema validated and parsed by fuzzed code.
+//! host therefore treats every byte from the agent as hostile input
+//! (`crateward_core::protocol`).
 //!
 //! Why it looks the way it does:
 //!
-//! * It ships as a static musl binary so that it does not depend on the
-//!   guest's C library, which a crate could tamper with.
-//! * It waits on one vsock port. The host initiates the single connection
-//!   after restoring the snapshot, sends the job specification (including
-//!   the per job honeytokens and the wall clock), and receives a stream of
-//!   length prefixed event frames. The host never listens for guest
-//!   initiated vsock connections.
-//! * It runs cargo offline against the vendored dependencies with
-//!   `CARGO_INCREMENTAL=0` and debuginfo off, as an unprivileged user.
-//! * It traces processes, files, network and selected syscalls with eBPF
-//!   (see ADR 0006). The eBPF programs live in a separate package because
-//!   they build for a different target with a pinned nightly toolchain.
-//! * It never holds host secrets. The honeytokens it plants are fake and
-//!   unique per job, so any sighting attributes to exactly one run.
+//! * It ships as a static musl binary and runs as PID 1, so it depends on
+//!   neither the guest's C library nor an init system that a crate could
+//!   tamper with, and boot takes as little time as possible.
+//! * It listens on one vsock port. The host opens the only connection after
+//!   the VM starts or is restored, so a listening socket, which survives
+//!   snapshot restore, is all the guest needs. The host never listens for
+//!   guest initiated vsock connections.
+//! * Everything specific to a job arrives after restore: the job
+//!   specification, the wall clock, and (from M4) the honeytokens. Nothing
+//!   unique lives in the snapshot.
+//! * Jobs run as an unprivileged user in their own process group, with a
+//!   cleared environment, bounded output and a guest side timeout. The host
+//!   enforces its own limits independently.
+//! * eBPF tracing arrives in M4 (ADR 0006), in a separate package because it
+//!   builds for a different target with a pinned nightly toolchain.
 
 #![forbid(unsafe_code)]
+
+pub mod init;
+pub mod runner;
+pub mod server;
 
 use crateward_core::component::Component;
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::GuestAgent;
 
-/// Milestone that delivers the agent.
-pub const MILESTONE: &str = "M4";
+/// User ID that jobs run as. Created in the root filesystem as `builder`.
+pub const BUILDER_UID: u32 = 1000;
+
+/// Group ID that jobs run as.
+pub const BUILDER_GID: u32 = 1000;
+
+/// Why the agent failed.
+#[derive(Debug, thiserror::Error)]
+pub enum AgentError {
+    /// A system call failed.
+    #[error("{context}: {source}")]
+    Io {
+        /// What the agent was doing.
+        context: &'static str,
+        /// The underlying error.
+        source: std::io::Error,
+    },
+    /// The host sent something the agent cannot handle.
+    #[error("protocol: {0}")]
+    Protocol(#[from] crateward_core::protocol::ProtocolError),
+}
+
+impl AgentError {
+    /// Wraps an I/O error with context.
+    pub fn io(context: &'static str) -> impl FnOnce(std::io::Error) -> Self {
+        move |source| Self::Io { context, source }
+    }
+}

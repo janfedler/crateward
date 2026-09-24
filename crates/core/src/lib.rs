@@ -6,7 +6,8 @@
 //! ([`component`]), the pipeline state machine ([`job`]), the failure
 //! taxonomy ([`failure`]) and retry policy ([`retry`]), verdict coverage
 //! labels ([`verdict`]), the closed list of human escalations
-//! ([`escalation`]) and the typed configuration ([`config`]).
+//! ([`escalation`]), the typed configuration ([`config`]) and the wire
+//! protocol between host and guest ([`protocol`]).
 //!
 //! The package is pure: no I/O besides reading the configuration file, no
 //! async runtime and no database. That keeps it cheap to test exhaustively
@@ -23,5 +24,6 @@ pub mod escalation;
 pub mod failure;
 pub mod job;
 pub mod name;
+pub mod protocol;
 pub mod retry;
 pub mod verdict;

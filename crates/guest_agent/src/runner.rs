@@ -1,0 +1,273 @@
+//! Runs one job and streams its output to the host.
+//!
+//! The job runs in its own process group with a cleared environment and, in
+//! the VM, as the unprivileged `builder` user. Two reader threads forward
+//! stdout and stderr through a channel, so the connection has exactly one
+//! writer. Output beyond the job's limit is dropped after one
+//! `OutputTruncated` message; the process keeps running, because a crate
+//! that writes a lot of output is behavior worth observing, not an error.
+
+use std::io::{Read, Write};
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+use crateward_core::protocol::{
+    ExitStatus, GuestMessage, JobSpec, MAX_OUTPUT_CHUNK, OutputStream, write_message,
+};
+
+use crate::AgentError;
+
+/// How the job's process is started.
+#[derive(Debug, Clone, Copy)]
+pub struct RunOptions {
+    /// User and group to switch to, or `None` to keep the agent's identity
+    /// (used by tests on the host).
+    pub identity: Option<(u32, u32)>,
+}
+
+enum Event {
+    Output(OutputStream, Vec<u8>),
+    Closed,
+}
+
+fn spawn_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    stream: OutputStream,
+    events: mpsc::Sender<Event>,
+) {
+    std::thread::spawn(move || {
+        let mut buffer = vec![0_u8; MAX_OUTPUT_CHUNK];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let chunk = buffer.get(..n).unwrap_or_default().to_vec();
+                    if events.send(Event::Output(stream, chunk)).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = events.send(Event::Closed);
+    });
+}
+
+fn kill_group(pid: u32) {
+    if let Some(pid) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    }
+}
+
+/// Runs the job and writes `Started`, `Output`, `OutputTruncated` and
+/// `Exited` messages to `out`. A job that cannot be started produces an
+/// `Error` message instead.
+///
+/// # Errors
+///
+/// Fails only if writing to `out` fails.
+pub fn run_job<W: Write>(
+    spec: &JobSpec,
+    options: RunOptions,
+    out: &mut W,
+) -> Result<(), AgentError> {
+    let Some((program, args)) = spec.argv.split_first() else {
+        write_message(out, &GuestMessage::Error("empty argv".into()))?;
+        return Ok(());
+    };
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env_clear()
+        .envs(spec.env.iter().map(|(k, v)| (k, v)))
+        .current_dir(&spec.cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    if let Some((uid, gid)) = options.identity {
+        command.uid(uid).gid(gid);
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            write_message(
+                out,
+                &GuestMessage::Error(format!("cannot start {program}: {error}")),
+            )?;
+            return Ok(());
+        }
+    };
+    let pid = child.id();
+    write_message(out, &GuestMessage::Started { pid })?;
+
+    let (sender, events) = mpsc::channel();
+    if let Some(stdout) = child.stdout.take() {
+        spawn_reader(stdout, OutputStream::Stdout, sender.clone());
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_reader(stderr, OutputStream::Stderr, sender);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(u64::from(spec.timeout_secs));
+    let limit = u64::from(spec.output_limit);
+    let mut forwarded: u64 = 0;
+    let mut truncated = false;
+    let mut open_streams = 2;
+    let mut timed_out = false;
+    while open_streams > 0 {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        match events.recv_timeout(remaining) {
+            Ok(Event::Output(stream, data)) => {
+                let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
+                if forwarded.saturating_add(len) <= limit {
+                    forwarded += len;
+                    write_message(out, &GuestMessage::Output { stream, data })?;
+                } else if !truncated {
+                    truncated = true;
+                    write_message(out, &GuestMessage::OutputTruncated)?;
+                }
+            }
+            Ok(Event::Closed) => open_streams -= 1,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                timed_out = true;
+                kill_group(pid);
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    // A job can close both streams and keep running, so the deadline also
+    // applies while waiting for the process itself.
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(AgentError::io("waiting for the job"))?
+        {
+            break status;
+        }
+        if !timed_out && Instant::now() >= deadline {
+            timed_out = true;
+            kill_group(pid);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // Nothing of the job may outlive it: processes that stayed in the group
+    // are killed here. A process that left the group with `setsid` dies with
+    // the VM, which ends after every job.
+    kill_group(pid);
+    let exit = if timed_out {
+        ExitStatus::TimedOut
+    } else if let Some(code) = status.code() {
+        ExitStatus::Code(code)
+    } else {
+        ExitStatus::Signal(status.signal().unwrap_or(0))
+    };
+    write_message(out, &GuestMessage::Exited(exit))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crateward_core::protocol::{MAX_FRAME_LEN, WallClock, read_message};
+
+    use super::*;
+
+    fn spec(script: &str, timeout_secs: u32, output_limit: u32) -> JobSpec {
+        JobSpec {
+            job_id: 1,
+            wall_clock: WallClock { secs: 0, nanos: 0 },
+            argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+            env: vec![("MARKER".into(), "visible".into())],
+            cwd: "/".into(),
+            timeout_secs,
+            output_limit,
+        }
+    }
+
+    fn run(spec: &JobSpec) -> Vec<GuestMessage> {
+        let mut wire = Vec::new();
+        run_job(spec, RunOptions { identity: None }, &mut wire).unwrap();
+        let mut reader = wire.as_slice();
+        let mut messages = Vec::new();
+        while let Some(m) = read_message(&mut reader, MAX_FRAME_LEN).unwrap() {
+            messages.push(m);
+        }
+        messages
+    }
+
+    fn stdout_of(messages: &[GuestMessage]) -> String {
+        messages
+            .iter()
+            .filter_map(|m| match m {
+                GuestMessage::Output {
+                    stream: OutputStream::Stdout,
+                    data,
+                } => Some(String::from_utf8_lossy(data).into_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn reports_output_and_exit_code_with_a_clean_environment() {
+        let messages = run(&spec("echo $MARKER; echo ${HOME:-unset}; exit 3", 10, 1024));
+        assert!(matches!(
+            messages.first(),
+            Some(GuestMessage::Started { .. })
+        ));
+        assert_eq!(stdout_of(&messages), "visible\nunset\n");
+        assert_eq!(
+            messages.last(),
+            Some(&GuestMessage::Exited(ExitStatus::Code(3)))
+        );
+    }
+
+    #[test]
+    fn truncates_output_beyond_the_limit_once() {
+        let messages = run(&spec("head -c 100000 /dev/zero", 10, 1000));
+        let truncations = messages
+            .iter()
+            .filter(|m| **m == GuestMessage::OutputTruncated)
+            .count();
+        assert_eq!(truncations, 1);
+        assert_eq!(
+            messages.last(),
+            Some(&GuestMessage::Exited(ExitStatus::Code(0)))
+        );
+    }
+
+    #[test]
+    fn kills_the_whole_group_on_timeout() {
+        let started = Instant::now();
+        let messages = run(&spec("sleep 60 & sleep 60", 1, 1024));
+        assert_eq!(
+            messages.last(),
+            Some(&GuestMessage::Exited(ExitStatus::TimedOut))
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn deadline_applies_after_the_streams_close() {
+        let started = Instant::now();
+        let messages = run(&spec("exec >/dev/null 2>&1; sleep 60", 1, 1024));
+        assert_eq!(
+            messages.last(),
+            Some(&GuestMessage::Exited(ExitStatus::TimedOut))
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn missing_program_is_an_error_message() {
+        let mut job = spec("", 1, 1);
+        job.argv = vec!["/nonexistent/program".into()];
+        let messages = run(&job);
+        assert!(matches!(messages.as_slice(), [GuestMessage::Error(_)]));
+    }
+}

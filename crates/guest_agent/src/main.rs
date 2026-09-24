@@ -1,16 +1,27 @@
-//! Entry point of the guest agent, built as a static musl binary.
+//! Entry point of the guest agent, built as a static musl binary. In the
+//! microVM it runs as PID 1 (`init=/sbin/crateward-agent`).
 
 use std::process::ExitCode;
 
-/// `EX_UNAVAILABLE` from `sysexits.h`.
-const EXIT_UNAVAILABLE: u8 = 69;
+use crateward_core::protocol::AGENT_PORT;
+use crateward_guest_agent::{init, server};
 
 fn main() -> ExitCode {
-    eprintln!(
-        "{} {}: not implemented yet (planned for milestone {})",
-        crateward_guest_agent::COMPONENT,
-        env!("CARGO_PKG_VERSION"),
-        crateward_guest_agent::MILESTONE
-    );
-    ExitCode::from(EXIT_UNAVAILABLE)
+    let pid1 = init::is_pid1();
+    if pid1 && let Err(error) = init::mount_filesystems() {
+        eprintln!("crateward agent: {error}");
+        init::shut_down();
+    }
+    let result = server::serve(AGENT_PORT);
+    if let Err(error) = &result {
+        eprintln!("crateward agent: {error}");
+    }
+    if pid1 {
+        init::shut_down();
+    }
+    if result.is_ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }

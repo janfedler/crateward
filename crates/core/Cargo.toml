@@ -16,6 +16,7 @@ app = ["dep:clap", "dep:tracing", "dep:tracing-subscriber"]
 
 [dependencies]
 clap = { workspace = true, optional = true }
+postcard.workspace = true
 rand.workspace = true
 secrecy.workspace = true
 serde.workspace = true

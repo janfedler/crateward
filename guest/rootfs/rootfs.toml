@@ -1,0 +1,19 @@
+# Pinned inputs of the guest root filesystem.
+#
+# `cargo xtask rootfs` builds a Debian base with mmdebstrap in unshare mode
+# (no root needed), from snapshot.debian.org at a fixed point in time, then
+# adds the guest agent and packs everything into a read only EROFS image.
+
+[debian]
+suite = "trixie"
+# snapshot.debian.org serves the archive as it was at this time.
+snapshot = "20260924T000000Z"
+variant = "minbase"
+# Extra packages. Build tools and the Rust toolchain arrive with M1.5 and M4.
+packages = []
+
+[image]
+# Fixed timestamp for every file in the image, for reproducible builds.
+source_date_epoch = 1790208000
+# EROFS compressor. The guest kernel enables LZ4 decompression.
+compression = "lz4hc"

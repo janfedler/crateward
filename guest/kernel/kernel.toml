@@ -1,0 +1,24 @@
+# Pinned source of the guest kernel. See docs/adr/0011-guest-kernel-source.md.
+#
+# Firecracker validates its 6.18 guest configuration against Amazon Linux
+# microVM kernels. The public `microvm-kernel-6.18.*` tags lag far behind
+# upstream stable, so the kernel is built from a pinned commit of Amazon
+# Linux's 6.18 branch instead, which carries both the stable updates and the
+# Amazon backports.
+
+[source]
+repository = "https://github.com/amazonlinux/linux"
+branch = "amazon-6.18.y/mainline"
+commit = "b1cf23d11cb763c096c5f252e7fbebd1edd745c5"
+# `make kernelversion` of the pinned commit; the build fails on a mismatch.
+version = "6.18.51"
+
+[config]
+base = "firecracker-6.18-x86_64.config"
+fragment = "crateward.config"
+
+[build]
+# Fixed build metadata for reproducible images.
+timestamp = "2026-09-24 00:00:00 UTC"
+user = "crateward"
+host = "crateward-build"
