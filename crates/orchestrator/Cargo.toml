@@ -1,0 +1,15 @@
+[package]
+name = "crateward_orchestrator"
+description = "Runs jobs in Firecracker microVMs and guarantees their cleanup."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+crateward_core = { workspace = true, features = ["app"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,20 @@
+[package]
+name = "crateward_cli"
+description = "Command line tool for the Crateward maintainer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "crateward"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+crateward_core.workspace = true
+
+[lints]
+workspace = true

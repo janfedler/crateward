@@ -1,0 +1,7 @@
+# Pinned so that CI, the server and every contributor build with the same
+# compiler. Bump deliberately, together with the guest image toolchain.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-unknown-linux-musl"]
+profile = "minimal"

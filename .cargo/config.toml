@@ -1,0 +1,3 @@
+[alias]
+# Developer tasks live in the crateward_xtask package.
+xtask = "run --package crateward_xtask --locked --quiet --"

@@ -1,0 +1,39 @@
+# cargo-deny policy. Run with `cargo deny --locked check`.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails the build unless it is listed here with a reason.
+ignore = []
+
+[licenses]
+# Permissive licenses only. Additions need a reason in the pull request.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.93
+# Keep the allowlist stable as dependencies come and go.
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Workspace packages are not published and have no license yet.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies inside the unpublished workspace are fine.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

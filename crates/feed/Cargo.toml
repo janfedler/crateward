@@ -1,0 +1,15 @@
+[package]
+name = "crateward_feed"
+description = "Discovers new crates.io versions and creates one job per version."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+crateward_core = { workspace = true, features = ["app"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,154 @@
+# Crateward configuration.
+#
+# Every service reads this file. Unknown keys are rejected and every value is
+# validated at startup; `crateward config check` runs the same validation.
+# Values below are the defaults for the production server: an Intel Core
+# i7-7700 with SMT disabled (4 cores), 64 GiB RAM and two HDDs.
+#
+# Secrets (database.url, notifier.topic, heartbeat.ping_url) belong in the
+# deployed copy only, which Ansible installs readable by the service users.
+
+[instance]
+# Name used in alerts and in the public export.
+name = "crateward"
+# Durable state on the HDD array: content addressed store, evidence, logs.
+data_dir = "/var/lib/crateward"
+# Volatile state in tmpfs: promoted images, sockets, per job scratch.
+run_dir = "/run/crateward"
+
+[telemetry]
+# "json" for journald, "pretty" for development.
+log_format = "json"
+# A tracing filter directive. RUST_LOG overrides it.
+log_filter = "info"
+# Prometheus metrics endpoint. Loopback only; scraped locally.
+metrics_listen = "127.0.0.1:9464"
+
+[database]
+# Peer authentication over the local socket: no password in this file.
+url = "postgresql://crateward@localhost/crateward?host=/run/postgresql"
+max_connections = 8
+
+[crates_io]
+# The data access policy asks for a user agent that identifies the
+# application and a way to contact its operator.
+user_agent = "crateward/0.1 (+https://crateward.com/about; security@crateward.com)"
+index_url = "https://index.crates.io/"
+static_url = "https://static.crates.io/"
+rss_updates_url = "https://static.crates.io/rss/updates.xml"
+rss_new_crates_url = "https://static.crates.io/rss/crates.xml"
+db_dump_url = "https://static.crates.io/db-dump.tar.gz"
+# Last resort only. The policy allows at most one request per second.
+api_url = "https://crates.io/api/v1/"
+api_max_requests_per_second = 1.0
+# static.crates.io has no published rate limit; stay polite anyway.
+static_max_concurrent_downloads = 4
+# The feeds cover the last 60 minutes, so polling every 2 minutes never
+# misses a version.
+rss_poll_interval_secs = 120
+# The dump is refreshed every 24 hours.
+db_dump_refresh_hours = 24
+
+# Per stage worker settings. A lease is renewed by heartbeats; a worker that
+# stops heartbeating loses its claim, and the job consumes one attempt.
+# Backoff uses full jitter between 0 and a ceiling that doubles per attempt
+# from backoff_base_secs up to backoff_cap_secs.
+
+[stages.fetch]
+concurrency = 4
+lease_secs = 300
+heartbeat_secs = 30
+max_attempts = 5
+max_infrastructure_retries = 100
+backoff_base_secs = 10
+backoff_cap_secs = 3600
+
+[stages.static_analysis]
+concurrency = 1
+lease_secs = 300
+heartbeat_secs = 30
+max_attempts = 3
+max_infrastructure_retries = 100
+backoff_base_secs = 10
+backoff_cap_secs = 1800
+
+[stages.sandbox]
+# Must not exceed sandbox.slots.
+concurrency = 3
+lease_secs = 120
+heartbeat_secs = 20
+max_attempts = 3
+max_infrastructure_retries = 50
+backoff_base_secs = 30
+backoff_cap_secs = 3600
+
+[stages.analysis]
+concurrency = 1
+lease_secs = 120
+heartbeat_secs = 20
+max_attempts = 3
+max_infrastructure_retries = 100
+backoff_base_secs = 5
+backoff_cap_secs = 600
+
+[stages.finalize]
+concurrency = 1
+lease_secs = 120
+heartbeat_secs = 20
+max_attempts = 5
+max_infrastructure_retries = 100
+backoff_base_secs = 5
+backoff_cap_secs = 600
+
+[triage]
+# A job waiting longer than this for a VM slot is scored as static only and
+# labeled with that reason.
+dynamic_deadline_hours = 12
+# Reverse dependencies from which a crate counts as popular; updates to
+# popular crates get dynamic analysis first.
+popular_min_reverse_dependencies = 100
+
+[sandbox]
+# Physical cores with SMT disabled, and the cores kept for host services.
+host_cores = 4
+host_reserved_cores = 1
+# Upper bound for VM memory, scratch disks and the image tmpfs together.
+host_memory_budget_mib = 40960
+slots = 3
+vcpus_per_slot = 1
+memory_mib_per_slot = 4096
+scratch_mib_per_slot = 4096
+images_tmpfs_mib = 14336
+check_timeout_secs = 900
+full_timeout_secs = 2700
+firecracker_bin = "/usr/local/lib/crateward/firecracker"
+jailer_bin = "/usr/local/lib/crateward/jailer"
+chroot_base_dir = "/srv/jailer"
+
+[storage]
+# Above this usage the maintainer is alerted.
+disk_alert_percent = 85
+# Raw logs of runs that were not flagged are deleted after this many days.
+raw_log_retention_days = 7
+
+[warmer]
+# The most depended upon crates to prebuild into the warm base.
+warm_set_size = 150
+# Only versions at least this old, already scored low risk, are prebuilt.
+min_version_age_days = 14
+
+[notifier]
+kind = "ntfy"
+server_url = "https://ntfy.sh"
+# Without access control the topic name is the password. Replace with the
+# output of `openssl rand -hex 24`.
+topic = "example_topic_replace_with_48_random_hex_chars"
+
+[heartbeat]
+# Ping URL of the healthchecks.io check. Replace the placeholder.
+ping_url = "https://hc-ping.com/00000000-0000-0000-0000-000000000000"
+interval_secs = 60
+
+[web]
+# The WireGuard address of the server. Never 0.0.0.0.
+listen = "10.77.0.1:8080"

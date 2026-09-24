@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+# Nothing in this workspace is published to crates.io. The license is not
+# chosen yet (see README), so no `license` field is set on purpose.
+publish = false
+repository = "https://github.com/janfedler/crateward"
+homepage = "https://crateward.com"
+
+[workspace.dependencies]
+crateward_core = { path = "crates/core" }
+clap = { version = "4.6", features = ["derive", "env"] }
+proptest = "1.11"
+rand = "0.10"
+secrecy = { version = "0.10", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+url = { version = "2.5", features = ["serde"] }
+
+[workspace.lints.rust]
+# Unsafe code is denied everywhere. Packages without any unsafe code
+# additionally `#![forbid]` it at the crate root; the few packages that will
+# need it (guest agent, orchestrator) confine it to documented modules.
+unsafe_code = "deny"
+missing_docs = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+# Production paths never panic: errors are typed and propagated.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+indexing_slicing = "deny"
