@@ -260,10 +260,16 @@ pub struct SandboxConfig {
     pub full_timeout_secs: u64,
     /// The Firecracker binary.
     pub firecracker_bin: PathBuf,
-    /// The jailer binary.
-    pub jailer_bin: PathBuf,
-    /// Base directory for jailer chroots.
-    pub chroot_base_dir: PathBuf,
+    /// The `crateward-vmjail` launcher (ADR 0012).
+    pub vmjail_bin: PathBuf,
+    /// Directory holding one subdirectory per slot. Must be private to the
+    /// orchestrator user.
+    pub slots_dir: PathBuf,
+    /// First subordinate UID for slots; slot `n` runs as `slot_uid_base + n`.
+    /// The range must be in the orchestrator user's `/etc/subuid` entry.
+    pub slot_uid_base: u32,
+    /// First subordinate GID for slots, from `/etc/subgid`.
+    pub slot_gid_base: u32,
 }
 
 /// Disk thresholds and retention.
@@ -598,8 +604,20 @@ impl Config {
             "must be at least 60 and not above full_timeout_secs",
         );
         v.absolute(&s.firecracker_bin, "sandbox.firecracker_bin");
-        v.absolute(&s.jailer_bin, "sandbox.jailer_bin");
-        v.absolute(&s.chroot_base_dir, "sandbox.chroot_base_dir");
+        v.absolute(&s.vmjail_bin, "sandbox.vmjail_bin");
+        v.absolute(&s.slots_dir, "sandbox.slots_dir");
+        // Subordinate IDs are never below 65536 in practice; a low value is
+        // almost certainly a real user or group on the host.
+        v.check(
+            s.slot_uid_base >= 65_536 && s.slot_uid_base.checked_add(s.slots).is_some(),
+            "sandbox.slot_uid_base",
+            "must be a subordinate UID range (at least 65536)",
+        );
+        v.check(
+            s.slot_gid_base >= 65_536 && s.slot_gid_base.checked_add(s.slots).is_some(),
+            "sandbox.slot_gid_base",
+            "must be a subordinate GID range (at least 65536)",
+        );
     }
 
     fn validate_operations(&self, v: &mut Issues) {

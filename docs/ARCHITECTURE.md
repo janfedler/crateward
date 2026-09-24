@@ -56,7 +56,7 @@ flowchart LR
         sa[static analysis<br/>sandboxed process]
     end
     subgraph untrusted[Untrusted zone]
-        orch[orchestrator<br/>plus root helper]
+        orch[orchestrator<br/>rootless jail]
         subgraph slot[slot netns]
             vm[Firecracker microVM<br/>guest agent]
         end
@@ -199,13 +199,15 @@ versions.
 ## MicroVM lifecycle
 
 The orchestrator drives Firecracker 1.17 through its API socket and always
-starts it through the jailer.
+starts it in a rootless jail ([ADR 0012](adr/0012-rootless-jail.md)).
 
-* **Privilege split.** The orchestrator runs unprivileged. A root helper with
-  a closed, typed command set (create slot, spawn jailer, kill slot, clean
-  slot) accepts slot numbers, never paths, and derives every path and name
-  from them. The jailer runs with `--cgroup-version 2`, `--new-pid-ns`,
-  `--netns` and a distinct uid per slot.
+* **No root.** A single threaded launcher, `crateward-vmjail`, joins the
+  slot's cgroup, creates a user namespace in which the slot's own
+  subordinate UID stands for Firecracker, then mount, network, IPC and UTS
+  namespaces; bind mounts exactly the kernel, the images and `/dev/kvm`;
+  creates the slot's tap device; `pivot_root`s; drops every capability;
+  sets `no_new_privs`; and executes Firecracker, whose own seccomp filter
+  then applies. Namespaces and tap devices die with the process.
 * **Restore, then personalize.** Jobs restore a Full snapshot of a clean boot
   (Diff snapshots are a developer preview). Firecracker's documentation calls
   resuming one snapshot many times insecure for uniqueness, so the job

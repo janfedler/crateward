@@ -49,5 +49,6 @@ All pinned by commit SHA.
 
 | Binary | Why |
 |--------|-----|
-| Firecracker and jailer 1.17 | The microVM monitor and its sandbox ([ADR 0002](adr/0002-firecracker-over-cloud-hypervisor-and-cratera.md)). |
+| Firecracker 1.17 | The microVM monitor ([ADR 0002](adr/0002-firecracker-over-cloud-hypervisor-and-cratera.md)); jailed without its jailer ([ADR 0012](adr/0012-rootless-jail.md)). |
+| `newuidmap`, `newgidmap` (Debian `uidmap`) | Write the ID maps of each jail's user namespace. |
 | PostgreSQL | Job queue and result store ([ADR 0004](adr/0004-postgres-as-queue.md)). |

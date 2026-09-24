@@ -5,11 +5,10 @@
 //!
 //! Why it looks the way it does:
 //!
-//! * Firecracker is driven through its API socket and always started by the
-//!   jailer (chroot, cgroup v2, new PID and network namespaces, dropped
-//!   privileges). The orchestrator itself runs unprivileged; a small root
-//!   helper with a closed, typed command set creates slots and spawns the
-//!   jailer, deriving every path from a slot number.
+//! * Firecracker is driven through its API socket and always started in a
+//!   rootless jail (ADR 0012): its own subordinate UID, private namespaces,
+//!   `pivot_root` into a root with only the needed files, no capabilities.
+//!   No process runs as root for the sandbox.
 //! * Jobs start by restoring a warm snapshot. Identity, honeytokens and the
 //!   clock are injected after restore, because resuming one snapshot many
 //!   times would otherwise repeat entropy and identifiers.
@@ -25,9 +24,12 @@
 //!
 //! The build cache warmer ships as a second binary of this package in M1.5.
 
-#![forbid(unsafe_code)]
+// Unsafe code is denied everywhere except `jail::sys`, which wraps one
+// system call and documents why it is sound.
+#![deny(unsafe_code)]
 
 pub mod firecracker;
+pub mod jail;
 
 use crateward_core::app::ComponentError;
 use crateward_core::component::Component;

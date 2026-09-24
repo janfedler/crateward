@@ -41,7 +41,7 @@ test. Nothing is marked Built before the code exists.
 | ID | Boundary | Crossing |
 |----|----------|----------|
 | B1 | Guest to Firecracker | virtio block, net, vsock and rng devices; the serial console |
-| B2 | Firecracker to host kernel | system calls, filtered by Firecracker's seccomp filters; the jailer's chroot, namespaces and cgroup |
+| B2 | Firecracker to host kernel | system calls, filtered by Firecracker's seccomp filters; the rootless jail's namespaces, `pivot_root`, cgroup and distinct UID |
 | B3 | Guest agent to orchestrator | one length limited vsock stream |
 | B4 | Guest network to fake internet | tap device, veth, nftables redirect |
 | B5 | Crate archive to extraction and static analysis | untrusted bytes into sandboxed subprocesses |
@@ -57,9 +57,10 @@ test. Nothing is marked Built before the code exists.
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
 | Fresh microVM per job from a clean snapshot; never reused | Planned | M1 |
-| Firecracker always started by the jailer: chroot, cgroup v2, new PID and network namespaces, distinct uid per slot | Planned | M1 |
-| Firecracker's default seccomp filters; never `--no-seccomp` | Planned | M1 |
-| Orchestrator unprivileged; root helper with a closed command set that accepts slot numbers, not paths | Planned | M1 |
+| Firecracker always started in the rootless jail: distinct subordinate UID per slot, mount, network, IPC and UTS namespaces, `pivot_root` with only the needed files, no capabilities, `no_new_privs` ([ADR 0012](adr/0012-rootless-jail.md)) | Tested | M1 |
+| Firecracker's default seccomp filters; never `--no-seccomp` | Tested | M1 |
+| No process runs as root for the sandbox; the orchestrator and the launcher are unprivileged | Built | M1 |
+| Serial console output rate limited, since it carries guest controlled text into the host log | Built | M1 |
 | Hard limits: `cpu.max`, `memory.max`, `pids.max`, drive and net rate limiters, fixed size scratch, wall clock with `cgroup.kill` | Planned | M1 |
 | SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Planned | M1 |
 | KSM disabled, no swap, as the Firecracker production guide recommends | Planned | M1 |
@@ -157,7 +158,7 @@ forge them. It cannot reach the server or read undisclosed findings.
   snapshot clock skew) can stay dormant. Host side ground truth limits what
   an active crate can hide, not what a dormant crate never does.
 * A zero day in KVM or the Firecracker device model could escape the VM. The
-  jailer, seccomp and the unprivileged, air gapped slot namespace limit what
+  rootless jail, seccomp and the unprivileged, air gapped slot namespace limit what
   such an escape reaches, but do not make it impossible.
 * The host kernel (Debian 13 stock 6.12) is outside Firecracker's validated
   host kernel matrix. See [ADR 0007](adr/0007-ansible-on-debian.md).

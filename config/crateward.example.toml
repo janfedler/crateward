@@ -122,8 +122,14 @@ images_tmpfs_mib = 14336
 check_timeout_secs = 900
 full_timeout_secs = 2700
 firecracker_bin = "/usr/local/lib/crateward/firecracker"
-jailer_bin = "/usr/local/lib/crateward/jailer"
-chroot_base_dir = "/srv/jailer"
+# The rootless jail launcher (ADR 0012).
+vmjail_bin = "/usr/local/lib/crateward/crateward-vmjail"
+# One subdirectory per slot, private to the orchestrator user.
+slots_dir = "/run/crateward/slots"
+# Slot n runs Firecracker as slot_uid_base + n. The range must lie in the
+# orchestrator user's /etc/subuid and /etc/subgid entries.
+slot_uid_base = 200000
+slot_gid_base = 200000
 
 [storage]
 # Above this usage the maintainer is alerted.

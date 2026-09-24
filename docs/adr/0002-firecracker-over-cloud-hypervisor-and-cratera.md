@@ -1,6 +1,7 @@
 # 0002: Firecracker directly, not Cloud Hypervisor or cratera
 
-* Status: Accepted
+* Status: Accepted; the jailer and root helper parts are superseded by
+  [ADR 0012](0012-rootless-jail.md)
 * Date: 2026-09-24
 
 ## Context

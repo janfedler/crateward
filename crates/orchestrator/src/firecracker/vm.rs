@@ -1,13 +1,14 @@
 //! One Firecracker process and the VM inside it.
 //!
-//! Every VM gets its own directory holding the API socket, the vsock socket
-//! and the log. Dropping or killing a [`Vm`] kills its whole process group
-//! and removes the directory, so a VM cannot outlive its owner without the
-//! startup reconciliation noticing its directory.
+//! Every VM gets its own directory on the host. Dropping or destroying a
+//! [`Vm`] kills Firecracker and removes the directory, so a VM cannot
+//! outlive its owner without startup reconciliation noticing the directory.
 //!
-//! This layer starts Firecracker directly as the calling user. Isolation
-//! (namespaces, cgroup limits, a distinct user per slot) wraps it in a later
-//! step of M1; the API sequence here stays the same.
+//! A VM runs either jailed (production, see [`crate::jail`]) or directly as
+//! the calling user (development only). In the jail, Firecracker sees fixed
+//! paths such as `/kernel` and `/rootfs.erofs`. Snapshots record those
+//! paths, which is what lets one snapshot restore into any slot: every
+//! jail offers the same paths, backed by different host files.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -22,6 +23,8 @@ use super::api::{
     Api, ApiError, BootSource, Drive, InstanceAction, MachineConfig, MemoryBackend, Serial,
     SnapshotCreate, SnapshotLoad, TokenBucket, VmState, Vsock, VsockOverride,
 };
+use crate::jail::host::{IdMap, JailError};
+use crate::jail::{BindMount, JailSpec};
 
 /// Guest context ID. Every VM uses the same one: Firecracker's vsock is
 /// private to each VM process, so there is no global CID namespace.
@@ -29,6 +32,16 @@ pub const GUEST_CID: u32 = 3;
 
 /// How long Firecracker may take to create its API socket.
 const API_SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Names Firecracker sees inside a jail.
+const KERNEL: &str = "kernel";
+const ROOTFS: &str = "rootfs.erofs";
+const STATE: &str = "vm.state";
+const MEMORY: &str = "vm.mem";
+const NEW_STATE: &str = "snapshot.state";
+const NEW_MEMORY: &str = "snapshot.mem";
+const VSOCK: &str = "vsock.sock";
+const API: &str = "api.sock";
 
 /// Why a VM operation failed.
 #[derive(Debug, thiserror::Error)]
@@ -47,6 +60,9 @@ pub enum VmError {
     /// The guest agent could not be reached or misbehaved.
     #[error("guest agent: {0}")]
     Agent(#[from] AgentError),
+    /// The jail could not be built.
+    #[error("jail: {0}")]
+    Jail(#[from] JailError),
     /// Firecracker did not create its API socket in time or exited early.
     #[error("firecracker did not start: {0}")]
     Start(String),
@@ -55,6 +71,46 @@ pub enum VmError {
 fn io_error(context: impl Into<String>) -> impl FnOnce(std::io::Error) -> VmError {
     let context = context.into();
     move |source| VmError::Io { context, source }
+}
+
+/// Settings of a jailed VM.
+#[derive(Debug, Clone)]
+pub struct JailConfig {
+    /// The `crateward-vmjail` binary.
+    pub launcher: PathBuf,
+    /// The slot's subordinate UID.
+    pub vm_uid: u32,
+    /// The slot's subordinate GID.
+    pub vm_gid: u32,
+    /// Tap device to create in the jail's network namespace.
+    pub tap: Option<String>,
+    /// cgroup the jail joins.
+    pub cgroup: Option<PathBuf>,
+    /// `RLIMIT_FSIZE` for Firecracker. Must fit the guest memory when the
+    /// VM will be snapshotted.
+    pub max_file_size: u64,
+}
+
+/// How Firecracker is started.
+#[derive(Debug, Clone)]
+pub enum Isolation {
+    /// Directly as the calling user. For development only.
+    Direct,
+    /// In a rootless jail.
+    Jail(JailConfig),
+}
+
+/// Where and how one VM runs.
+#[derive(Debug, Clone)]
+pub struct Launch {
+    /// The Firecracker binary.
+    pub firecracker: PathBuf,
+    /// The VM's directory on the host. Created, and removed on destroy.
+    pub dir: PathBuf,
+    /// Firecracker `--id`.
+    pub id: String,
+    /// Isolation mode.
+    pub isolation: Isolation,
 }
 
 /// Resources of a VM that is booted from scratch.
@@ -86,13 +142,16 @@ impl BootSpec {
     }
 }
 
-/// Files of a full snapshot.
+/// Files of a full snapshot on the host.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     /// Device and vCPU state.
     pub state: PathBuf,
     /// Guest memory.
     pub memory: PathBuf,
+    /// The root filesystem the snapshot was taken with. Restores attach it
+    /// at the same path inside the jail.
+    pub rootfs: PathBuf,
 }
 
 /// A running Firecracker process.
@@ -101,45 +160,113 @@ pub struct Vm {
     child: Child,
     api: Api,
     dir: PathBuf,
-    vsock_uds: PathBuf,
+    /// The jail root on the host, if jailed.
+    root: Option<PathBuf>,
+    vsock_host: PathBuf,
 }
 
-/// Paths inside a VM directory.
-fn api_socket(dir: &Path) -> PathBuf {
-    dir.join("api.sock")
+/// A host file and the name Firecracker sees it under in a jail.
+struct Exposed {
+    host: PathBuf,
+    name: &'static str,
 }
 
-fn vsock_socket(dir: &Path) -> PathBuf {
-    dir.join("vsock.sock")
+impl Launch {
+    fn jail_root(&self) -> PathBuf {
+        self.dir.join("root")
+    }
+
+    /// The path Firecracker uses for a host file exposed under `name`.
+    fn fc_path(&self, host: &Path, name: &str) -> PathBuf {
+        match self.isolation {
+            Isolation::Direct => host.to_path_buf(),
+            Isolation::Jail(_) => PathBuf::from(format!("/{name}")),
+        }
+    }
+
+    /// The path Firecracker uses for a file it creates itself.
+    fn fc_created(&self, name: &str) -> PathBuf {
+        match self.isolation {
+            Isolation::Direct => self.dir.join(name),
+            Isolation::Jail(_) => PathBuf::from(format!("/{name}")),
+        }
+    }
+
+    /// Host path of a file Firecracker creates itself.
+    fn host_created(&self, name: &str) -> PathBuf {
+        match self.isolation {
+            Isolation::Direct => self.dir.join(name),
+            Isolation::Jail(_) => self.jail_root().join(name),
+        }
+    }
 }
 
 impl Vm {
-    /// Starts Firecracker in `dir` and waits for its API socket.
-    async fn spawn(firecracker: &Path, dir: &Path, id: &str) -> Result<Self, VmError> {
-        tokio::fs::create_dir_all(dir)
+    /// Starts Firecracker and waits for its API socket.
+    async fn spawn(launch: &Launch, files: &[Exposed]) -> Result<Self, VmError> {
+        tokio::fs::create_dir_all(&launch.dir)
             .await
-            .map_err(io_error(format!("creating {}", dir.display())))?;
-        let log_path = dir.join("firecracker.log");
-        let log = std::fs::File::create(&log_path).map_err(io_error("creating the log"))?;
-        let log_err = log.try_clone().map_err(io_error("duplicating the log"))?;
-        let socket = api_socket(dir);
-        let child = Command::new(firecracker)
-            .arg("--api-sock")
-            .arg(&socket)
-            .arg("--id")
-            .arg(id)
-            .stdin(Stdio::null())
-            .stdout(log)
-            .stderr(log_err)
-            .process_group(0)
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(io_error(format!("starting {}", firecracker.display())))?;
+            .map_err(io_error(format!("creating {}", launch.dir.display())))?;
+        let log_path = launch.dir.join("firecracker.log");
+        let (child, root) = match &launch.isolation {
+            Isolation::Direct => {
+                let log = std::fs::File::create(&log_path).map_err(io_error("creating the log"))?;
+                let log_err = log.try_clone().map_err(io_error("duplicating the log"))?;
+                let child = Command::new(&launch.firecracker)
+                    .arg("--api-sock")
+                    .arg(launch.host_created(API))
+                    .arg("--id")
+                    .arg(&launch.id)
+                    .stdin(Stdio::null())
+                    .stdout(log)
+                    .stderr(log_err)
+                    .process_group(0)
+                    .kill_on_drop(true)
+                    .spawn()
+                    .map_err(io_error(format!(
+                        "starting {}",
+                        launch.firecracker.display()
+                    )))?;
+                (child, None)
+            }
+            Isolation::Jail(jail) => {
+                let root = launch.jail_root();
+                crate::jail::host::prepare_root(&root, jail.vm_uid)?;
+                let mut devices = vec![PathBuf::from("/dev/kvm")];
+                if jail.tap.is_some() {
+                    devices.push(PathBuf::from("/dev/net/tun"));
+                }
+                let spec = JailSpec {
+                    id: launch.id.clone(),
+                    root: root.clone(),
+                    firecracker: launch.firecracker.clone(),
+                    mounts: files
+                        .iter()
+                        .map(|file| BindMount {
+                            source: file.host.clone(),
+                            target: file.name.to_owned(),
+                            writable: false,
+                        })
+                        .collect(),
+                    devices,
+                    tap: jail.tap.clone(),
+                    cgroup: jail.cgroup.clone(),
+                    log: log_path,
+                    max_open_files: 2048,
+                    max_file_size: jail.max_file_size,
+                };
+                let ids = IdMap::for_slot(jail.vm_uid, jail.vm_gid);
+                let child = crate::jail::host::spawn(&jail.launcher, &spec, ids).await?;
+                (child, Some(root))
+            }
+        };
+        let socket = launch.host_created(API);
         let mut vm = Self {
             child,
             api: Api::new(&socket),
-            dir: dir.to_path_buf(),
-            vsock_uds: vsock_socket(dir),
+            dir: launch.dir.clone(),
+            root,
+            vsock_host: launch.host_created(VSOCK),
         };
         let deadline = Instant::now() + API_SOCKET_TIMEOUT;
         while !socket.exists() {
@@ -163,13 +290,18 @@ impl Vm {
     /// # Errors
     ///
     /// Fails if Firecracker does not start or rejects the configuration.
-    pub async fn boot(
-        firecracker: &Path,
-        dir: &Path,
-        id: &str,
-        spec: &BootSpec,
-    ) -> Result<Self, VmError> {
-        let vm = Self::spawn(firecracker, dir, id).await?;
+    pub async fn boot(launch: &Launch, spec: &BootSpec) -> Result<Self, VmError> {
+        let files = [
+            Exposed {
+                host: spec.kernel.clone(),
+                name: KERNEL,
+            },
+            Exposed {
+                host: spec.rootfs.clone(),
+                name: ROOTFS,
+            },
+        ];
+        let vm = Self::spawn(launch, &files).await?;
         // The serial console carries guest controlled text into our log.
         // Excess output is dropped: 64 KiB burst, then 4 KiB per second.
         vm.api
@@ -187,7 +319,7 @@ impl Vm {
             .put(
                 "/boot-source",
                 &BootSource {
-                    kernel_image_path: spec.kernel.clone(),
+                    kernel_image_path: launch.fc_path(&spec.kernel, KERNEL),
                     boot_args: spec.boot_args.clone(),
                 },
             )
@@ -207,7 +339,7 @@ impl Vm {
                 "/drives/rootfs",
                 &Drive {
                     drive_id: "rootfs".into(),
-                    path_on_host: spec.rootfs.clone(),
+                    path_on_host: launch.fc_path(&spec.rootfs, ROOTFS),
                     is_root_device: true,
                     is_read_only: true,
                 },
@@ -218,7 +350,7 @@ impl Vm {
                 "/vsock",
                 &Vsock {
                     guest_cid: GUEST_CID,
-                    uds_path: vm.vsock_uds.clone(),
+                    uds_path: launch.fc_created(VSOCK),
                 },
             )
             .await?;
@@ -239,25 +371,34 @@ impl Vm {
     /// # Errors
     ///
     /// Fails if Firecracker does not start or rejects the snapshot.
-    pub async fn restore(
-        firecracker: &Path,
-        dir: &Path,
-        id: &str,
-        snapshot: &Snapshot,
-    ) -> Result<Self, VmError> {
-        let vm = Self::spawn(firecracker, dir, id).await?;
+    pub async fn restore(launch: &Launch, snapshot: &Snapshot) -> Result<Self, VmError> {
+        let files = [
+            Exposed {
+                host: snapshot.rootfs.clone(),
+                name: ROOTFS,
+            },
+            Exposed {
+                host: snapshot.state.clone(),
+                name: STATE,
+            },
+            Exposed {
+                host: snapshot.memory.clone(),
+                name: MEMORY,
+            },
+        ];
+        let vm = Self::spawn(launch, &files).await?;
         vm.api
             .put(
                 "/snapshot/load",
                 &SnapshotLoad {
-                    snapshot_path: snapshot.state.clone(),
+                    snapshot_path: launch.fc_path(&snapshot.state, STATE),
                     mem_backend: MemoryBackend {
                         backend_type: "File",
-                        backend_path: snapshot.memory.clone(),
+                        backend_path: launch.fc_path(&snapshot.memory, MEMORY),
                     },
                     resume_vm: true,
                     vsock_override: VsockOverride {
-                        uds_path: vm.vsock_uds.clone(),
+                        uds_path: launch.fc_created(VSOCK),
                     },
                 },
             )
@@ -272,41 +413,59 @@ impl Vm {
     ///
     /// Fails if the agent is not reachable before the deadline.
     pub async fn agent(&self, deadline: Instant) -> Result<AgentConnection, VmError> {
-        Ok(
-            AgentConnection::connect_until(
-                &self.vsock_uds,
-                AGENT_PORT,
-                Limits::default(),
-                deadline,
-            )
-            .await?,
+        Ok(AgentConnection::connect_until(
+            &self.vsock_host,
+            AGENT_PORT,
+            Limits::default(),
+            deadline,
         )
+        .await?)
     }
 
-    /// Pauses the VM and writes a full snapshot into `out`.
+    /// Pauses the VM and writes a full snapshot into `out` on the host.
+    /// `launch` must be the one the VM was started with, and `rootfs` the
+    /// root filesystem it runs on.
     ///
     /// # Errors
     ///
-    /// Fails if pausing or snapshotting fails.
-    pub async fn snapshot(&self, out: &Path) -> Result<Snapshot, VmError> {
+    /// Fails if pausing, snapshotting or copying fails.
+    pub async fn snapshot(
+        &self,
+        launch: &Launch,
+        rootfs: &Path,
+        out: &Path,
+    ) -> Result<Snapshot, VmError> {
         tokio::fs::create_dir_all(out)
             .await
             .map_err(io_error(format!("creating {}", out.display())))?;
-        let snapshot = Snapshot {
-            state: out.join("vm.state"),
-            memory: out.join("vm.mem"),
-        };
         self.api.patch("/vm", &VmState { state: "Paused" }).await?;
         self.api
             .put(
                 "/snapshot/create",
                 &SnapshotCreate {
                     snapshot_type: "Full",
-                    snapshot_path: snapshot.state.clone(),
-                    mem_file_path: snapshot.memory.clone(),
+                    snapshot_path: launch.fc_created(NEW_STATE),
+                    mem_file_path: launch.fc_created(NEW_MEMORY),
                 },
             )
             .await?;
+        let snapshot = Snapshot {
+            state: out.join(STATE),
+            memory: out.join(MEMORY),
+            rootfs: rootfs.to_path_buf(),
+        };
+        // Copy rather than move: in a jail the files belong to the slot's
+        // user, and the copies must belong to the orchestrator so that no
+        // slot can ever write a snapshot another VM restores from.
+        for (from, to) in [(NEW_STATE, &snapshot.state), (NEW_MEMORY, &snapshot.memory)] {
+            let from = launch.host_created(from);
+            tokio::fs::copy(&from, to)
+                .await
+                .map_err(io_error(format!("copying {}", from.display())))?;
+            tokio::fs::remove_file(&from)
+                .await
+                .map_err(io_error(format!("removing {}", from.display())))?;
+        }
         Ok(snapshot)
     }
 
@@ -330,6 +489,12 @@ impl Vm {
     #[must_use]
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// The jail root on the host, if the VM is jailed.
+    #[must_use]
+    pub fn jail_root(&self) -> Option<&Path> {
+        self.root.as_deref()
     }
 
     /// Process ID of the Firecracker process, while it runs.

@@ -1,8 +1,9 @@
 //! Downloads the pinned Firecracker release and verifies it.
 //!
 //! The release archive's SHA-256 is pinned in `guest/firecracker.toml`.
-//! Only after the digest matches are the `firecracker` and `jailer` binaries
-//! extracted to `target/guest/bin`.
+//! Only after the digest matches is the `firecracker` binary extracted to
+//! `target/guest/bin`. Crateward does not use Firecracker's jailer
+//! (ADR 0012).
 
 use std::path::Path;
 
@@ -52,13 +53,11 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         )));
     }
     let release = format!("release-{}-x86_64", pin.version);
-    for binary in ["firecracker", "jailer"] {
-        let member = format!("{release}/{binary}-{}-x86_64", pin.version);
-        run_in(&dir, "tar", &["-xzf", &archive_str, &member], &[])?;
-        let from = dir.join(&member);
-        let to = dir.join(binary);
-        std::fs::rename(&from, &to).map_err(io(&from))?;
-    }
+    let member = format!("{release}/firecracker-{}-x86_64", pin.version);
+    run_in(&dir, "tar", &["-xzf", &archive_str, &member], &[])?;
+    let from = dir.join(&member);
+    let to = dir.join("firecracker");
+    std::fs::rename(&from, &to).map_err(io(&from))?;
     let _ = std::fs::remove_dir_all(dir.join(&release));
     eprintln!(
         "xtask: firecracker {} verified in {}",

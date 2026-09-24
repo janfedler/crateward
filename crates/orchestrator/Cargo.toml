@@ -8,10 +8,19 @@ publish.workspace = true
 repository.workspace = true
 homepage.workspace = true
 
+[[bin]]
+name = "crateward_orchestrator"
+path = "src/main.rs"
+
+[[bin]]
+name = "crateward-vmjail"
+path = "src/bin/vmjail.rs"
+
 [dependencies]
 bytes.workspace = true
 crateward_core = { workspace = true, features = ["app"] }
 http-body-util.workspace = true
+rustix = { workspace = true, features = ["fs", "mount", "process", "system", "thread", "stdio"] }
 hyper.workspace = true
 hyper-util.workspace = true
 serde.workspace = true

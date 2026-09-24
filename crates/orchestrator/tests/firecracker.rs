@@ -1,7 +1,8 @@
 //! Tests against real Firecracker microVMs.
 //!
-//! They need `/dev/kvm`, the pinned Firecracker binary and the guest images,
-//! so they are ignored by default and never run in CI. On the server:
+//! They need `/dev/kvm`, the pinned Firecracker binary, the guest images, and
+//! subordinate IDs for the jail tests, so they are ignored by default and
+//! never run in CI. On the server:
 //!
 //! ```sh
 //! cargo xtask firecracker && cargo xtask guest-kernel && cargo xtask rootfs
@@ -12,14 +13,18 @@
 //! here; no crate under analysis is involved.
 
 // Test helpers outside `#[test]` functions are still test code.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crateward_core::protocol::{ExitStatus, JobSpec, WallClock};
-use crateward_orchestrator::firecracker::vm::{BootSpec, Vm};
+use crateward_orchestrator::firecracker::vm::{BootSpec, Isolation, JailConfig, Launch, Vm};
 use tokio::time::Instant;
+
+/// Subordinate IDs used by the jail tests. Inside the `claude` user's
+/// range (`/etc/subuid`), away from its start where image builds map root.
+const TEST_SUBID_BASE: u32 = 160_000;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -27,10 +32,6 @@ fn root() -> PathBuf {
         .nth(2)
         .map(Path::to_path_buf)
         .unwrap()
-}
-
-fn firecracker() -> PathBuf {
-    root().join("target/guest/bin/firecracker")
 }
 
 fn boot_spec() -> BootSpec {
@@ -58,6 +59,28 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// A launch in the given mode; `slot` picks the subordinate ID.
+fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
+    let isolation = if jailed {
+        Isolation::Jail(JailConfig {
+            launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
+            vm_uid: TEST_SUBID_BASE + slot,
+            vm_gid: TEST_SUBID_BASE + slot,
+            tap: Some("tap0".into()),
+            cgroup: None,
+            max_file_size: 1 << 30,
+        })
+    } else {
+        Isolation::Direct
+    };
+    Launch {
+        firecracker: root().join("target/guest/bin/firecracker"),
+        dir: scratch(name),
+        id: name.into(),
+        isolation,
+    }
+}
+
 fn now() -> WallClock {
     let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     WallClock {
@@ -78,19 +101,42 @@ fn job(argv: &[&str]) -> JobSpec {
     }
 }
 
-#[tokio::test]
-#[ignore = "needs /dev/kvm and the guest images"]
-async fn boots_runs_a_job_and_shuts_down() {
-    let dir = scratch("boot");
+/// A field of `/proc/<pid>/status`, readable for any process on the host.
+fn status_field(pid: u32, field: &str) -> String {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{field}:")))
+        .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default()
+}
+
+async fn boot_run_shutdown(jailed: bool) {
+    let launch = launch(if jailed { "boot-jail" } else { "boot-direct" }, jailed, 0);
     let started = Instant::now();
-    let mut vm = Vm::boot(&firecracker(), &dir, "boot-test", &boot_spec())
-        .await
-        .unwrap();
+    let mut vm = Vm::boot(&launch, &boot_spec()).await.unwrap();
     let mut agent = vm
         .agent(Instant::now() + Duration::from_secs(20))
         .await
         .unwrap();
     let boot_time = started.elapsed();
+
+    if jailed {
+        let pid = vm.pid().unwrap();
+        let uid = TEST_SUBID_BASE.to_string();
+        assert_eq!(status_field(pid, "Uid"), format!("{uid} {uid} {uid} {uid}"));
+        assert_eq!(status_field(pid, "CapEff"), "0000000000000000");
+        assert_eq!(status_field(pid, "CapPrm"), "0000000000000000");
+        assert_eq!(status_field(pid, "NoNewPrivs"), "1");
+        // 2 means a seccomp filter is installed (Firecracker's own).
+        assert_eq!(status_field(pid, "Seccomp"), "2");
+        // The tap device lives only in the jail's network namespace.
+        let host_links = std::process::Command::new("/usr/sbin/ip")
+            .args(["-br", "link"])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&host_links.stdout).contains("tap0"));
+    }
 
     let outcome = agent.run(job(&["/usr/bin/id"])).await.unwrap();
     let id = String::from_utf8_lossy(&outcome.stdout);
@@ -98,10 +144,8 @@ async fn boots_runs_a_job_and_shuts_down() {
     assert!(id.contains("uid=1000(builder)"), "{id}");
     assert!(!id.contains("groups=0"), "job kept root's groups: {id}");
 
-    // Snapshot uniqueness relies on the VM generation ID driver reseeding
-    // the guest RNG on restore (Firecracker snapshot-support.md).
-    // A device must be bound to the vmgenid platform driver, not merely
-    // the driver be present.
+    // Snapshot uniqueness relies on the VM generation ID driver reseeding the
+    // guest RNG on restore; a device must be bound to it.
     let outcome = agent
         .run(job(&[
             "/bin/sh",
@@ -131,34 +175,33 @@ async fn boots_runs_a_job_and_shuts_down() {
         status.is_some(),
         "firecracker did not exit after the guest shut down"
     );
+    let dir = vm.dir().to_path_buf();
     vm.destroy().await.unwrap();
-    eprintln!("boot to agent ready: {boot_time:?}");
+    assert!(!dir.exists(), "VM directory left behind");
+    eprintln!("jailed={jailed}: boot to agent ready: {boot_time:?}");
 }
 
-#[tokio::test]
-#[ignore = "needs /dev/kvm and the guest images"]
-async fn restores_the_same_snapshot_twice_with_fresh_state() {
-    let base_dir = scratch("snap-base");
-    let snap_dir = scratch("snap-files");
-    let vm = Vm::boot(&firecracker(), &base_dir, "snap-base", &boot_spec())
-        .await
-        .unwrap();
+async fn snapshot_and_restore_twice(jailed: bool) {
+    let mode = if jailed { "jail" } else { "direct" };
+    let base = launch(&format!("snap-base-{mode}"), jailed, 0);
+    let snap_dir = scratch(&format!("snap-files-{mode}"));
+    let spec = boot_spec();
+    let vm = Vm::boot(&base, &spec).await.unwrap();
     let mut agent = vm
         .agent(Instant::now() + Duration::from_secs(20))
         .await
         .unwrap();
     agent.ping().await.unwrap();
     drop(agent);
-    let snapshot = vm.snapshot(&snap_dir).await.unwrap();
+    let snapshot = vm.snapshot(&base, &spec.rootfs, &snap_dir).await.unwrap();
     vm.destroy().await.unwrap();
 
-    let mut boot_ids = Vec::new();
+    let mut uuids = Vec::new();
     for round in 0..2 {
-        let dir = scratch(&format!("restore-{round}"));
+        // Each restore runs in its own slot, with its own subordinate UID.
+        let launch = launch(&format!("restore-{mode}-{round}"), jailed, round + 1);
         let started = Instant::now();
-        let vm = Vm::restore(&firecracker(), &dir, &format!("restore-{round}"), &snapshot)
-            .await
-            .unwrap();
+        let vm = Vm::restore(&launch, &snapshot).await.unwrap();
         let mut agent = vm
             .agent(Instant::now() + Duration::from_secs(10))
             .await
@@ -179,7 +222,7 @@ async fn restores_the_same_snapshot_twice_with_fresh_state() {
             "{}",
             String::from_utf8_lossy(&outcome.stderr)
         );
-        boot_ids.push(outcome.stdout);
+        uuids.push(outcome.stdout);
         // The guest clock follows the host, not the snapshot.
         let outcome = agent.run(job(&["/bin/date", "+%s"])).await.unwrap();
         let guest: u64 = String::from_utf8_lossy(&outcome.stdout)
@@ -192,11 +235,35 @@ async fn restores_the_same_snapshot_twice_with_fresh_state() {
         );
         drop(agent);
         vm.destroy().await.unwrap();
-        eprintln!("restore {round} to agent ready: {restore_time:?}");
+        eprintln!("jailed={jailed}: restore {round} to agent ready: {restore_time:?}");
     }
     assert_ne!(
-        boot_ids[0], boot_ids[1],
+        uuids[0], uuids[1],
         "restored VMs produced the same random UUID"
     );
-    let _ = std::fs::remove_dir_all(&snap_dir);
+    std::fs::remove_dir_all(&snap_dir).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "needs /dev/kvm and the guest images"]
+async fn direct_boots_runs_a_job_and_shuts_down() {
+    boot_run_shutdown(false).await;
+}
+
+#[tokio::test]
+#[ignore = "needs /dev/kvm and the guest images"]
+async fn direct_restores_the_same_snapshot_twice_with_fresh_state() {
+    snapshot_and_restore_twice(false).await;
+}
+
+#[tokio::test]
+#[ignore = "needs /dev/kvm, the guest images and subordinate IDs"]
+async fn jailed_boots_runs_a_job_and_shuts_down() {
+    boot_run_shutdown(true).await;
+}
+
+#[tokio::test]
+#[ignore = "needs /dev/kvm, the guest images and subordinate IDs"]
+async fn jailed_restores_the_same_snapshot_twice_with_fresh_state() {
+    snapshot_and_restore_twice(true).await;
 }
