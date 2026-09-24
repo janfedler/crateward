@@ -29,7 +29,6 @@
 pub mod acl;
 pub mod host;
 pub mod launcher;
-pub mod sys;
 
 use std::path::PathBuf;
 

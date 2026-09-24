@@ -24,9 +24,7 @@
 //!
 //! The build cache warmer ships as a second binary of this package in M1.5.
 
-// Unsafe code is denied everywhere except `jail::sys`, which wraps one
-// system call and documents why it is sound.
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 
 pub mod backend;
 pub mod cgroup;

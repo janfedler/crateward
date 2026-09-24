@@ -19,14 +19,18 @@ store = ["dep:tokio-postgres", "dep:tokio", "cratesio", "dep:tracing"]
 cratesio = ["dep:serde_json", "dep:semver", "dep:quick-xml"]
 # The polite HTTP client for crates.io.
 http = ["dep:reqwest", "dep:tokio", "dep:bytes"]
+# Namespaces, resource limits and Landlock for workers handling hostile input.
+sandbox = ["dep:rustix", "dep:landlock"]
 
 [dependencies]
 bytes = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
+landlock = { workspace = true, optional = true }
 postcard.workspace = true
 quick-xml = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, optional = true }
+rustix = { workspace = true, optional = true, features = ["process", "thread"] }
 secrecy.workspace = true
 semver = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

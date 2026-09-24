@@ -24,7 +24,14 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `tokio` | orchestrator | Async runtime for supervising many VMs, timers and sockets at once. |
 | `hyper`, `hyper-util`, `http-body-util`, `bytes` | orchestrator | HTTP/1.1 client for the Firecracker API over its Unix socket, with bounded response bodies. |
 | `serde_json` | orchestrator | JSON bodies of the Firecracker API. |
-| `blake3` | xtask | Fast digests that identify every image Crateward builds. |
+| `blake3` | xtask, fetcher | Fast digests that name images and content addressed blobs. |
+| `tokio-postgres` | core (`store`) | Asynchronous PostgreSQL client from the `rust-postgres` project; plain SQL, no query builder or code generation. |
+| `semver` | core (`cratesio`, `store`) | The reference implementation of Cargo's version rules. |
+| `quick-xml` | core (`cratesio`) | Streaming XML parser for the RSS feeds. |
+| `reqwest` | core (`http`) | HTTP client with rustls and the platform certificate verifier. |
+| `landlock` | core (`sandbox`) | Official Rust bindings for Landlock, from its maintainers. |
+| `tar`, `flate2` | fetcher | Reading crate archives; `flate2` uses the pure Rust `miniz_oxide` backend. |
+| `zstd` | fetcher | Compression of stored blobs; binds the reference zstd library. |
 | `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
 
 ## Tools

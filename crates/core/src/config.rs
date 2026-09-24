@@ -51,6 +51,8 @@ pub struct Config {
     pub sandbox: SandboxConfig,
     /// Disk thresholds and retention.
     pub storage: StorageConfig,
+    /// The fetch stage.
+    pub fetcher: FetcherConfig,
     /// The build cache warmer.
     pub warmer: WarmerConfig,
     /// Where alerts go.
@@ -286,6 +288,19 @@ pub struct StorageConfig {
     pub disk_alert_percent: u8,
     /// Days to keep raw logs of runs that were not flagged.
     pub raw_log_retention_days: u32,
+}
+
+/// The fetch stage.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FetcherConfig {
+    /// The real `cargo` binary of the pinned toolchain (not the rustup
+    /// proxy), for dependency resolution in the sandbox. Its toolchain
+    /// directory becomes readable inside the sandbox.
+    pub cargo_bin: PathBuf,
+    /// Keep the original `.crate` file of every analyzed version, so that
+    /// evidence stays verifiable against the crates.io checksum.
+    pub keep_originals: bool,
 }
 
 /// The build cache warmer.
@@ -653,6 +668,7 @@ impl Config {
             "storage.raw_log_retention_days",
             "must be at least 1",
         );
+        v.absolute(&self.fetcher.cargo_bin, "fetcher.cargo_bin");
         v.check(
             self.warmer.warm_set_size >= 1,
             "warmer.warm_set_size",

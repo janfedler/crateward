@@ -110,7 +110,7 @@ async fn migrations_are_idempotent() {
         return;
     };
     let mut store = db.store().await;
-    assert_eq!(store.migrate().await.unwrap(), vec![1]);
+    assert_eq!(store.migrate().await.unwrap(), vec![1, 2]);
     assert!(store.migrate().await.unwrap().is_empty());
     db.drop().await;
 }

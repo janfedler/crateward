@@ -9,7 +9,27 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-crateward_core = { workspace = true, features = ["app"] }
+blake3.workspace = true
+bytes.workspace = true
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["server"] }
+hyper-util.workspace = true
+secrecy.workspace = true
+semver.workspace = true
+sha2.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+toml.workspace = true
+tracing.workspace = true
+crateward_core = { workspace = true, features = ["app", "cratesio", "http", "store", "sandbox"] }
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true

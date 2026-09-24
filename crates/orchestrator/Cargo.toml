@@ -18,7 +18,7 @@ path = "src/bin/vmjail.rs"
 
 [dependencies]
 bytes.workspace = true
-crateward_core = { workspace = true, features = ["app"] }
+crateward_core = { workspace = true, features = ["app", "sandbox"] }
 http-body-util.workspace = true
 rustix = { workspace = true, features = ["fs", "mount", "process", "system", "thread", "stdio"] }
 hyper.workspace = true

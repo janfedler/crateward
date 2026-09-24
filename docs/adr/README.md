@@ -20,3 +20,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0011](0011-guest-kernel-source.md) | Guest kernel from a pinned Amazon Linux 6.18 branch commit | Accepted |
 | [0012](0012-rootless-jail.md) | A rootless jail instead of Firecracker's jailer | Accepted |
 | [0013](0013-ext4-on-md-raid-without-encryption.md) | ext4 on md RAID1, without disk encryption | Accepted |
+| [0014](0014-resolve-fetch-validate.md) | Resolve with Cargo, fetch and validate ourselves, never extract | Accepted |

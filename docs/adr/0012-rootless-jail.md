@@ -67,8 +67,8 @@ exist in the host's network namespace.
   above is the contract, and each row that can be checked from the host is
   checked by a test. The departure is revisited if Firecracker adds a
   rootless mode or the kernel restricts unprivileged user namespaces.
-* `crateward_orchestrator::jail::sys` wraps `unshare(2)` in the project's
-  only `unsafe` block, documented and limited to flags that exclude
+* `crateward_core::sandbox` wraps `unshare(2)` in the project's only
+  `unsafe` block, documented and limited to flags that exclude
   `CLONE_FILES`.
 
 ## Sources

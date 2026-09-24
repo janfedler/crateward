@@ -25,7 +25,10 @@ use crate::name::CrateName;
 use crate::retry::RetryPolicy;
 
 /// Migrations, applied in order. Never edit one that has shipped.
-const MIGRATIONS: &[(i32, &str)] = &[(1, include_str!("../migrations/0001_jobs.sql"))];
+const MIGRATIONS: &[(i32, &str)] = &[
+    (1, include_str!("../migrations/0001_jobs.sql")),
+    (2, include_str!("../migrations/0002_fetch.sql")),
+];
 
 /// Why a store operation failed.
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +105,27 @@ pub struct StoredEvent {
     pub worker: String,
 }
 
+/// A validated crate file, as recorded by the fetcher.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrateFile {
+    /// SHA-256 of the `.crate` file.
+    pub sha256: Sha256Digest,
+    /// Crate name as published.
+    pub name: String,
+    /// Version.
+    pub version: String,
+    /// BLAKE3 of the unpacked tar, if the archive was stored.
+    pub blake3: Option<String>,
+    /// Size of the `.crate` file.
+    pub compressed_bytes: i64,
+    /// Unpacked size.
+    pub unpacked_bytes: i64,
+    /// Size of the stored blob.
+    pub stored_bytes: Option<i64>,
+    /// The validation report.
+    pub report: Value,
+}
+
 /// Backoff policies per stage, used to schedule retries.
 #[derive(Debug, Clone)]
 pub struct Policies {
@@ -112,6 +136,25 @@ pub struct Policies {
 }
 
 impl Policies {
+    /// The policies configured for every stage.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a stage has an invalid backoff; configuration validation
+    /// already rejects those.
+    pub fn from_config(
+        stages: &crate::config::StagesConfig,
+    ) -> Result<Self, crate::retry::RetryPolicyError> {
+        let mut backoff = BTreeMap::new();
+        for stage in Stage::ALL {
+            backoff.insert(stage.name(), stages.get(stage).retry_policy()?);
+        }
+        Ok(Self {
+            limits: stages.limits(),
+            backoff,
+        })
+    }
+
     fn delay(&self, effect: &Effect) -> Option<Duration> {
         let (stage, attempt) = match *effect {
             Effect::RetryAfterBackoff { stage, attempt } => (stage, attempt),
@@ -481,6 +524,89 @@ impl Store {
                 })
             })
             .collect()
+    }
+
+    /// Records a validated crate file. Recording the same file twice is
+    /// a no op.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn record_crate_file(&self, file: &CrateFile) -> Result<(), StoreError> {
+        self.client
+            .execute(
+                "INSERT INTO crate_files (sha256, crate_name, version, blake3, compressed_bytes,
+                                          unpacked_bytes, stored_bytes, report)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 ON CONFLICT (sha256) DO NOTHING",
+                &[
+                    &file.sha256.as_bytes().as_slice(),
+                    &file.name,
+                    &file.version,
+                    &file.blake3,
+                    &file.compressed_bytes,
+                    &file.unpacked_bytes,
+                    &file.stored_bytes,
+                    &file.report,
+                ],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// A recorded crate file by its SHA-256.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn crate_file(&self, sha256: &Sha256Digest) -> Result<Option<CrateFile>, StoreError> {
+        let row = self
+            .client
+            .query_opt(
+                "SELECT crate_name, version, blake3, compressed_bytes, unpacked_bytes,
+                        stored_bytes, report
+                 FROM crate_files WHERE sha256 = $1",
+                &[&sha256.as_bytes().as_slice()],
+            )
+            .await?;
+        row.map(|r| {
+            Ok(CrateFile {
+                sha256: *sha256,
+                name: r.try_get(0)?,
+                version: r.try_get(1)?,
+                blake3: r.try_get(2)?,
+                compressed_bytes: r.try_get(3)?,
+                unpacked_bytes: r.try_get(4)?,
+                stored_bytes: r.try_get(5)?,
+                report: r.try_get(6)?,
+            })
+        })
+        .transpose()
+    }
+
+    /// Records the fetch stage's result for a job, replacing an earlier one
+    /// (a retried fetch overwrites it).
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn record_fetch(
+        &self,
+        job: JobId,
+        lockfile: Option<&str>,
+        resolution_error: Option<&str>,
+        packages: &Value,
+    ) -> Result<(), StoreError> {
+        self.client
+            .execute(
+                "INSERT INTO job_fetches (job_id, lockfile, resolution_error, packages)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (job_id) DO UPDATE
+                 SET lockfile = $2, resolution_error = $3, packages = $4, fetched_at = now()",
+                &[&job.0, &lockfile, &resolution_error, packages],
+            )
+            .await?;
+        Ok(())
     }
 
     /// Number of jobs per state.

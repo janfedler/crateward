@@ -94,11 +94,12 @@ test. Nothing is marked Built before the code exists.
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
 | Crate names validated before use as paths or URLs | Tested | M0 |
+| Every name, version and checksum from crates.io parsed into typed values; parsers property tested | Tested | M2 |
 | SHA-256 digests parsed as fixed size values and compared exactly | Tested | M0 |
-| Checksum verified against the index before extraction | Planned | M2 |
-| Extraction in a sandboxed subprocess; reject traversal, links, devices and special files; cap size, count, depth and ratio | Planned | M2 |
-| Vendoring through a generated consumer package, run from an empty directory with a fixed `CARGO_HOME`, so cargo never reads configuration shipped in the crate | Planned | M2 |
-| Vendoring subprocess reaches only a local registry proxy | Planned | M2 |
+| SHA-256 verified against the index or lockfile for every crate file | Built | M2 |
+| Archives never extracted on the host; validated in a sandboxed child (no filesystem, no network, rlimits); traversal, links, devices, special modes and case collisions reported; bombs aborted ([ADR 0014](adr/0014-resolve-fetch-validate.md)) | Tested | M2 |
+| Resolution through a generated consumer probe, so cargo never reads configuration shipped in the crate; `RUSTC` points nowhere, so nothing compiles | Built | M2 |
+| Resolution child: own user and network namespaces, only a loopback relay to the fetcher's index proxy, Landlock, rlimits | Built | M2 |
 | Static analysis in a separate process with rlimits, Landlock and seccomp | Planned | M3 |
 | Guest disk images parsed on the host only in a sandboxed subprocess | Planned | M4 |
 | No README or other crate text rendered as raw HTML; autoescaping templates; strict CSP | Planned | M6 |
@@ -143,7 +144,7 @@ forge them. It cannot reach the server or read undisclosed findings.
 | `Cargo.lock` committed; every build uses `--locked` | Built | M0 |
 | `cargo deny`, `cargo audit` and `cargo vet` in CI | Built | M0 |
 | GitHub Actions pinned by commit SHA; workflow token read only | Built | M0 |
-| `unsafe_code` denied workspace wide; forbidden in every package so far | Built | M0 |
+| `unsafe_code` denied workspace wide; one documented `unsafe` block (`crateward_core::sandbox`, wrapping `unshare(2)`) | Built | M2 |
 | Vendored sources attached to signed releases; SBOM published | Planned | M8 |
 
 ### Integrity without ECC (A2)
@@ -151,8 +152,8 @@ forge them. It cannot reach the server or read undisclosed findings.
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
 | md RAID1 with a monthly `mdcheck` scrub (detects, cannot choose the right copy) | Built | M1 |
-| Content addressed blobs verified by BLAKE3 on every read | Planned | M2 |
-| PostgreSQL data checksums (the Debian cluster needs `pg_checksums --enable`) | Planned | M2 |
+| Content addressed blobs verified by BLAKE3 on every read | Tested | M2 |
+| PostgreSQL data checksums (the Debian cluster needs `pg_checksums --enable`; waiting for the maintainer) | Planned | M2 |
 | BLAKE3 manifests for images and evidence, verified on read | Planned | M1.5 |
 
 ## Residual risks

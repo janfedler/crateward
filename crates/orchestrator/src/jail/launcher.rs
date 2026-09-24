@@ -19,8 +19,8 @@ use rustix::fs::{Gid, Uid};
 use rustix::mount::{MountFlags, MountPropagationFlags, UnmountFlags};
 use rustix::process::{Resource, Rlimit};
 
-use super::sys::{Namespaces, unshare};
 use super::{FIRECRACKER_IN_JAIL, INSIDE_VM_ID, JailSpec, MAX_SPEC_BYTES};
+use crateward_core::sandbox::{Namespaces, unshare};
 
 /// `ip` on the host, used to create the tap device before `pivot_root`.
 const IP: &str = "/usr/sbin/ip";

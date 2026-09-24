@@ -98,9 +98,11 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    index, and creates the job. The daily database dump reconciles anything
    the feeds missed and provides the popularity data behind priorities.
 2. **fetcher** downloads the `.crate` file, verifies its SHA-256 against the
-   index, extracts it in a sandboxed subprocess, and vendors all dependencies
-   for all targets through a generated consumer package. Nothing executes
-   crate code here; `cargo vendor` resolves and downloads only.
+   index, validates the archive in a sandboxed child without extracting it,
+   resolves all dependencies for all targets with `cargo generate-lockfile`
+   on a generated consumer probe (sandboxed, no compiler), fetches and
+   validates every locked crate, and stores them as content addressed blobs
+   ([ADR 0014](adr/0014-resolve-fetch-validate.md)).
 3. **static analysis** parses every file with `syn` across all `cfg` branches,
    runs detectors and YARA-X rules, diffs against the previous version, and
    decides the triage: dynamic, static only, or not applicable on Linux.

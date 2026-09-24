@@ -46,7 +46,7 @@ static_max_concurrent_downloads = 4
 # Request rates towards the CDN and the sparse index. crates.io publishes no
 # limit for either; these are our own courtesy.
 static_requests_per_second = 5.0
-index_requests_per_second = 5.0
+index_requests_per_second = 20.0
 # The feeds cover the last 60 minutes, so polling every 2 minutes never
 # misses a version.
 rss_poll_interval_secs = 120
@@ -140,6 +140,14 @@ slot_gid_base = 200000
 disk_alert_percent = 85
 # Raw logs of runs that were not flagged are deleted after this many days.
 raw_log_retention_days = 7
+
+[fetcher]
+# The real cargo binary of the pinned toolchain, not the rustup proxy
+# (`rustup which cargo`). Its toolchain directory is readable in the
+# resolution sandbox.
+cargo_bin = "/usr/local/lib/crateward/toolchain/bin/cargo"
+# Keep the original .crate file of every analyzed version as evidence.
+keep_originals = true
 
 [warmer]
 # The most depended upon crates to prebuild into the warm base.

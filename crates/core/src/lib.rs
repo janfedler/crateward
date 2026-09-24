@@ -14,7 +14,9 @@
 //! exhaustively and safe to link into the guest agent. Host services opt
 //! into the process harness (`app`) and the Postgres job store (`store`).
 
-#![forbid(unsafe_code)]
+// Unsafe code is denied everywhere except `sandbox`, which wraps one system
+// call and documents why it is sound.
+#![deny(unsafe_code)]
 
 #[cfg(feature = "app")]
 pub mod app;
@@ -31,6 +33,8 @@ pub mod job;
 pub mod name;
 pub mod protocol;
 pub mod retry;
+#[cfg(feature = "sandbox")]
+pub mod sandbox;
 #[cfg(feature = "store")]
 pub mod store;
 pub mod verdict;

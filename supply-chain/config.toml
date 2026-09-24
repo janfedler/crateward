@@ -150,6 +150,10 @@ criteria = "safe-to-deploy"
 version = "0.3.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.crc32fast]]
+version = "1.5.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.crypto-common]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
@@ -174,12 +178,28 @@ criteria = "safe-to-deploy"
 version = "0.2.7"
 criteria = "safe-to-deploy"
 
+[[exemptions.enumflags2]]
+version = "0.7.12"
+criteria = "safe-to-deploy"
+
+[[exemptions.enumflags2_derive]]
+version = "0.7.12"
+criteria = "safe-to-deploy"
+
 [[exemptions.fastrand]]
 version = "2.5.0"
 criteria = "safe-to-run"
 
+[[exemptions.filetime]]
+version = "0.2.29"
+criteria = "safe-to-deploy"
+
 [[exemptions.find-msvc-tools]]
 version = "0.1.13"
+criteria = "safe-to-deploy"
+
+[[exemptions.flate2]]
+version = "1.1.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.fs_extra]]
@@ -334,6 +354,10 @@ criteria = "safe-to-deploy"
 version = "0.3.105"
 criteria = "safe-to-deploy"
 
+[[exemptions.landlock]]
+version = "0.4.7"
+criteria = "safe-to-deploy"
+
 [[exemptions.libc]]
 version = "0.2.189"
 criteria = "safe-to-deploy"
@@ -371,6 +395,10 @@ version = "2.8.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.memoffset]]
+version = "0.9.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.miniz_oxide]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
@@ -590,6 +618,10 @@ criteria = "safe-to-deploy"
 version = "1.4.8"
 criteria = "safe-to-deploy"
 
+[[exemptions.simd-adler32]]
+version = "0.3.10"
+criteria = "safe-to-deploy"
+
 [[exemptions.simd_cesu8]]
 version = "1.2.0"
 criteria = "safe-to-deploy"
@@ -632,6 +664,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.synstructure]]
 version = "0.14.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tar]]
+version = "0.4.45"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror]]
@@ -894,6 +930,22 @@ criteria = "safe-to-deploy"
 version = "0.11.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.zlib-rs]]
+version = "0.6.8"
+criteria = "safe-to-deploy"
+
 [[exemptions.zmij]]
 version = "1.0.23"
+criteria = "safe-to-deploy"
+
+[[exemptions.zstd]]
+version = "0.13.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.zstd-safe]]
+version = "7.3.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.zstd-sys]]
+version = "2.1.0+zstd.1.5.7"
 criteria = "safe-to-deploy"
