@@ -69,6 +69,10 @@ pub struct Sinks {
     pub binary: PathBuf,
     /// Its event log on the host, opened before the jail closes.
     pub events: PathBuf,
+    /// The TLS authority (certificate and private key, PEM) on the host.
+    /// The launcher reads it and passes it on stdin, so no path in the jail
+    /// ever holds the key.
+    pub authority: Option<PathBuf>,
 }
 
 /// Everything the launcher needs to build one jail.
@@ -136,7 +140,10 @@ impl JailSpec {
             if self.tap.is_none() {
                 return fail("the fake internet needs a tap device".into());
             }
-            for path in [&sinks.binary, &sinks.events] {
+            for path in [&sinks.binary, &sinks.events]
+                .into_iter()
+                .chain(sinks.authority.as_ref())
+            {
                 if !path.is_absolute() {
                     return fail(format!("{} is not absolute", path.display()));
                 }

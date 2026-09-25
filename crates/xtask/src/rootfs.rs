@@ -10,7 +10,10 @@
 //!    cached under a name derived from the BLAKE3 digest of its inputs.
 //! 2. The Rust toolchain pinned in `guest/rootfs/rust.toml` under
 //!    `/usr/local`, downloaded once and verified by SHA-256.
-//! 3. The guest agent, appended to a copy of the base tarball with root
+//! 3. The fake internet's TLS authority, added to the system trust bundle.
+//!    It is created once per installation under `target/guest/ca` (mode
+//!    0600) and reused, because the orchestrator needs its private key.
+//! 4. The guest agent, appended to a copy of the base tarball with root
 //!    ownership.
 //!
 //! The result is packed with `mkfs.erofs` into a compressed, read only
@@ -111,7 +114,10 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     // Layer 2: the Rust toolchain.
     let toolchain = stage_toolchain(root, &inputs.join("rust.toml"), &work)?;
 
-    // Layer 3: the guest agent.
+    // Layer 3: trust in the fake internet's authority.
+    let trust = stage_trust(root, &base, &work)?;
+
+    // Layer 4: the guest agent.
     crate::guest_agent()?;
     let agent = root
         .join("target")
@@ -143,6 +149,26 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
             "-C",
             &toolchain.to_string_lossy(),
             "usr",
+        ],
+        &[],
+    )?;
+    // A later entry replaces an earlier one with the same path.
+    run_in(
+        root,
+        "tar",
+        &[
+            "--append",
+            "--file",
+            &tar,
+            "--owner=0",
+            "--group=0",
+            "--numeric-owner",
+            "--mode=0644",
+            &format!("--mtime=@{epoch}"),
+            "-C",
+            &trust.to_string_lossy(),
+            TRUST_BUNDLE,
+            TRUST_ANCHOR,
         ],
         &[],
     )?;
@@ -296,5 +322,82 @@ fn stage_toolchain(root: &Path, pin_path: &Path, work: &Path) -> Result<PathBuf,
         )?;
     }
     eprintln!("xtask: staged Rust {} for the guest", pin.version);
+    Ok(staging)
+}
+
+/// The system trust bundle that OpenSSL, curl and Python read.
+const TRUST_BUNDLE: &str = "etc/ssl/certs/ca-certificates.crt";
+/// Where `update-ca-certificates` expects local anchors.
+const TRUST_ANCHOR: &str = "usr/local/share/ca-certificates/crateward-fake-internet.crt";
+
+/// Creates the authority if needed and stages the trust bundle with its
+/// certificate appended. Returns the staging root.
+fn stage_trust(root: &Path, base: &Path, work: &Path) -> Result<PathBuf, TaskError> {
+    use std::io::{Read, Write};
+    use std::os::unix::fs::OpenOptionsExt;
+    let ca_dir = root.join("target").join("guest").join("ca");
+    std::fs::create_dir_all(&ca_dir).map_err(io(&ca_dir))?;
+    let authority = ca_dir.join("authority.pem");
+    if !authority.exists() {
+        let (cert, key) = crateward_fake_internet::tls::generate_ca()
+            .map_err(|e| TaskError::Check(format!("generating the TLS authority: {e}")))?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&authority)
+            .and_then(|mut f| f.write_all(format!("{cert}{key}").as_bytes()))
+            .map_err(io(&authority))?;
+        eprintln!("xtask: created the TLS authority {}", authority.display());
+    }
+    let pem = std::fs::read_to_string(&authority).map_err(io(&authority))?;
+    let (cert, _) = crateward_fake_internet::tls::split_pem(&pem).ok_or_else(|| {
+        TaskError::Check(format!(
+            "{} is not a certificate and a key",
+            authority.display()
+        ))
+    })?;
+
+    let file = std::fs::File::open(base).map_err(io(base))?;
+    let mut bundle = None;
+    let mut archive = tar::Archive::new(file);
+    for entry in archive.entries().map_err(io(base))? {
+        let mut entry = entry.map_err(io(base))?;
+        let path = entry
+            .path()
+            .map_err(io(base))?
+            .to_string_lossy()
+            .into_owned();
+        if path.trim_start_matches("./") == TRUST_BUNDLE {
+            let mut text = String::new();
+            entry.read_to_string(&mut text).map_err(io(base))?;
+            bundle = Some(text);
+            break;
+        }
+    }
+    let mut bundle = bundle.ok_or_else(|| {
+        TaskError::Check(format!(
+            "the base has no {TRUST_BUNDLE}; is ca-certificates installed?"
+        ))
+    })?;
+    if !bundle.ends_with('\n') {
+        bundle.push('\n');
+    }
+    bundle.push_str(&cert);
+
+    let staging = work.join("trust");
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).map_err(io(&staging))?;
+    }
+    for (name, text) in [
+        (TRUST_BUNDLE, bundle.as_str()),
+        (TRUST_ANCHOR, cert.as_str()),
+    ] {
+        let path = staging.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(io(parent))?;
+        }
+        std::fs::write(&path, text).map_err(io(&path))?;
+    }
     Ok(staging)
 }

@@ -87,6 +87,13 @@ pub enum EventKind {
         bytes: u64,
         /// The first [`MAX_CAPTURE`] bytes, hex encoded.
         data: String,
+        /// Inside TLS: what the plain text looked like.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inner: Option<Box<Sniffed>>,
+        /// Inside TLS: the first [`MAX_CAPTURE`] plain text bytes, hex
+        /// encoded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decrypted: Option<String>,
     },
     /// A UDP datagram other than DNS.
     Udp {
@@ -205,21 +212,37 @@ fn serve_udp(socket: &UdpSocket, log: &Shared) {
     }
 }
 
-/// Reads what the guest sends on one connection, answers HTTP requests
-/// with 404, and logs it.
-fn handle(mut stream: TcpStream, log: &Shared) {
-    let dst = rustix::net::sockopt::ip_original_dst(&stream)
-        .map_or_else(|_| "unknown".to_owned(), |a| a.to_string());
-    let deadline = Instant::now() + CONNECTION_DEADLINE;
+/// Whether a request read so far is complete: an HTTP request with its
+/// body, the capture limit, or (for raw bytes) a TLS ClientHello.
+fn complete(data: &[u8], plaintext: bool) -> bool {
+    if data.len() >= MAX_CAPTURE {
+        return true;
+    }
+    if let Some(end) = http_header_end(data) {
+        let body = content_length(data.get(..end).unwrap_or_default()).unwrap_or(0);
+        return data.len() >= end.saturating_add(body);
+    }
+    !plaintext && matches!(sniff(data), Sniffed::Tls { .. })
+}
+
+/// Reads until [`complete`], end of stream, an error or `deadline`. Returns
+/// the kept bytes and the total count. `timeout` sets the underlying
+/// socket's read timeout before every read.
+fn read_request(
+    reader: &mut impl Read,
+    mut timeout: impl FnMut(Duration) -> bool,
+    deadline: Instant,
+    plaintext: bool,
+) -> (Vec<u8>, u64) {
     let mut data = Vec::new();
     let mut total = 0_u64;
     let mut buffer = [0_u8; 16 * 1024];
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() || stream.set_read_timeout(Some(left)).is_err() {
+        if left.is_zero() || !timeout(left) {
             break;
         }
-        let Ok(read) = stream.read(&mut buffer) else {
+        let Ok(read) = reader.read(&mut buffer) else {
             break;
         };
         if read == 0 {
@@ -228,19 +251,107 @@ fn handle(mut stream: TcpStream, log: &Shared) {
         total += read as u64;
         let room = MAX_CAPTURE.saturating_sub(data.len());
         data.extend_from_slice(buffer.get(..read.min(room)).unwrap_or_default());
-        if let Some(end) = http_header_end(&data) {
-            let body = content_length(data.get(..end).unwrap_or_default()).unwrap_or(0);
-            if data.len() >= end.saturating_add(body) || data.len() >= MAX_CAPTURE {
-                break;
-            }
-        } else if data.len() >= MAX_CAPTURE || matches!(sniff(&data), Sniffed::Tls { .. }) {
+        if complete(&data, plaintext) {
             break;
         }
     }
+    (data, total)
+}
+
+/// A socket whose first bytes were already read: they are replayed before
+/// the socket is read again, so TLS can start from the ClientHello.
+struct Replay<'a> {
+    prefix: &'a [u8],
+    stream: &'a mut TcpStream,
+}
+
+impl Read for Replay<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.prefix.is_empty() {
+            return self.stream.read(buf);
+        }
+        let n = self.prefix.len().min(buf.len());
+        let (head, rest) = self.prefix.split_at(n);
+        if let Some(target) = buf.get_mut(..n) {
+            target.copy_from_slice(head);
+        }
+        self.prefix = rest;
+        Ok(n)
+    }
+}
+
+impl Write for Replay<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.stream.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+/// Completes the TLS handshake with a certificate for the requested name
+/// and reads the request in plain text. Returns what was read, or `None`
+/// if the handshake failed (for example because the client does not trust
+/// the authority).
+fn terminate(
+    config: &Arc<rustls::ServerConfig>,
+    hello: &[u8],
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> Option<Vec<u8>> {
+    let mut conn = rustls::ServerConnection::new(Arc::clone(config)).ok()?;
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+    let mut io = Replay {
+        prefix: hello,
+        stream,
+    };
+    let (plain, _) = {
+        let mut tls = rustls::Stream::new(&mut conn, &mut io);
+        read_request(&mut tls, |_| true, deadline, true)
+    };
+    if conn.is_handshaking() {
+        return None;
+    }
+    if matches!(sniff(&plain), Sniffed::Http { .. }) {
+        let mut tls = rustls::Stream::new(&mut conn, &mut io);
+        let _ = tls.write_all(HTTP_RESPONSE);
+        tls.conn.send_close_notify();
+        let _ = tls.flush();
+    }
+    Some(plain)
+}
+
+/// Reads what the guest sends on one connection, answers HTTP requests
+/// with 404 (inside TLS too, when an authority is loaded), and logs it.
+fn handle(mut stream: TcpStream, log: &Shared, tls: Option<&Arc<rustls::ServerConfig>>) {
+    let dst = rustix::net::sockopt::ip_original_dst(&stream)
+        .map_or_else(|_| "unknown".to_owned(), |a| a.to_string());
+    let deadline = Instant::now() + CONNECTION_DEADLINE;
+    let timeouts = stream.try_clone();
+    let (data, total) = read_request(
+        &mut stream,
+        |left| {
+            timeouts
+                .as_ref()
+                .is_ok_and(|s| s.set_read_timeout(Some(left)).is_ok())
+        },
+        deadline,
+        false,
+    );
     let sniffed = sniff(&data);
-    if matches!(sniffed, Sniffed::Http { .. }) {
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-        let _ = stream.write_all(HTTP_RESPONSE);
+    let mut decrypted = None;
+    match (&sniffed, tls) {
+        (Sniffed::Http { .. }, _) => {
+            let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+            let _ = stream.write_all(HTTP_RESPONSE);
+        }
+        (Sniffed::Tls { .. }, Some(config)) => {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if !left.is_zero() && stream.set_read_timeout(Some(left)).is_ok() {
+                decrypted = terminate(config, &data, &mut stream, deadline);
+            }
+        }
+        _ => {}
     }
     emit(
         log,
@@ -249,11 +360,13 @@ fn handle(mut stream: TcpStream, log: &Shared) {
             sniffed,
             bytes: total,
             data: hex(&data),
+            inner: decrypted.as_deref().map(|d| Box::new(sniff(d))),
+            decrypted: decrypted.as_deref().map(hex),
         },
     );
 }
 
-fn serve_tcp(listener: &TcpListener, log: &Shared) {
+fn serve_tcp(listener: &TcpListener, log: &Shared, tls: Option<&Arc<rustls::ServerConfig>>) {
     let active = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         let Ok(stream) = stream else {
@@ -268,10 +381,11 @@ fn serve_tcp(listener: &TcpListener, log: &Shared) {
         }
         let log = Arc::clone(log);
         let active = Arc::clone(&active);
+        let tls = tls.cloned();
         let spawned = std::thread::Builder::new()
             .stack_size(256 * 1024)
             .spawn(move || {
-                handle(stream, &log);
+                handle(stream, &log, tls.as_ref());
                 active.fetch_sub(1, Ordering::SeqCst);
             });
         if spawned.is_err() {
@@ -282,12 +396,16 @@ fn serve_tcp(listener: &TcpListener, log: &Shared) {
 }
 
 /// Binds the sinks and serves until the process is killed. Events go to
-/// `out`, one JSON line each.
+/// `out`, one JSON line each. With `tls`, TLS connections are terminated.
 ///
 /// # Errors
 ///
 /// Fails if a socket cannot be bound.
-pub fn serve(config: SlotConfig, out: Box<dyn Write + Send>) -> std::io::Result<()> {
+pub fn serve(
+    config: SlotConfig,
+    out: Box<dyn Write + Send>,
+    tls: Option<Arc<rustls::ServerConfig>>,
+) -> std::io::Result<()> {
     let at = |port| SocketAddr::from((config.address, port));
     let dns_socket = UdpSocket::bind(at(config.dns_port))?;
     let udp_socket = UdpSocket::bind(at(config.udp_port))?;
@@ -302,7 +420,7 @@ pub fn serve(config: SlotConfig, out: Box<dyn Write + Send>) -> std::io::Result<
     std::thread::spawn(move || serve_dns(&dns_socket, address, &dns_log));
     let udp_log = Arc::clone(&log);
     std::thread::spawn(move || serve_udp(&udp_socket, &udp_log));
-    serve_tcp(&listener, &log);
+    serve_tcp(&listener, &log, tls.as_ref());
     Ok(())
 }
 
@@ -350,7 +468,7 @@ mod tests {
             events: 0,
         }));
         let server_log = Arc::clone(&log);
-        std::thread::spawn(move || serve_tcp(&listener, &server_log));
+        std::thread::spawn(move || serve_tcp(&listener, &server_log, None));
         let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
         let request = b"POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: 5\r\n\r\ntoken";
         client.write_all(request).unwrap();

@@ -126,6 +126,9 @@ pub struct Connection {
     pub sniffed: Sniffed,
     /// Bytes it sent.
     pub bytes: u64,
+    /// Inside TLS, when the fake internet could terminate it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner: Option<Box<Sniffed>>,
 }
 
 /// A honeytoken found outside the VM.
@@ -188,6 +191,8 @@ fn analyze_network(
                 sniffed,
                 bytes,
                 data,
+                inner,
+                decrypted,
             } => {
                 // Every name resolves to the sink, so the name the guest
                 // asked for says more than the address.
@@ -199,11 +204,15 @@ fn analyze_network(
                     _ => dst.clone(),
                 };
                 leak(&unhex(&data).unwrap_or_default(), &via);
+                if let Some(plain) = decrypted.as_deref().and_then(unhex) {
+                    leak(&plain, &via.replacen("tls://", "https://", 1));
+                }
                 if summary.connections.len() < MAX_LISTED {
                     summary.connections.push(Connection {
                         dst,
                         sniffed,
                         bytes,
+                        inner,
                     });
                 }
             }

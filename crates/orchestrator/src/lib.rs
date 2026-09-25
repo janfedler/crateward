@@ -97,6 +97,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             // Firecracker writes the base snapshot's memory file.
             max_file_size: (sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB) << 20,
             fake_internet: Some(sandbox.fake_internet_bin.clone()),
+            authority: Some(sandbox.fake_internet_authority.clone()),
         };
         // A jail has no dynamic loader, so everything executed in one must
         // be static.

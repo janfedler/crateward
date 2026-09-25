@@ -83,6 +83,9 @@ pub struct Drive {
     pub is_root_device: bool,
     /// Whether the guest may only read it.
     pub is_read_only: bool,
+    /// I/O limits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limiter: Option<RateLimiter>,
 }
 
 /// `PATCH /drives/{drive_id}`: points a drive at another backing file and
@@ -104,6 +107,10 @@ pub struct NetworkInterface {
     pub host_dev_name: String,
     /// MAC address the guest sees.
     pub guest_mac: String,
+    /// Limits on what the guest receives.
+    pub rx_rate_limiter: RateLimiter,
+    /// Limits on what the guest sends.
+    pub tx_rate_limiter: RateLimiter,
 }
 
 /// `PUT /vsock`
@@ -122,6 +129,15 @@ pub struct TokenBucket {
     pub size: u64,
     /// Milliseconds to refill the whole bucket.
     pub refill_time: u64,
+}
+
+/// Independent byte and operation limits of a device.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RateLimiter {
+    /// Bytes per refill time.
+    pub bandwidth: TokenBucket,
+    /// Operations (requests or packets) per refill time.
+    pub ops: TokenBucket,
 }
 
 /// `PUT /serial`

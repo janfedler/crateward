@@ -10,7 +10,9 @@ homepage.workspace = true
 
 [dependencies]
 crateward_core = { workspace = true, features = ["app", "sandbox"] }
+rcgen.workspace = true
 rustix = { workspace = true, features = ["net"] }
+rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

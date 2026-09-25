@@ -30,10 +30,12 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `quick-xml` | core (`cratesio`) | Streaming XML parser for the RSS feeds. |
 | `reqwest` | core (`http`) | HTTP client with rustls and the platform certificate verifier. |
 | `landlock` | core (`sandbox`) | Official Rust bindings for Landlock, from its maintainers. |
-| `tar`, `flate2` | fetcher, static analysis | Reading crate archives; `flate2` uses the pure Rust `miniz_oxide` backend. |
+| `tar`, `flate2` | fetcher, static analysis, orchestrator, xtask | Reading crate archives; `flate2` uses the pure Rust `miniz_oxide` backend. |
 | `zstd` | core (`blobs`) | Compression of stored blobs; binds the reference zstd library. |
 | `syn`, `proc-macro2` | static analysis | The parser the Rust ecosystem uses for Rust source; parses without evaluating `cfg`, and `span-locations` gives line numbers for evidence. |
 | `yara-x` | static analysis | VirusTotal's Rust rewrite of YARA for byte patterns in any file; default features off, only the rule compiler options it needs. |
+| `rustls` | fake internet | Terminates the guest's TLS connections; pure Rust, with the `ring` provider so the static musl build needs no C library. |
+| `rcgen` | fake internet, xtask | Issues the fake internet's certificates per server name and creates its authority; from the rustls project. |
 | `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
 
 ## Tools

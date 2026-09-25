@@ -21,8 +21,8 @@ use tokio::time::Instant;
 use super::agent::{AgentConnection, AgentError};
 use super::api::{
     Api, ApiError, BootSource, Drive, DriveUpdate, InstanceAction, MachineConfig, MemoryBackend,
-    NetworkInterface, Serial, SnapshotCreate, SnapshotLoad, TokenBucket, VmState, Vsock,
-    VsockOverride,
+    NetworkInterface, RateLimiter, Serial, SnapshotCreate, SnapshotLoad, TokenBucket, VmState,
+    Vsock, VsockOverride,
 };
 use crate::jail::host::{IdMap, JailError};
 use crate::jail::{BindMount, JailSpec, Sinks};
@@ -57,6 +57,33 @@ pub const HOST_ADDRESS: &str = "10.0.2.1";
 /// Prefix length of the link between guest and host.
 pub const PREFIX_LEN: u8 = 30;
 const GUEST_MAC: &str = "06:00:0a:00:02:02";
+
+/// Limits of the job drives. Both live in host memory; the limits keep one
+/// guest from monopolizing memory bandwidth and the host's I/O threads.
+/// Compiling reads and writes far less than this.
+const DRIVE_LIMIT: RateLimiter = RateLimiter {
+    bandwidth: TokenBucket {
+        size: 256 << 20,
+        refill_time: 1_000,
+    },
+    ops: TokenBucket {
+        size: 50_000,
+        refill_time: 1_000,
+    },
+};
+
+/// Limits of the network interface. Everything the guest sends goes to the
+/// fake internet, which only needs to see that something was sent.
+const NETWORK_LIMIT: RateLimiter = RateLimiter {
+    bandwidth: TokenBucket {
+        size: 4 << 20,
+        refill_time: 1_000,
+    },
+    ops: TokenBucket {
+        size: 2_000,
+        refill_time: 1_000,
+    },
+};
 const API: &str = "api.sock";
 
 /// Why a VM operation failed.
@@ -401,6 +428,7 @@ impl Vm {
                     path_on_host: launch.fc_path(&spec.rootfs, ROOTFS),
                     is_root_device: true,
                     is_read_only: true,
+                    rate_limiter: None,
                 },
             )
             .await?;
@@ -417,6 +445,7 @@ impl Vm {
                             path_on_host: launch.fc_path(host, name),
                             is_root_device: false,
                             is_read_only: read_only,
+                            rate_limiter: Some(DRIVE_LIMIT),
                         },
                     )
                     .await?;
@@ -430,6 +459,8 @@ impl Vm {
                         iface_id: "eth0".into(),
                         host_dev_name: TAP.into(),
                         guest_mac: GUEST_MAC.into(),
+                        rx_rate_limiter: NETWORK_LIMIT,
+                        tx_rate_limiter: NETWORK_LIMIT,
                     },
                 )
                 .await?;

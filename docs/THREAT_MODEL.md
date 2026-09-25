@@ -93,7 +93,7 @@ test. Nothing is marked Built before the code exists.
 | Fake internet runs as the slot's user with Landlock (no filesystem) and rlimits; its DNS, HTTP and TLS parsers are property tested | Tested | M4 |
 | The fake internet's parsers as fuzz targets | Planned | M7 |
 | The fake internet's log (every DNS query, connection and datagram with its first 64 KiB) is owned by the orchestrator and read after the run as ground truth; the job's honeytokens are searched in it | Tested (canary) | M4 |
-| TLS terminated with a CA baked into the guest image, so HTTPS content is visible | Planned | M4 |
+| TLS terminated with Crateward's own authority, which the guest image trusts, so HTTPS content is visible; the private key reaches the fake internet only through a pipe | Tested (canary) | M4 |
 
 ### Hostile content on the host (T2; B5)
 

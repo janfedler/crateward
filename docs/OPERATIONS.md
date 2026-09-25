@@ -85,6 +85,9 @@ specification for the Ansible role.
   flushes, SMT disabled", `kvm_intel.vmentry_l1d_flush=always`.
 * Swap disabled and removed from `/etc/fstab`; KSM off.
 * Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap`.
+  Still to install: `musl-tools`, the proper C compiler for the fake
+  internet's static build (ring compiles a little C); until then the build
+  falls back to the host `gcc`.
 * Development user `claude`: groups `kvm` and `systemd-journal`, lingering
   enabled, subordinate IDs `100000:65536`, and
   `/etc/systemd/system/user@1000.service.d/delegate.conf` with

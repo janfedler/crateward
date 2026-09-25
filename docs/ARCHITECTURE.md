@@ -255,7 +255,9 @@ intended TCP destination with `SO_ORIGINAL_DST` and logs each attempt with
 its first 64 KiB. That log is read after the run as ground truth and
 searched for the job's honeytokens
 ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)).
-IPv6 logging and TLS termination are still open.
+TLS is terminated with Crateward's own authority, which the guest image
+trusts, so the content of HTTPS requests is logged too. IPv6 logging is
+still open.
 
 ## Build cache
 

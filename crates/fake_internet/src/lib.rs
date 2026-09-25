@@ -16,8 +16,11 @@
 //!   its own kernel still cannot reach anything without appearing here.
 //! * DNS answers every `A` question with the sink's address, so name based
 //!   downloaders connect and reveal what they want. HTTP requests get a 404.
-//! * TLS is not terminated yet; the server name is logged. Terminating it
-//!   with a certificate authority baked into the guest image is planned.
+//! * TLS is terminated with Crateward's own certificate authority, which the
+//!   guest image trusts; its private key reaches this process only through
+//!   stdin from the launcher and never exists inside a VM. Clients that
+//!   bring their own root list refuse the handshake; the server name is
+//!   logged either way.
 //! * Parsers of guest traffic are property tested and fuzz targets, because
 //!   the guest controls every byte they see.
 
@@ -26,6 +29,7 @@
 pub mod dns;
 pub mod server;
 pub mod sniff;
+pub mod tls;
 
 use crateward_core::app::ComponentError;
 use crateward_core::component::Component;
@@ -62,6 +66,28 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
         eprintln!("crateward fake internet: {message}");
         std::process::ExitCode::FAILURE
     };
+    // The launcher writes the authority's certificate and key to stdin
+    // and closes it; an empty stdin means no TLS termination.
+    let mut pem = String::new();
+    if let Err(error) = std::io::Read::read_to_string(
+        &mut std::io::Read::take(std::io::stdin().lock(), 64 * 1024),
+        &mut pem,
+    ) {
+        return Some(fail(&format!("reading the authority: {error}")));
+    }
+    let tls = if pem.trim().is_empty() {
+        None
+    } else {
+        let authority = tls::split_pem(&pem)
+            .ok_or_else(|| "the authority is not a certificate and a key".to_owned())
+            .and_then(|(cert, key)| tls::Authority::from_pem(&cert, &key))
+            .and_then(|a| tls::server_config(std::sync::Arc::new(a)).map_err(|e| e.to_string()));
+        match authority {
+            Ok(config) => Some(config),
+            Err(error) => return Some(fail(&error)),
+        }
+    };
+    drop(pem);
     let entered = sandbox::limit(Limits {
         address_space: 1 << 30,
         cpu_seconds: 3_600,
@@ -73,7 +99,7 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
         return Some(fail(&error.to_string()));
     }
     let out = Box::new(std::io::stdout());
-    match server::serve(server::SlotConfig::default(), out) {
+    match server::serve(server::SlotConfig::default(), out, tls) {
         Ok(()) => Some(std::process::ExitCode::SUCCESS),
         Err(error) => Some(fail(&error.to_string())),
     }

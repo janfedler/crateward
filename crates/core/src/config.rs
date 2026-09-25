@@ -276,6 +276,10 @@ pub struct SandboxConfig {
     pub vmjail_bin: PathBuf,
     /// The `crateward_fake_internet` binary, started in every slot.
     pub fake_internet_bin: PathBuf,
+    /// The fake internet's TLS authority: certificate and private key in
+    /// one PEM file, readable only by the orchestrator. The guest image
+    /// trusts the certificate.
+    pub fake_internet_authority: PathBuf,
     /// The guest kernel (bzImage).
     pub kernel_image: PathBuf,
     /// The guest root filesystem (EROFS).
@@ -653,6 +657,10 @@ impl Config {
         v.absolute(&s.firecracker_bin, "sandbox.firecracker_bin");
         v.absolute(&s.vmjail_bin, "sandbox.vmjail_bin");
         v.absolute(&s.fake_internet_bin, "sandbox.fake_internet_bin");
+        v.absolute(
+            &s.fake_internet_authority,
+            "sandbox.fake_internet_authority",
+        );
         v.absolute(&s.kernel_image, "sandbox.kernel_image");
         v.absolute(&s.rootfs_image, "sandbox.rootfs_image");
         v.absolute(&s.slots_dir, "sandbox.slots_dir");

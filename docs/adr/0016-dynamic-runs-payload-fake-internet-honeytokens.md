@@ -60,10 +60,14 @@ Facts verified on the server on 2026-09-25:
    `10.0.2.1/30`, loads nftables rules that redirect all DNS, TCP and UDP
    from the tap to three local ports, and starts `crateward_fake_internet`
    as the slot's user with Landlock (no filesystem) and resource limits.
-   DNS answers every `A` question with the sink, HTTP gets a 404, TLS is
-   logged by its server name, and the first 64 KiB of every connection and
-   datagram go to a JSON lines log that the orchestrator owns. The guest's
-   resolver is pinned to `10.0.2.1` in the image.
+   DNS answers every `A` question with the sink and HTTP gets a 404. TLS
+   is terminated with Crateward's own authority, which the guest image
+   trusts: a leaf certificate is issued per server name, and the plain
+   text is logged too. The authority's private key reaches the fake
+   internet only through a pipe from the launcher. The first 64 KiB of
+   every connection and datagram go to a JSON lines log that the
+   orchestrator owns. The guest's resolver is pinned to `10.0.2.1` in the
+   image.
 6. **Host side ground truth.** After the run, the orchestrator reads that
    log, summarizes names and connections, and searches every captured byte
    and every DNS name for the job's honeytokens. Because the tap is the
@@ -77,12 +81,19 @@ Facts verified on the server on 2026-09-25:
 ## Consequences
 
 * A canary test (`cargo xtask canary`) runs a fixture crate whose build
-  script steals the cargo token and posts it to a made up host. It must be
-  caught end to end. Its source lives only in the test file and runs only
-  inside the microVM.
-* HTTPS content is invisible until TLS is terminated with a certificate
-  authority baked into the guest image; a token sent over HTTPS is seen
-  only as a connection with a server name. Planned next.
+  script posts the cargo token over HTTP and has `curl` post the AWS
+  credentials over HTTPS. Both must be caught end to end. Its source lives
+  only in the test file and runs only inside the microVM.
+* Clients that carry their own root list (for example `webpki-roots`) or
+  pin certificates refuse the fake internet's certificates. Their
+  connections are still logged with the server name, but not their
+  content.
+* The authority is created once per installation by `cargo xtask rootfs`
+  and baked into the image, so each installation's image differs by one
+  certificate.
+* The fake internet uses rustls with the `ring` provider, which compiles a
+  little C for the musl target; the build uses `musl-gcc` when
+  `musl-tools` is installed and the host `gcc` otherwise.
 * The fake internet runs as the slot's user, like Firecracker. A guest
   that compromises it gains nothing it could not reach by escaping
   Firecracker, and the network namespace has no uplink either way.

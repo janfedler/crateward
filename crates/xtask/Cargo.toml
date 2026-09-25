@@ -12,8 +12,10 @@ homepage.workspace = true
 blake3.workspace = true
 clap.workspace = true
 crateward_core.workspace = true
+crateward_fake_internet.workspace = true
 serde.workspace = true
 sha2.workspace = true
+tar.workspace = true
 toml.workspace = true
 
 [lints]

@@ -165,6 +165,7 @@ async fn sequential_jobs_leave_nothing_behind() {
         },
         max_file_size: 1 << 30,
         fake_internet: None,
+        authority: None,
     };
     let cgroups = CgroupTree::own().expect("run through `cargo xtask soak` for a delegated cgroup");
 

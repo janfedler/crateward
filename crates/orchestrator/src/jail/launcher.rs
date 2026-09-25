@@ -158,6 +158,20 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
         .open(&spec.log)
         .map_err(step("opening the log"))?;
     let null = File::open("/dev/null").map_err(step("opening /dev/null"))?;
+    let authority = spec
+        .sinks
+        .as_ref()
+        .and_then(|sinks| sinks.authority.as_ref())
+        .map(|path| {
+            let mut pem = Vec::new();
+            File::open(path)
+                .and_then(|f| {
+                    std::io::Read::read_to_end(&mut std::io::Read::take(f, 64 * 1024), &mut pem)
+                })
+                .map(|_| pem)
+                .map_err(step("reading the TLS authority"))
+        })
+        .transpose()?;
     let events = spec
         .sinks
         .as_ref()
@@ -252,21 +266,33 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
     limit(Resource::Nofile, spec.max_open_files)?;
     limit(Resource::Fsize, spec.max_file_size)?;
     if let Some(events) = events {
-        start_sinks(events, &log, &null)?;
+        start_sinks(events, &log, &null, authority)?;
     }
     Ok((log, null))
 }
 
 /// Starts the fake internet as the slot's user in the jail. It ends with
 /// the slot: the orchestrator kills the slot's cgroup after every run.
-fn start_sinks(events: File, log: &File, null: &File) -> Result<(), LaunchError> {
+fn start_sinks(
+    events: File,
+    log: &File,
+    null: &File,
+    authority: Option<Vec<u8>>,
+) -> Result<(), LaunchError> {
     // Also covers the launcher itself from here on; nothing it still
     // executes needs new privileges.
     rustix::thread::set_no_new_privs(true).map_err(step("setting no_new_privs"))?;
     let errors = log.try_clone().map_err(step("duplicating the log"))?;
-    // The jail has no /dev/null to open; reuse the one opened before.
-    let stdin = null.try_clone().map_err(step("duplicating /dev/null"))?;
-    Command::new(FAKE_INTERNET_IN_JAIL)
+    // The jail has no /dev/null to open; reuse the one opened before. With
+    // an authority, stdin is a pipe that carries it and is then closed.
+    let stdin = match authority {
+        Some(_) => std::process::Stdio::piped(),
+        None => null
+            .try_clone()
+            .map_err(step("duplicating /dev/null"))?
+            .into(),
+    };
+    let mut child = Command::new(FAKE_INTERNET_IN_JAIL)
         .arg("slot")
         .env_clear()
         .uid(INSIDE_VM_ID)
@@ -275,8 +301,12 @@ fn start_sinks(events: File, log: &File, null: &File) -> Result<(), LaunchError>
         .stdout(events)
         .stderr(errors)
         .spawn()
-        .map(drop)
-        .map_err(step("starting the fake internet"))
+        .map_err(step("starting the fake internet"))?;
+    if let (Some(pem), Some(mut pipe)) = (authority, child.stdin.take()) {
+        pipe.write_all(&pem)
+            .map_err(step("passing the TLS authority"))?;
+    }
+    Ok(())
 }
 
 /// Switches to the slot's UID. Moving every UID from 0 to a non zero value

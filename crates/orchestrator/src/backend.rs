@@ -142,6 +142,8 @@ pub struct FirecrackerConfig {
     pub max_file_size: u64,
     /// The `crateward_fake_internet` binary, started in every job's jail.
     pub fake_internet: Option<PathBuf>,
+    /// The fake internet's TLS authority (certificate and key, PEM).
+    pub authority: Option<PathBuf>,
 }
 
 /// Runs jobs in jailed Firecracker VMs restored from one snapshot.
@@ -210,7 +212,11 @@ impl FirecrackerBackend {
             .fake_internet
             .clone()
             .zip(network_log)
-            .map(|(binary, events)| Sinks { binary, events });
+            .map(|(binary, events)| Sinks {
+                binary,
+                events,
+                authority: config.authority.clone(),
+            });
         Launch {
             firecracker: config.firecracker.clone(),
             dir: config.slots_dir.join(format!("{SLOT_PREFIX}{slot}")),

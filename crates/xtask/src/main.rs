@@ -260,6 +260,16 @@ fn soak(jobs: u32) -> Result<(), TaskError> {
     )
 }
 
+/// The C compiler for musl targets: `musl-gcc` when installed, otherwise
+/// the host `gcc`.
+fn musl_cc() -> &'static str {
+    if Path::new("/usr/bin/musl-gcc").exists() {
+        "musl-gcc"
+    } else {
+        "gcc"
+    }
+}
+
 /// Runs the canary test: a fixture crate that steals a honeytoken inside a
 /// microVM must be caught. Builds the static fake internet first. Needs the
 /// same environment as the soak test.
@@ -275,7 +285,10 @@ fn canary() -> Result<(), TaskError> {
             "--package",
             "crateward_fake_internet",
         ],
-        &[],
+        // ring compiles a little C and assembly. Without `musl-tools` there
+        // is no musl C compiler; the host gcc works for ring's freestanding
+        // code. Installing `musl-tools` is the proper fix.
+        &[("CC_x86_64_unknown_linux_musl", musl_cc())],
     )?;
     run(
         "systemd-run",
