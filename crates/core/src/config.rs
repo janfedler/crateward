@@ -429,8 +429,8 @@ pub struct HeartbeatConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebConfig {
-    /// Listen address. Must be a specific address, normally the WireGuard
-    /// interface, never all interfaces.
+    /// Listen address. Must be a loopback address: the dashboard is reached
+    /// through WireGuard and an SSH tunnel (ADR 0022).
     pub listen: SocketAddr,
 }
 
@@ -868,9 +868,9 @@ impl Config {
             "must be between 10 and 600",
         );
         v.check(
-            !self.web.listen.ip().is_unspecified(),
+            self.web.listen.ip().is_loopback(),
             "web.listen",
-            "must be a specific address (the WireGuard interface), not all interfaces",
+            "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0022)",
         );
     }
 }
@@ -928,9 +928,14 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_on_all_interfaces_is_rejected() {
-        let issues = issues_for("listen = \"10.77.0.1:8080\"", "listen = \"0.0.0.0:8080\"");
-        assert_eq!(issues[0].key, "web.listen");
+    fn dashboard_off_loopback_is_rejected() {
+        for address in ["0.0.0.0:8080", "10.77.0.1:8080", "[::]:8080"] {
+            let issues = issues_for(
+                "listen = \"127.0.0.1:8080\"",
+                &format!("listen = \"{address}\""),
+            );
+            assert_eq!(issues[0].key, "web.listen", "{address}");
+        }
     }
 
     #[test]

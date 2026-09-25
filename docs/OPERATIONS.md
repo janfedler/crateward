@@ -97,6 +97,17 @@ specification for the Ansible role.
 For production the orchestrator gets its own user (see below) instead of
 the development account.
 
+## Opening the dashboard
+
+The dashboard listens on `127.0.0.1:8080` only (ADR 0022). With WireGuard
+up, open a tunnel and browse to `http://localhost:8080`:
+
+```sh
+ssh -N -L 8080:127.0.0.1:8080 <server>
+```
+
+`crateward status` shows the same pipeline state on the command line.
+
 ## Services and users
 
 Each component runs as its own system user under systemd with

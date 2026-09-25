@@ -1,7 +1,6 @@
 # 0022: The dashboard and the public export
 
-* Status: Accepted, except for authentication, which waits for a decision
-  (see Open question)
+* Status: Accepted
 * Date: 2026-09-25
 
 ## Context
@@ -20,12 +19,20 @@ Facts verified on 2026-09-25:
   tarballs matched the SHA-512 integrity the registry publishes.
 * WebAuthn works only in a secure context (HTTPS, or `localhost`), and a
   relying party ID must be a domain, not an IP address. A dashboard served
-  over plain HTTP at the WireGuard address therefore cannot use passkeys.
+  over plain HTTP at the WireGuard address therefore cannot use passkeys,
+  which the threat model had planned.
 * The server has no WireGuard interface yet and the site repository does
   not exist yet; both are M8 work.
 
 ## Decision
 
+0. **Access.** The dashboard listens on loopback only; configuration
+   rejects any other address. The maintainer reaches it through WireGuard
+   and an SSH tunnel (`ssh -L 8080:127.0.0.1:8080 <server>`), so the SSH
+   key authenticates them. Passkeys are not a requirement (maintainer
+   decision, 2026-09-25): with loopback and SSH they would add a second
+   login without a second boundary, and without them no domain or
+   certificate is needed.
 1. **Dashboard.** `crateward_api` serves an overview (pipeline state,
    breakers, canaries, queues, verdict levels; live through server sent
    events), the "needs you" inbox, a filterable job list and a job page
@@ -52,22 +59,13 @@ Facts verified on 2026-09-25:
    a deploy key for the site repository only, in one commit, only when
    something changed.
 
-## Open question
-
-Authentication beyond WireGuard (a passkey, per the threat model) needs one
-of:
-
-1. a domain for the dashboard (for example `admin.crateward.com` pointing
-   at the WireGuard address) with a certificate the maintainer's devices
-   trust, or
-2. the dashboard bound to `localhost` on the server and reached through an
-   SSH tunnel over WireGuard, which is a secure context without a domain
-   or certificate.
-
-Until the maintainer decides, the dashboard relies on WireGuard alone, and
-its listen address must not be reachable otherwise.
-
 ## Consequences
+
+* Every local process on the server can reach the loopback port. They are
+  all Crateward's own services or the maintainer's; crate code never runs
+  on the host, and the VMs' network namespaces have no route to it.
+* Through the tunnel the browser sends `Host: localhost:<port>`, so the
+  Host check accepts `localhost` and `127.0.0.1` with the configured port.
 
 * Crate supplied text is escaped everywhere; a test renders hostile names
   and evidence and checks nothing executes.

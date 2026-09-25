@@ -17,7 +17,7 @@ test. Nothing is marked Built before the code exists.
 | A3 | Confidentiality of undisclosed findings | Publishing early helps attackers and breaks coordinated disclosure. |
 | A4 | Isolation between jobs | One crate must not influence the verdict of another. |
 | A5 | Shared build cache and warm snapshot | Poisoning them would affect every later job. |
-| A6 | Admin access: WireGuard keys, passkeys, SSH keys | Full control of the system. |
+| A6 | Admin access: WireGuard keys, SSH keys | Full control of the system. |
 | A7 | Deploy key of the public site repository | Allows defacing crateward.com. |
 | A8 | ntfy topic and healthchecks.io ping URL | Allow reading or forging alerts and heartbeats. |
 | A9 | Availability of the pipeline | Crateward is only useful if it keeps up. |
@@ -48,7 +48,7 @@ test. Nothing is marked Built before the code exists.
 | B6 | Warmer output to job VMs | read only images, sealed with a signed BLAKE3 manifest |
 | B7 | Server to internet | allowlisted egress per service user; WireGuard inbound |
 | B8 | Server to public site | one way push of a sanitized static export |
-| B9 | Admin to control plane | WireGuard plus passkey |
+| B9 | Admin to control plane | WireGuard, then SSH; the dashboard listens on loopback only and is reached through an SSH tunnel |
 
 ## Mitigations
 
@@ -139,8 +139,7 @@ test. Nothing is marked Built before the code exists.
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
 | No inbound service except WireGuard on one UDP port | Planned | M1 |
-| Admin dashboard binds to the WireGuard address; configuration rejects all interfaces | Tested | M0 |
-| Passkey authentication for the admin view; needs a domain with a trusted certificate or a localhost binding behind an SSH tunnel ([ADR 0022](adr/0022-dashboard-and-public-export.md)) | Planned | M8 |
+| Admin dashboard binds to loopback only; configuration rejects any other address. Reaching it needs WireGuard and an SSH login, whose key authenticates the maintainer ([ADR 0022](adr/0022-dashboard-and-public-export.md)) | Tested | M6 |
 | Dashboard: Host check against DNS rebinding, same origin checks for writes, strict Content Security Policy, compile time escaping, read only page queries | Tested | M6 |
 | Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Tested | M5 |
 | ntfy topic of at least 32 random characters; configuration rejects shorter topics | Tested | M0 |

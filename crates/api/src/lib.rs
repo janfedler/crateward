@@ -1,6 +1,7 @@
 //! Dashboard (M6).
 //!
-//! Zone: control plane. The admin view is reachable only through WireGuard;
+//! Zone: control plane. The admin view listens on loopback and is reached
+//! through WireGuard and an SSH tunnel (ADR 0022);
 //! the public view is a static export (`crate::export`), never served here.
 //!
 //! Why it looks the way it does:
@@ -386,7 +387,7 @@ async fn asset(Path(file): Path<String>) -> Response {
 }
 
 /// The dashboard's routes, behind the protections of [`security`].
-pub fn router(state: Arc<AppState>, host: String) -> Router {
+pub fn router(state: Arc<AppState>, port: u16) -> Router {
     Router::new()
         .route("/", get(overview))
         .route("/events", get(events))
@@ -397,7 +398,7 @@ pub fn router(state: Arc<AppState>, host: String) -> Router {
         .route("/static/{file}", get(asset))
         .with_state(state)
         .layer(middleware::from_fn(move |request, next| {
-            security::guard(host.clone(), request, next)
+            security::guard(port, request, next)
         }))
 }
 
@@ -430,7 +431,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let listen = config.web.listen;
         let listener = tokio::net::TcpListener::bind(listen).await.map_err(fatal)?;
         tracing::info!(%listen, "dashboard listening");
-        axum::serve(listener, router(state, listen.to_string()))
+        axum::serve(listener, router(state, listen.port()))
             .with_graceful_shutdown(async {
                 match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
                     Ok(mut terminate) => {
