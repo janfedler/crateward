@@ -9,7 +9,12 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-crateward_core = { workspace = true, features = ["app"] }
+crateward_core = { workspace = true, features = ["app", "store"] }
+reqwest.workspace = true
+rustix = { workspace = true, features = ["fs"] }
+secrecy.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
 
 [lints]
 workspace = true

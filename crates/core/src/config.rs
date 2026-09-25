@@ -53,8 +53,8 @@ pub struct Config {
     pub storage: StorageConfig,
     /// The fetch stage.
     pub fetcher: FetcherConfig,
-    /// The build cache warmer.
-    pub warmer: WarmerConfig,
+    /// Breakers, deadlines and alert delivery.
+    pub supervisor: SupervisorConfig,
     /// Where alerts go.
     pub notifier: NotifierConfig,
     /// The external dead man's switch.
@@ -292,6 +292,8 @@ pub struct SandboxConfig {
     pub slot_uid_base: u32,
     /// First subordinate GID for slots, from `/etc/subgid`.
     pub slot_gid_base: u32,
+    /// Minutes between two canary runs (ADR 0020); 0 turns them off.
+    pub canary_interval_minutes: u64,
     /// The warm build cache (ADR 0008). Without this table, jobs build
     /// cold.
     #[serde(default)]
@@ -341,21 +343,47 @@ pub struct FetcherConfig {
     pub keep_originals: bool,
 }
 
-/// The build cache warmer.
+impl SupervisorConfig {
+    /// The breaker policy these settings describe.
+    #[must_use]
+    pub const fn breaker_policy(&self) -> crate::breaker::BreakerPolicy {
+        crate::breaker::BreakerPolicy {
+            window: std::time::Duration::from_secs(self.breaker_window_secs),
+            min_failures: self.breaker_min_failures,
+            failure_percent: self.breaker_failure_percent,
+            cooldown: std::time::Duration::from_secs(self.breaker_cooldown_secs),
+            max_cooldown: std::time::Duration::from_secs(self.breaker_max_cooldown_secs),
+        }
+    }
+}
+
+/// Breakers, deadlines and alert delivery (ADR 0020).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct WarmerConfig {
-    /// Number of most depended upon crates to prebuild.
-    pub warm_set_size: u32,
-    /// Only versions at least this old, and already scored low risk by
-    /// Crateward, enter the warm set.
-    pub min_version_age_days: u32,
+pub struct SupervisorConfig {
+    /// Seconds between two rounds of checks.
+    pub interval_secs: u64,
+    /// Sliding window over which a stage's breaker counts.
+    pub breaker_window_secs: u64,
+    /// Infrastructure failures in the window needed to open a breaker.
+    pub breaker_min_failures: u32,
+    /// Share of failures among failures and completions needed to open a
+    /// breaker, in percent.
+    pub breaker_failure_percent: u8,
+    /// First cooldown of an open breaker.
+    pub breaker_cooldown_secs: u64,
+    /// Longest cooldown, after repeated failed probes.
+    pub breaker_max_cooldown_secs: u64,
+    /// The same alert is sent again at most this often.
+    pub alert_repeat_hours: u64,
 }
 
 /// Where alerts go.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NotifierConfig {
+    /// Only log alerts, for development installations.
+    Log,
     /// Push notifications through an ntfy server.
     Ntfy {
         /// Server root, for example `https://ntfy.sh`.
@@ -736,17 +764,40 @@ impl Config {
             "must be at least 1",
         );
         v.absolute(&self.fetcher.cargo_bin, "fetcher.cargo_bin");
+        let sup = &self.supervisor;
         v.check(
-            self.warmer.warm_set_size >= 1,
-            "warmer.warm_set_size",
+            (5..=300).contains(&sup.interval_secs),
+            "supervisor.interval_secs",
+            "must be between 5 and 300",
+        );
+        v.check(
+            sup.breaker_min_failures >= 1,
+            "supervisor.breaker_min_failures",
             "must be at least 1",
         );
         v.check(
-            self.warmer.min_version_age_days >= 1,
-            "warmer.min_version_age_days",
+            (1..=100).contains(&sup.breaker_failure_percent),
+            "supervisor.breaker_failure_percent",
+            "must be between 1 and 100",
+        );
+        v.check(
+            sup.breaker_window_secs >= 60,
+            "supervisor.breaker_window_secs",
+            "must be at least 60",
+        );
+        v.check(
+            sup.breaker_cooldown_secs >= 30
+                && sup.breaker_cooldown_secs <= sup.breaker_max_cooldown_secs,
+            "supervisor.breaker_cooldown_secs",
+            "must be at least 30 and not above breaker_max_cooldown_secs",
+        );
+        v.check(
+            sup.alert_repeat_hours >= 1,
+            "supervisor.alert_repeat_hours",
             "must be at least 1",
         );
         match &self.notifier {
+            NotifierConfig::Log => {}
             NotifierConfig::Ntfy { server_url, topic } => {
                 v.https(server_url, "notifier.server_url");
                 let topic = topic.expose_secret();
@@ -842,7 +893,9 @@ mod tests {
     #[test]
     fn short_ntfy_topic_is_rejected() {
         let config = Config::from_toml(EXAMPLE).unwrap();
-        let NotifierConfig::Ntfy { topic, .. } = &config.notifier;
+        let NotifierConfig::Ntfy { topic, .. } = &config.notifier else {
+            panic!("the example uses ntfy");
+        };
         let issues = issues_for(topic.expose_secret(), "alerts");
         assert_eq!(issues[0].key, "notifier.topic");
     }

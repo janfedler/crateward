@@ -146,6 +146,9 @@ slots_dir = "/run/crateward/slots"
 # orchestrator user's /etc/subuid and /etc/subgid entries.
 slot_uid_base = 200000
 slot_gid_base = 200000
+# Minutes between canary runs: a known bad and a known good inert crate
+# must produce the expected results (ADR 0020). 0 turns them off.
+canary_interval_minutes = 60
 
 # The warm build cache (ADR 0008): the orchestrator replays the dependency
 # builds of recent jobs in a VM and mounts the result read only under every
@@ -175,11 +178,20 @@ cargo_bin = "/usr/local/lib/crateward/toolchain/bin/cargo"
 # Keep the original .crate file of every analyzed version as evidence.
 keep_originals = true
 
-[warmer]
-# The most depended upon crates to prebuild into the warm base.
-warm_set_size = 150
-# Only versions at least this old, already scored low risk, are prebuilt.
-min_version_age_days = 14
+[supervisor]
+# Seconds between two rounds of checks.
+interval_secs = 30
+# A stage's breaker opens when, within the window, at least min_failures
+# infrastructure failures happened and they make up failure_percent of the
+# stage's results. It lets jobs through again after the cooldown, which
+# doubles after each failed probe up to the maximum.
+breaker_window_secs = 900
+breaker_min_failures = 5
+breaker_failure_percent = 50
+breaker_cooldown_secs = 300
+breaker_max_cooldown_secs = 7200
+# The same alert is sent again at most this often.
+alert_repeat_hours = 24
 
 [notifier]
 kind = "ntfy"

@@ -71,7 +71,7 @@ test. Nothing is marked Built before the code exists.
 | Startup reconciliation removes slot cgroups and directories left by a crash; namespaces and tap devices cannot outlive their process | Tested | M1 |
 | eBPF programs loaded at boot trace every process of the job, its file opens, socket destinations and tamper attempts (`bpf`, `ptrace`, `mount`); a base snapshot is refused when tracing does not start ([ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) | Tested (canary) | M4 |
 | The trace is the guest's account and can be blinded by guest root; it is read next to host ground truth, and a trace without its closing totals is marked incomplete | Built | M4 |
-| Unexpected VM exits, Firecracker crashes and seccomp violations raise a sandbox escape indicator | Planned | M5 |
+| Firecracker exits after a forbidden system call or a fatal signal quarantine the pipeline and raise a sandbox escape indicator; a guest that stops itself is a result, never retried, so it cannot pause the sandbox stage ([ADR 0020](adr/0020-autonomy-breakers-quarantine-canaries-alerts.md)) | Tested | M5 |
 | Host honeytokens and integrity monitoring detect a successful escape | Planned | M7 |
 
 ### The single host channel (T1; B3)
@@ -124,7 +124,7 @@ test. Nothing is marked Built before the code exists.
 | Warm set limited to versions Crateward stored at least 14 days ago, locked by several recent jobs, with a static report without high findings; the crate under analysis is replaced by a stub and its units are never cached | Tested | M1.5 |
 | The warm build is analyzed like a job (trace, fake internet, honeytokens, scratch scan) and used only if all are clean; a promotion check runs one job with the image before any other job sees it | Tested | M1.5 |
 | Warm images named by their BLAKE3 digest; a signed manifest follows when images outlive the orchestrator process | Partly built | M1.5, M8 |
-| Promotion gated on canaries; automatic rollback | Planned | M5 |
+| Hourly canaries (known bad, known good); a wrong result pauses the producing stages until they pass again. Image promotion and rollback follow with the weekly refresh | Partly built | M5, M8 |
 
 ### Downloads (T5; B7)
 
@@ -141,7 +141,7 @@ test. Nothing is marked Built before the code exists.
 | No inbound service except WireGuard on one UDP port | Planned | M1 |
 | Admin dashboard binds to the WireGuard address; configuration rejects all interfaces | Tested | M0 |
 | Passkey authentication for the admin view | Planned | M6 |
-| Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Planned | M5 |
+| Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Tested | M5 |
 | ntfy topic of at least 32 random characters; configuration rejects shorter topics | Tested | M0 |
 | Secrets redacted from `Debug` output and logs | Tested | M0 |
 | Public site is a static export of aggregate statistics and disclosed findings only, pushed with a deploy key limited to one repository | Planned | M6 |

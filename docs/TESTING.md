@@ -76,6 +76,10 @@ reading the AWS file. The build script also copies the token into its
 `OUT_DIR` and drops an autostart file into the home directory; the host's
 scan of the scratch disk must find both.
 
+The same test also runs the known good canary, which must come out with
+nothing flagged. The orchestrator runs both canaries on a schedule
+(ADR 0020); their fixtures live in `crates/orchestrator/src/canary.rs`.
+
 The eBPF programs themselves only run in the guest kernel. On the host,
 tests cover the agent's record decoder (including every truncation of a
 record), its BTF reader (on built fixtures and on the host kernel's own

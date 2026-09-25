@@ -11,6 +11,9 @@
 //!
 //! Enabled with the `store` feature; the guest agent never links it.
 
+mod autonomy;
+pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
+
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
 
@@ -18,6 +21,7 @@ use serde_json::Value;
 use tokio_postgres::{Client, NoTls, Row};
 
 use crate::digest::Sha256Digest;
+use crate::escalation::HumanEscalation;
 use crate::job::{
     Effect, Job, JobEvent, JobId, JobState, Limits, Stage, Transition, TransitionError,
 };
@@ -31,6 +35,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (3, include_str!("../migrations/0003_crate_stats.sql")),
     (4, include_str!("../migrations/0004_static.sql")),
     (5, include_str!("../migrations/0005_dynamic.sql")),
+    (6, include_str!("../migrations/0006_autonomy.sql")),
 ];
 
 /// The server's message for database errors, which the error's own
@@ -365,12 +370,16 @@ impl Store {
                      WHERE id = (
                          SELECT id FROM jobs
                          WHERE state = ANY($1) AND lease_owner IS NULL AND not_before <= now()
+                           AND NOT EXISTS (SELECT 1 FROM pipeline_pauses p
+                                           WHERE $4 = ANY(p.stages))
+                           AND NOT EXISTS (SELECT 1 FROM stage_breakers b
+                                           WHERE b.stage = $4 AND b.state = 'open')
                          ORDER BY priority DESC, id
                          LIMIT 1
                          FOR UPDATE SKIP LOCKED)
                      RETURNING {COLUMNS}"
                 ),
-                &[&states, &worker, &lease_interval(lease)],
+                &[&states, &worker, &lease_interval(lease), &stage.name()],
             )
             .await?;
         row.as_ref().map(stored).transpose()
@@ -457,6 +466,28 @@ impl Store {
             ],
         )
         .await?;
+        // A suspected compromise pauses everything and alerts, in the same
+        // transaction as the event, so it cannot be recorded without them.
+        if let Effect::EnterQuarantine { stage } = transition.effect {
+            let stages: Vec<&str> = PauseReason::Quarantine
+                .stages()
+                .iter()
+                .map(|s| s.name())
+                .collect();
+            let detail = format!("stage {} reported a suspected compromise", stage.name());
+            tx.execute(
+                "INSERT INTO pipeline_pauses (reason, stages, job_id, detail)
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (reason) DO NOTHING",
+                &[&PauseReason::Quarantine.name(), &stages, &id.0, &detail],
+            )
+            .await?;
+            let alert = HumanEscalation::SandboxEscapeIndicator { job: Some(id) };
+            tx.execute(
+                "INSERT INTO alerts (dedup_key, escalation) VALUES ($1, $2)",
+                &[&alert.dedup_key(), &to_json(&alert)],
+            )
+            .await?;
+        }
         tx.commit().await?;
         Ok(transition)
     }

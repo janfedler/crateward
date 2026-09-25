@@ -22,6 +22,7 @@
 pub mod app;
 #[cfg(feature = "blobs")]
 pub mod blobs;
+pub mod breaker;
 pub mod component;
 pub mod config;
 #[cfg(feature = "cratesio")]

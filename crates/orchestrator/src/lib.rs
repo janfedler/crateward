@@ -27,6 +27,7 @@
 #![forbid(unsafe_code)]
 
 pub mod backend;
+pub mod canary;
 pub mod cgroup;
 pub mod firecracker;
 pub mod honeytokens;
@@ -240,9 +241,21 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 lease,
             );
             let stop = Arc::clone(&stop);
+            let canary_interval = Duration::from_secs(sandbox.canary_interval_minutes * 60);
             tasks.push(tokio::spawn(async move {
                 let mut last_reap = tokio::time::Instant::now();
+                // Canaries run first, right after the warm build, then on
+                // their schedule, all in slot 0 between jobs.
+                let mut last_canary: Option<tokio::time::Instant> = None;
                 while !stop.load(Ordering::SeqCst) {
+                    let due = last_canary.is_none_or(|at| at.elapsed() >= canary_interval);
+                    if slot == 0 && !canary_interval.is_zero() && due {
+                        if let Err(error) = worker.run_canaries().await {
+                            tracing::error!(slot, %error, "job store failed");
+                            return Err(error);
+                        }
+                        last_canary = Some(tokio::time::Instant::now());
+                    }
                     if slot == 0 && last_reap.elapsed() >= Duration::from_secs(60) {
                         let policies = worker.policies.clone();
                         match worker.store().reap_expired(&policies).await {

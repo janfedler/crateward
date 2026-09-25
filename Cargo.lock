@@ -717,6 +717,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "crateward_core",
+ "secrecy",
+ "tokio",
 ]
 
 [[package]]
@@ -864,6 +866,11 @@ name = "crateward_supervisor"
 version = "0.1.0"
 dependencies = [
  "crateward_core",
+ "reqwest",
+ "rustix",
+ "secrecy",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -10,12 +10,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
+use crateward_core::breaker::BreakerState;
 use crateward_core::digest::Sha256Digest;
+use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
 use crateward_core::job::{BuildOutcome, JobEvent, Stage};
 use crateward_core::name::CrateName;
 use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClock, Workspace};
-use crateward_core::store::{Policies, Store, StoreError, StoredJob, heartbeat};
+use crateward_core::store::{PauseReason, Policies, Store, StoreError, StoredJob, heartbeat};
 use serde::{Deserialize, Serialize};
 
 use crateward_fake_internet::server::{Event, EventKind, unhex};
@@ -48,6 +50,8 @@ pub struct Failure {
     pub class: FailureClass,
     /// What happened.
     pub message: String,
+    /// An alert to raise, beyond what the failure class implies.
+    pub escalation: Option<HumanEscalation>,
 }
 
 impl Failure {
@@ -55,6 +59,7 @@ impl Failure {
         Self {
             class: FailureClass::Infrastructure,
             message: message.to_string(),
+            escalation: None,
         }
     }
 
@@ -62,6 +67,7 @@ impl Failure {
         Self {
             class: FailureClass::Permanent,
             message: message.to_string(),
+            escalation: None,
         }
     }
 }
@@ -339,6 +345,79 @@ impl SandboxWorker {
         &mut self.store
     }
 
+    /// Runs both canaries (ADR 0020) in this worker's slot and records the
+    /// results. Nothing runs while the pipeline is quarantined.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if the store fails.
+    pub async fn run_canaries(&mut self) -> Result<(), StoreError> {
+        let quarantined = self
+            .store
+            .pauses()
+            .await?
+            .iter()
+            .any(|p| p.reason == PauseReason::Quarantine);
+        if quarantined {
+            return Ok(());
+        }
+        for canary in crate::canary::ALL {
+            let work = &self.setup.work_dir;
+            let files = JobFiles {
+                payload: work.join(format!("{}.payload", canary.name)),
+                scratch: work.join(format!("{}.scratch", canary.name)),
+                network: work.join(format!("{}.network", canary.name)),
+                warm: self.setup.warm.clone(),
+                warm_placeholder: self.setup.warm_placeholder.clone(),
+            };
+            let result = async {
+                let spec = canary
+                    .payload(&self.blobs)
+                    .map_err(Failure::infrastructure)?;
+                let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+                let plan = RunPlan::check(self.setup.check_timeout);
+                execute(
+                    &self.backend,
+                    self.slot,
+                    &self.setup,
+                    &self.blobs,
+                    0,
+                    spec,
+                    &tokens,
+                    &files,
+                    &plan,
+                )
+                .await
+            }
+            .await;
+            for file in [&files.payload, &files.scratch, &files.network] {
+                let _ = std::fs::remove_file(file);
+            }
+            let (passed, detail) = match result {
+                Ok(report) => {
+                    let problems = canary.check(&report);
+                    let detail = serde_json::json!({
+                        "problems": problems,
+                        "outcome": report.outcome,
+                        "run_ms": report.run_ms,
+                    });
+                    (problems.is_empty(), detail)
+                }
+                // The run itself failed: that says nothing about verdicts,
+                // so it is recorded but not counted as a wrong result.
+                Err(failure) => {
+                    tracing::warn!(canary = canary.name, %failure, "canary run failed");
+                    continue;
+                }
+            };
+            tracing::info!(canary = canary.name, passed, %detail, "canary finished");
+            self.store
+                .record_canary(canary.name, passed, &detail)
+                .await?;
+        }
+        Ok(())
+    }
+
     /// Claims and runs one job. Returns `false` when there was none.
     ///
     /// # Errors
@@ -381,6 +460,23 @@ impl SandboxWorker {
             }
             Err(failure) => {
                 tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, %failure, "run failed");
+                if let Some(escalation) = &failure.escalation {
+                    self.store.raise_alert(escalation).await?;
+                    // A KVM error stops the stage at once; the supervisor
+                    // probes again after the cooldown.
+                    if *escalation == HumanEscalation::KvmError {
+                        let now = self.store.now_epoch().await?;
+                        self.store
+                            .set_breaker(
+                                Stage::Sandbox,
+                                BreakerState::Open {
+                                    since: now,
+                                    reopened: 0,
+                                },
+                            )
+                            .await?;
+                    }
+                }
                 JobEvent::StageFailed {
                     class: failure.class,
                 }
@@ -562,6 +658,13 @@ pub async fn execute(
     files: &JobFiles,
     plan: &RunPlan,
 ) -> Result<RunReport, Failure> {
+    // The fake internet appends to its log; one left from an earlier run
+    // would mix that run's traffic into this one's.
+    match std::fs::remove_file(&files.network) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(Failure::infrastructure(error)),
+    }
     let stats = build_payload(setup, blobs, spec, &files.payload).await?;
     make_scratch(setup.scratch_mib, &files.scratch).await?;
     crate::jail::acl::grant_user(&files.scratch, backend.slot_uid(slot))
@@ -646,8 +749,31 @@ pub async fn execute(
             false,
             TraceSummary::default(),
         ),
-        // A VM that died without a report is not a build result. The
-        // supervisor (M5) treats repeats as an escape indicator.
+        // Only guest code stops a guest: a result, never retried, so a crate
+        // cannot trip the sandbox breaker by crashing its own VM.
+        JobEnd::GuestStopped(_) => (
+            BuildOutcome::GuestStopped,
+            None,
+            &[][..],
+            &[][..],
+            false,
+            TraceSummary::default(),
+        ),
+        JobEnd::VmmCrashed(reason) => {
+            return Err(Failure {
+                class: FailureClass::SuspectedCompromise,
+                message: format!("the VMM crashed: {reason}"),
+                escalation: None,
+            });
+        }
+        JobEnd::KvmError(reason) => {
+            return Err(Failure {
+                class: FailureClass::Infrastructure,
+                message: format!("KVM error: {reason}"),
+                escalation: Some(HumanEscalation::KvmError),
+            });
+        }
+        // A VM that died without a report and without a known reason: ours.
         JobEnd::UnexpectedExit(reason) => {
             return Err(Failure::infrastructure(format!(
                 "the VM ended unexpectedly: {reason}"

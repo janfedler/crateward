@@ -41,8 +41,19 @@ pub enum JobEnd {
     Finished(RunOutcome),
     /// The host's wall clock expired; the slot was killed.
     HostTimeout,
-    /// The VM hit its cgroup memory or process limit and was killed.
+    /// The VM hit its cgroup memory or process limit and was killed, or
+    /// Firecracker hit its file size or CPU time limit.
     ResourceLimit,
+    /// The guest stopped (shut down, restarted, panicked) or its agent
+    /// stopped answering before it reported an end. A result about the
+    /// crate: only guest code can do that.
+    GuestStopped(String),
+    /// Firecracker was shut down after a forbidden system call or a fatal
+    /// signal. It handles guest input, so this may mean the guest attacked
+    /// it: a sandbox escape indicator.
+    VmmCrashed(String),
+    /// KVM refused to run the VM. The host is at fault.
+    KvmError(String),
     /// The VM stopped without the agent reporting an end and without a
     /// limit explaining it. The supervisor treats this as a possible escape
     /// indicator.
@@ -258,7 +269,7 @@ impl FirecrackerBackend {
             job.network_log.clone(),
         );
         let started = Instant::now();
-        let vm = Vm::restore(&launch, &self.snapshot, job.drives.as_ref()).await?;
+        let mut vm = Vm::restore(&launch, &self.snapshot, job.drives.as_ref()).await?;
         // No crate code has run yet, so a failure up to here is ours.
         let ready = async {
             let mut agent = vm.agent(Instant::now() + AGENT_READY_TIMEOUT).await?;
@@ -288,10 +299,11 @@ impl FirecrackerBackend {
                 if oom > 0 || pids > 0 {
                     JobEnd::ResourceLimit
                 } else {
+                    let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
                     // The console's last lines usually say why; the guest
                     // wrote them, so they are escaped.
                     let tail = console_tail(&launch.dir.join("firecracker.log"));
-                    JobEnd::UnexpectedExit(format!("{error}; console: {tail}"))
+                    classify_exit(status, &format!("{error}; console: {tail}"))
                 }
             }
         };
@@ -353,6 +365,42 @@ impl VmBackend for FirecrackerBackend {
             cgroups,
             directories,
         })
+    }
+}
+
+/// How long to wait for Firecracker to exit after the agent's connection
+/// broke, to learn why.
+const EXIT_GRACE: Duration = Duration::from_secs(2);
+
+/// Classifies a run that ended without the agent's report, by Firecracker's
+/// exit status. Firecracker v1.17 handles fatal signals itself and exits
+/// with `FcExitCode` (`src/vmm/src/lib.rs`): 0 when the guest stopped, 1 on
+/// errors including KVM faults (logged as `FaultyKvmExit`), 148 after a
+/// forbidden system call, 149, 150 and 157 after `SIGBUS`, `SIGSEGV` and
+/// `SIGILL`, 151 and 154 after `SIGXFSZ` and `SIGXCPU`, 2 when a signal
+/// handler met something impossible.
+#[must_use]
+pub fn classify_exit(status: Option<std::process::ExitStatus>, detail: &str) -> JobEnd {
+    use std::os::unix::process::ExitStatusExt;
+    let Some(status) = status else {
+        // Firecracker still runs: the guest's agent went away.
+        return JobEnd::GuestStopped(format!("the agent stopped answering: {detail}"));
+    };
+    match (status.code(), status.signal()) {
+        (Some(0), _) => JobEnd::GuestStopped(format!("the guest stopped: {detail}")),
+        (Some(code @ (2 | 148 | 149 | 150 | 157)), _) => {
+            JobEnd::VmmCrashed(format!("firecracker exited with {code}: {detail}"))
+        }
+        (Some(151 | 154), _) => JobEnd::ResourceLimit,
+        (Some(1), _) if detail.contains("FaultyKvmExit") || detail.contains("KVM_RUN") => {
+            JobEnd::KvmError(detail.to_owned())
+        }
+        (_, Some(signal)) => {
+            JobEnd::UnexpectedExit(format!("firecracker ended by signal {signal}: {detail}"))
+        }
+        (code, None) => {
+            JobEnd::UnexpectedExit(format!("firecracker exited with {code:?}: {detail}"))
+        }
     }
 }
 
@@ -440,6 +488,37 @@ mod tests {
             network_log: None,
             scratch_mib: 0,
         }
+    }
+
+    #[test]
+    fn exits_are_classified_by_firecracker_exit_codes() {
+        use std::os::unix::process::ExitStatusExt;
+        let code = |c: i32| Some(std::process::ExitStatus::from_raw(c << 8));
+        let signal = |s: i32| Some(std::process::ExitStatus::from_raw(s));
+        assert!(matches!(classify_exit(None, "x"), JobEnd::GuestStopped(_)));
+        assert!(matches!(
+            classify_exit(code(0), "x"),
+            JobEnd::GuestStopped(_)
+        ));
+        for c in [2, 148, 149, 150, 157] {
+            assert!(
+                matches!(classify_exit(code(c), "x"), JobEnd::VmmCrashed(_)),
+                "{c}"
+            );
+        }
+        assert_eq!(classify_exit(code(151), "x"), JobEnd::ResourceLimit);
+        assert!(matches!(
+            classify_exit(code(1), "vcpu: FaultyKvmExit(InternalError)"),
+            JobEnd::KvmError(_)
+        ));
+        assert!(matches!(
+            classify_exit(code(1), "x"),
+            JobEnd::UnexpectedExit(_)
+        ));
+        assert!(matches!(
+            classify_exit(signal(9), "x"),
+            JobEnd::UnexpectedExit(_)
+        ));
     }
 
     #[tokio::test]

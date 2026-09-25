@@ -91,7 +91,7 @@ Facts verified on 2026-09-25:
   never instead of it, and a trace without `TraceEnd` is marked incomplete.
 * A run that the host kills at its own wall clock has no trace; the
   agent's own timeout is shorter and still sends one.
-* Scoring (M5) decides what the summary means. For example, cargo itself
+* Scoring (M6) decides what the summary means. For example, cargo itself
   reading the credentials file is different from a build script doing it,
   which is why each access names its process.
 

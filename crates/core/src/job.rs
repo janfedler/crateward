@@ -222,6 +222,11 @@ pub enum BuildOutcome {
     TimedOut,
     /// The run hit a memory, disk or process limit inside the guest.
     ResourceLimit,
+    /// The guest stopped before the agent reported an end: it shut down,
+    /// restarted or panicked, or its agent stopped answering. Something in
+    /// the guest did that, so it is a result about the crate, not a failure
+    /// of the pipeline, and it is not retried (ADR 0020).
+    GuestStopped,
 }
 
 /// How a job ended when it reached [`JobState::Done`].

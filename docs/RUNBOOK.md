@@ -22,8 +22,9 @@ failed for an infrastructure problem.
    are 429 or 5xx. Check the nftables allowlist sets for the fetcher user.
 3. Sandbox stage: check `journalctl -u crateward-orchestrator` and the KVM
    section below.
-4. Fix the cause, then close the breaker from the dashboard (M5). Queued
-   jobs resume by priority.
+4. Fix the cause. The breaker probes again by itself after its cooldown;
+   to resume at once, run `crateward breaker close <stage>`. Queued jobs
+   resume by priority.
 
 ## Disk usage above threshold
 
@@ -58,8 +59,9 @@ filling, the sandbox stage stops claiming jobs.
 **Meaning.** The known good canary was flagged, or the known bad canary was
 not. Verdicts cannot be trusted.
 
-**Already done.** The pipeline paused. If an image refresh was being
-promoted, it was rolled back automatically.
+**Already done.** The sandbox, analysis and finalize stages paused; fetch
+and static analysis continue. The pause lifts by itself once both canaries
+pass again (they run every `sandbox.canary_interval_minutes`).
 
 **What to do.**
 1. Compare the canary run with the last passing run on the Operations page.
@@ -80,8 +82,10 @@ with an evidence pack.
 ## Sandbox escape indicator
 
 **Meaning.** Something suggests a crate may have escaped its microVM:
-an unexpected VM exit, a Firecracker crash or seccomp violation, a host
-honeytoken touched, or unexpected changes on the host.
+Firecracker exited after a forbidden system call or a fatal signal, a host
+honeytoken was touched (M7), or the host changed unexpectedly (M7). A guest
+that merely stopped itself is not an escape indicator; it is recorded as a
+result.
 
 **Already done.** Quarantine: the whole pipeline paused. The job that was
 running is failed and will not be retried automatically.
@@ -97,7 +101,8 @@ running is failed and will not be retried automatically.
    then reinstall from the Ansible playbooks and restore data from backup.
 5. Report a Firecracker or KVM escape to the respective project's security
    contact.
-6. Lift quarantine from the CLI only after the cause is understood (M5).
+6. Lift quarantine only after the cause is understood:
+   `crateward quarantine lift`. `crateward status` shows what is paused.
 
 ## Decommissioning the server
 
@@ -119,4 +124,5 @@ sent by healthchecks.io, not by Crateward.
 1. Try WireGuard and SSH.
 2. If unreachable, check the Hetzner Robot panel for the server status and
    use the rescue system or a KVM console request if needed.
-3. After a reboot the encrypted disks need unlocking (procedure in M8).
+3. After a reboot, check `crateward status`: pauses and breakers survive a
+   restart, and the orchestrator runs the canaries again on start.

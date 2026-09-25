@@ -184,8 +184,13 @@ Notes on the design:
 * An expired lease counts as a failed attempt because a hostile crate can
   crash a worker on purpose.
 * A suspected compromise ends the job in `Failed` and puts the pipeline into
-  quarantine. The job is never retried automatically, since that would
-  execute the suspicious crate again.
+  quarantine, in the same transaction. The job is never retried
+  automatically, since that would execute the suspicious crate again.
+* Infrastructure failures feed a circuit breaker per stage; an open breaker
+  or a pause (quarantine, a failed canary, a full scratch filesystem) stops
+  claiming in the affected stages only. The supervisor decides from the job
+  events and delivers alerts
+  ([ADR 0020](adr/0020-autonomy-breakers-quarantine-canaries-alerts.md)).
 * A crate that fails to build is a result (`BuildOutcome::Failed`), not a
   failure of the pipeline.
 * Escalation to a full build and test happens at most once. Together with

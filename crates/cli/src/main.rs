@@ -7,12 +7,15 @@
 
 #![forbid(unsafe_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
+use crateward_core::breaker::BreakerState;
 use crateward_core::config::{Config, DEFAULT_CONFIG_PATH};
-use crateward_core::job::{JobState, mermaid_diagram};
+use crateward_core::job::{JobState, Stage, mermaid_diagram};
+use crateward_core::store::{PauseReason, Store};
+use secrecy::ExposeSecret;
 
 /// `EX_CONFIG` from `sysexits.h`.
 const EXIT_CONFIG: u8 = 78;
@@ -36,6 +39,43 @@ enum Command {
         #[command(subcommand)]
         command: StateMachineCommand,
     },
+    /// Show pauses, circuit breakers, canaries and pending alerts.
+    Status {
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
+    /// Quarantine control.
+    Quarantine {
+        #[command(subcommand)]
+        command: QuarantineCommand,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
+    /// Circuit breaker control.
+    Breaker {
+        #[command(subcommand)]
+        command: BreakerCommand,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum QuarantineCommand {
+    /// Lift the quarantine. Only after the cause is understood (RUNBOOK.md).
+    Lift,
+}
+
+#[derive(Debug, Subcommand)]
+enum BreakerCommand {
+    /// Close a stage's breaker, after the cause was fixed.
+    Close {
+        /// The stage, for example `sandbox`.
+        stage: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -56,8 +96,114 @@ enum StateMachineCommand {
     States,
 }
 
+/// Runs a store command against the configured database.
+fn with_store<F, Fut>(config: &Path, action: F) -> ExitCode
+where
+    F: FnOnce(Store) -> Fut,
+    Fut: Future<Output = Result<(), String>>,
+{
+    let config = match Config::load(config) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = runtime.block_on(async {
+        let store = Store::connect(config.database.url.expose_secret())
+            .await
+            .map_err(|e| e.to_string())?;
+        action(store).await
+    });
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn status(store: Store) -> Result<(), String> {
+    let now = store.now_epoch().await.map_err(|e| e.to_string())?;
+    let pauses = store.pauses().await.map_err(|e| e.to_string())?;
+    if pauses.is_empty() {
+        println!("pauses: none");
+    }
+    for p in pauses {
+        let job = p.job.map_or(String::new(), |j| format!(", job {}", j.0));
+        println!(
+            "paused: {} for {} s{job}: {}",
+            p.reason.name(),
+            now - p.since,
+            p.detail
+        );
+    }
+    let breakers = store.breakers().await.map_err(|e| e.to_string())?;
+    for stage in Stage::ALL {
+        let state = breakers
+            .get(&stage)
+            .copied()
+            .unwrap_or(BreakerState::Closed);
+        println!("breaker {:<16} {}", stage.name(), state.name());
+    }
+    for (name, passed, at) in store.latest_canaries().await.map_err(|e| e.to_string())? {
+        let result = if passed { "passed" } else { "FAILED" };
+        println!("canary {name:<16} {result} {} s ago", now - at);
+    }
+    let pending = store
+        .pending_alerts(1000)
+        .await
+        .map_err(|e| e.to_string())?;
+    println!("alerts waiting: {}", pending.len());
+    Ok(())
+}
+
 fn main() -> ExitCode {
     match Cli::parse().command {
+        Command::Status { config } => with_store(&config, status),
+        Command::Quarantine {
+            command: QuarantineCommand::Lift,
+            config,
+        } => with_store(&config, |store| async move {
+            if store
+                .lift_pause(PauseReason::Quarantine)
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                println!("quarantine lifted");
+            } else {
+                println!("no quarantine was active");
+            }
+            Ok(())
+        }),
+        Command::Breaker {
+            command: BreakerCommand::Close { stage },
+            config,
+        } => {
+            let Some(stage) = Stage::ALL.into_iter().find(|s| s.name() == stage) else {
+                eprintln!("unknown stage {stage}");
+                return ExitCode::FAILURE;
+            };
+            with_store(&config, move |store| async move {
+                store
+                    .set_breaker(stage, BreakerState::Closed)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                println!("breaker of {} closed", stage.name());
+                Ok(())
+            })
+        }
         Command::Config {
             command: ConfigCommand::Check { config },
         } => match Config::load(&config) {
