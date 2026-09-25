@@ -9,6 +9,9 @@
 //! /cw/vendor/<name>-<version>/  each locked crate, from the blob store
 //! ```
 //!
+//! The warm build (ADR 0008) adds further probes under `/cw/probes/<n>/`
+//! and a script that runs them.
+//!
 //! Crate archives are never extracted on the host (ADR 0014). The
 //! orchestrator writes a new tar from the stored blobs, with its own
 //! headers (root owned, fixed modes and times), and streams it into
@@ -95,6 +98,26 @@ pub struct PayloadSpec {
     pub lockfile: String,
     /// Every locked crate, the target included.
     pub packages: Vec<Package>,
+    /// Further probes, written to `probes/<n>/` (the warm build).
+    pub extra_probes: Vec<ProbeSpec>,
+    /// Further files at the payload's root, with their contents.
+    pub files: Vec<(String, Vec<u8>)>,
+    /// Packages (`<name>-<version>`) written as stubs: their manifest with
+    /// the build script, binaries and other targets removed, and an empty
+    /// library. The warm build (ADR 0008) replays a job's dependency build
+    /// this way without compiling the crate under analysis.
+    pub stubs: Vec<String>,
+}
+
+/// A consumer probe: a crate version and the lockfile resolved for it.
+#[derive(Debug, Clone)]
+pub struct ProbeSpec {
+    /// The crate.
+    pub name: CrateName,
+    /// Its version.
+    pub version: semver::Version,
+    /// The lockfile from the fetch stage.
+    pub lockfile: String,
 }
 
 /// Size of a written payload.
@@ -133,6 +156,44 @@ fn append<W: Write>(
     Ok(())
 }
 
+/// A published manifest reduced to its dependencies and features: no build
+/// script, no `links`, one empty library (keeping its crate type), no other
+/// targets. Cargo then resolves dependencies and features exactly as for
+/// the real crate, and compiles nothing of it.
+///
+/// # Errors
+///
+/// Fails if the manifest is not valid TOML.
+pub fn stub_manifest(original: &[u8]) -> Result<String, String> {
+    let text = std::str::from_utf8(original).map_err(|e| e.to_string())?;
+    let mut manifest: toml::Table = text.parse().map_err(|e| format!("{e}"))?;
+    if let Some(package) = manifest
+        .get_mut("package")
+        .and_then(toml::Value::as_table_mut)
+    {
+        for key in ["build", "links", "autolib", "default-run"] {
+            package.remove(key);
+        }
+        for key in ["autobins", "autoexamples", "autotests", "autobenches"] {
+            package.insert(key.into(), toml::Value::Boolean(false));
+        }
+    }
+    for key in ["bin", "example", "test", "bench"] {
+        manifest.remove(key);
+    }
+    let mut lib = toml::Table::new();
+    if let Some(original) = manifest.get("lib").and_then(toml::Value::as_table) {
+        for key in ["name", "crate-type", "proc-macro"] {
+            if let Some(value) = original.get(key) {
+                lib.insert(key.into(), value.clone());
+            }
+        }
+    }
+    lib.insert("path".into(), toml::Value::String("src/lib.rs".into()));
+    manifest.insert("lib".into(), toml::Value::Table(lib));
+    toml::to_string(&manifest).map_err(|e| e.to_string())
+}
+
 /// Writes the payload as a tar stream.
 ///
 /// # Errors
@@ -146,31 +207,40 @@ pub fn write_tar<W: Write>(
 ) -> Result<PayloadStats, PayloadError> {
     let mut builder = tar::Builder::new(out);
     let mut stats = PayloadStats::default();
-    let manifest = probe_manifest(&spec.name, &spec.version);
-    append(
-        &mut builder,
-        "probe/Cargo.toml",
-        0o644,
-        manifest.as_bytes(),
-        &mut stats,
-    )?;
-    append(
-        &mut builder,
-        "probe/Cargo.lock",
-        0o644,
-        spec.lockfile.as_bytes(),
-        &mut stats,
-    )?;
-    append(&mut builder, "probe/lib.rs", 0o644, b"", &mut stats)?;
-    append(
-        &mut builder,
-        "probe/.cargo/config.toml",
-        0o644,
-        CARGO_CONFIG.as_bytes(),
-        &mut stats,
-    )?;
+    let first = ProbeSpec {
+        name: spec.name.clone(),
+        version: spec.version.clone(),
+        lockfile: spec.lockfile.clone(),
+    };
+    let probes = std::iter::once(("probe".to_owned(), &first)).chain(
+        spec.extra_probes
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (format!("probes/{i}"), p)),
+    );
+    for (dir, probe) in probes {
+        let manifest = probe_manifest(&probe.name, &probe.version);
+        for (file, data) in [
+            ("Cargo.toml", manifest.as_bytes()),
+            ("Cargo.lock", probe.lockfile.as_bytes()),
+            ("lib.rs", b"".as_slice()),
+            (".cargo/config.toml", CARGO_CONFIG.as_bytes()),
+        ] {
+            append(
+                &mut builder,
+                &format!("{dir}/{file}"),
+                0o644,
+                data,
+                &mut stats,
+            )?;
+        }
+    }
+    for (path, data) in &spec.files {
+        append(&mut builder, path, 0o644, data, &mut stats)?;
+    }
     for package in &spec.packages {
         let dir = format!("{}-{}", package.name, package.version);
+        let stub = spec.stubs.contains(&dir);
         let tar = blobs
             .get(&package.blake3, MAX_BLOB_BYTES)
             .map_err(|e| PayloadError::Io {
@@ -195,7 +265,7 @@ pub fn write_tar<W: Write>(
                 return Err(PayloadError::Mismatch(dir));
             };
             // Cargo trusts this file for vendored sources; only ours counts.
-            if rest == ".cargo-checksum.json" {
+            if rest == ".cargo-checksum.json" || (stub && rest != "Cargo.toml") {
                 continue;
             }
             let executable = entry.header().mode().is_ok_and(|m| m & 0o111 != 0);
@@ -204,6 +274,25 @@ pub fn write_tar<W: Write>(
                 .read_to_end(&mut data)
                 .map_err(io(format!("reading {path}")))?;
             let mode = if executable { 0o755 } else { 0o644 };
+            if stub {
+                let manifest = stub_manifest(&data)
+                    .map_err(|e| PayloadError::Mismatch(format!("{dir}: {e}")))?;
+                append(
+                    &mut builder,
+                    &format!("vendor/{path}"),
+                    0o644,
+                    manifest.as_bytes(),
+                    &mut stats,
+                )?;
+                append(
+                    &mut builder,
+                    &format!("vendor/{dir}/src/lib.rs"),
+                    0o644,
+                    b"",
+                    &mut stats,
+                )?;
+                continue;
+            }
             append(
                 &mut builder,
                 &format!("vendor/{path}"),
@@ -355,6 +444,9 @@ mod tests {
                 checksum: "ab".repeat(32),
                 blake3: blob.blake3,
             }],
+            extra_probes: Vec::new(),
+            files: Vec::new(),
+            stubs: Vec::new(),
         };
         (dir, blobs, spec)
     }
@@ -404,5 +496,54 @@ mod tests {
             Err(PayloadError::Mismatch(_))
         ));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_stub_keeps_dependencies_and_features_only() {
+        let original = br#"
+[package]
+name = "evil"
+version = "1.0.0"
+edition = "2021"
+build = "build.rs"
+links = "evil"
+default-run = "evil-cli"
+
+[lib]
+name = "evil"
+path = "src/evil.rs"
+proc-macro = true
+
+[[bin]]
+name = "evil-cli"
+path = "src/main.rs"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[build-dependencies]
+cc = "1"
+
+[features]
+default = ["std"]
+std = []
+"#;
+        let stub: toml::Table = stub_manifest(original).unwrap().parse().unwrap();
+        let package = stub["package"].as_table().unwrap();
+        assert!(package.get("build").is_none() && package.get("links").is_none());
+        assert!(package.get("default-run").is_none());
+        assert_eq!(package["autobins"].as_bool(), Some(false));
+        assert!(stub.get("bin").is_none());
+        let lib = stub["lib"].as_table().unwrap();
+        assert_eq!(lib["path"].as_str(), Some("src/lib.rs"));
+        assert_eq!(lib["proc-macro"].as_bool(), Some(true));
+        assert!(
+            stub["dependencies"]["serde"]["features"]
+                .as_array()
+                .is_some()
+        );
+        assert!(stub.get("features").is_some());
+        assert!(stub_manifest(b"not [toml").is_err());
     }
 }

@@ -61,6 +61,10 @@ pub struct JobInput {
     /// Where the fake internet writes its events. It runs only if both
     /// this and [`FirecrackerConfig::fake_internet`] are set.
     pub network_log: Option<PathBuf>,
+    /// Size of the scratch disk. It lives on tmpfs, and the pages the guest
+    /// writes are charged to the slot's cgroup, so its memory limit grows by
+    /// this much.
+    pub scratch_mib: u64,
 }
 
 /// One run with its timings.
@@ -284,7 +288,10 @@ impl FirecrackerBackend {
                 if oom > 0 || pids > 0 {
                     JobEnd::ResourceLimit
                 } else {
-                    JobEnd::UnexpectedExit(error.to_string())
+                    // The console's last lines usually say why; the guest
+                    // wrote them, so they are escaped.
+                    let tail = console_tail(&launch.dir.join("firecracker.log"));
+                    JobEnd::UnexpectedExit(format!("{error}; console: {tail}"))
                 }
             }
         };
@@ -304,9 +311,9 @@ impl VmBackend for FirecrackerBackend {
         if slot >= self.config.slots {
             return Err(BackendError::NoSuchSlot(slot));
         }
-        let cgroup = self
-            .cgroups
-            .create_slot(&slot.to_string(), self.config.limits)?;
+        let mut limits = self.config.limits;
+        limits.memory_mib = limits.memory_mib.saturating_add(job.scratch_mib);
+        let cgroup = self.cgroups.create_slot(&slot.to_string(), limits)?;
         let result = self.run_in_slot(slot, job, wall_clock, &cgroup).await;
         // The cgroup goes away whatever happened, and with it any process.
         let removed = cgroup.remove();
@@ -347,6 +354,20 @@ impl VmBackend for FirecrackerBackend {
             directories,
         })
     }
+}
+
+/// The last 2 KiB of a VM's log, rendered with escapes.
+fn console_tail(path: &std::path::Path) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return "unavailable".into();
+    };
+    let len = file.metadata().map_or(0, |m| m.len());
+    let _ = file.seek(SeekFrom::Start(len.saturating_sub(2048)));
+    let mut tail = Vec::new();
+    let _ = file.take(2048).read_to_end(&mut tail);
+    // `render` keeps at most 512 bytes per call.
+    tail.chunks(512).map(crate::trace::render).collect()
 }
 
 /// A scripted backend for tests of the layers above.
@@ -417,6 +438,7 @@ mod tests {
             workspace: Workspace::default(),
             drives: None,
             network_log: None,
+            scratch_mib: 0,
         }
     }
 

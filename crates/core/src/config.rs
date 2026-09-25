@@ -292,6 +292,30 @@ pub struct SandboxConfig {
     pub slot_uid_base: u32,
     /// First subordinate GID for slots, from `/etc/subgid`.
     pub slot_gid_base: u32,
+    /// The warm build cache (ADR 0008). Without this table, jobs build
+    /// cold.
+    #[serde(default)]
+    pub warm: Option<WarmConfig>,
+}
+
+/// The warm build cache: which past builds it replays and what may enter it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WarmConfig {
+    /// Recent fetch records the warm build chooses from.
+    pub sample_jobs: u32,
+    /// Probes the warm build replays at most.
+    pub max_probes: u32,
+    /// A crate version enters only if at least this many sampled jobs lock
+    /// it.
+    pub min_jobs: u32,
+    /// A crate version enters only if Crateward stored its file at least
+    /// this many hours ago.
+    pub min_age_hours: u64,
+    /// Guest side wall clock limit of the warm build.
+    pub timeout_secs: u64,
+    /// Largest warm image; a larger one is discarded.
+    pub max_image_mib: u64,
 }
 
 /// Disk thresholds and retention.
@@ -664,6 +688,28 @@ impl Config {
         v.absolute(&s.kernel_image, "sandbox.kernel_image");
         v.absolute(&s.rootfs_image, "sandbox.rootfs_image");
         v.absolute(&s.slots_dir, "sandbox.slots_dir");
+        if let Some(w) = &s.warm {
+            v.check(
+                w.min_jobs >= 2,
+                "sandbox.warm.min_jobs",
+                "must be at least 2",
+            );
+            v.check(
+                w.max_probes >= 1 && w.max_probes <= w.sample_jobs,
+                "sandbox.warm.max_probes",
+                "must be at least 1 and not above sample_jobs",
+            );
+            v.check(
+                w.timeout_secs >= 60,
+                "sandbox.warm.timeout_secs",
+                "must be at least 60",
+            );
+            v.check(
+                w.max_image_mib <= s.images_tmpfs_mib,
+                "sandbox.warm.max_image_mib",
+                "must fit into images_tmpfs_mib",
+            );
+        }
         // Subordinate IDs are never below 65536 in practice; a low value is
         // almost certainly a real user or group on the host.
         v.check(

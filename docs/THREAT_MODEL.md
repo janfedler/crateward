@@ -119,10 +119,11 @@ test. Nothing is marked Built before the code exists.
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| Cache and warm images mounted read only into job VMs; written only by the warmer | Planned | M1.5 |
-| Warm snapshot taken from a fresh clean boot, never from the VM that ran build scripts | Planned | M1.5 |
-| Warm set limited to versions at least 14 days old that Crateward scored low risk | Planned | M1.5 |
-| Images sealed with a BLAKE3 manifest signed by the warmer key; verified on promotion and on every copy into tmpfs | Planned | M1.5 |
+| The warm image is mounted read only under each job's own writable overlay layer; only the warm build writes it, packed from its scratch disk by sandboxed children without mounting ([ADR 0008](adr/0008-prewarmed-snapshot-and-shared-sccache.md)) | Tested | M1.5 |
+| The base snapshot is a fresh clean boot; the warm image is a drive switched in per job, so no memory of the VM that ran build scripts reaches a job | Built | M1.5 |
+| Warm set limited to versions Crateward stored at least 14 days ago, locked by several recent jobs, with a static report without high findings; the crate under analysis is replaced by a stub and its units are never cached | Tested | M1.5 |
+| The warm build is analyzed like a job (trace, fake internet, honeytokens, scratch scan) and used only if all are clean; a promotion check runs one job with the image before any other job sees it | Tested | M1.5 |
+| Warm images named by their BLAKE3 digest; a signed manifest follows when images outlive the orchestrator process | Partly built | M1.5, M8 |
 | Promotion gated on canaries; automatic rollback | Planned | M5 |
 
 ### Downloads (T5; B7)

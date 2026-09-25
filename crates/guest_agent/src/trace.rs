@@ -24,16 +24,19 @@ use crate::btf::Btf;
 pub const OBJECT_PATH: &str = "/usr/lib/crateward/guest-ebpf.o";
 
 /// Global name, struct and member of every kernel offset the programs use.
-pub const OFFSETS: [(&str, &str, &str); 12] = [
+pub const OFFSETS: [(&str, &str, &str); 15] = [
     ("OFF_TASK_PID", "task_struct", "pid"),
     ("OFF_TASK_TGID", "task_struct", "tgid"),
     ("OFF_TASK_MM", "task_struct", "mm"),
     ("OFF_TASK_EXIT_CODE", "task_struct", "exit_code"),
+    ("OFF_TASK_REAL_CRED", "task_struct", "real_cred"),
+    ("OFF_CRED_EUID", "cred", "euid"),
     ("OFF_MM_ARG_START", "mm_struct", "arg_start"),
     ("OFF_MM_ARG_END", "mm_struct", "arg_end"),
     ("OFF_BINPRM_FILENAME", "linux_binprm", "filename"),
     ("OFF_FILE_PATH", "file", "f_path"),
     ("OFF_FILE_FLAGS", "file", "f_flags"),
+    ("OFF_FILE_MODE", "file", "f_mode"),
     ("OFF_SOCKET_TYPE", "socket", "type"),
     ("OFF_MSGHDR_NAME", "msghdr", "msg_name"),
     ("OFF_MSGHDR_NAMELEN", "msghdr", "msg_namelen"),

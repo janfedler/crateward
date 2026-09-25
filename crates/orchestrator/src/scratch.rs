@@ -13,6 +13,7 @@
 //! limits) that gets the image as stdin and prints a JSON report. The walk
 //! is bounded in entries, depth and bytes read.
 
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::os::fd::AsFd as _;
 use std::path::Path;
@@ -24,6 +25,14 @@ use serde::{Deserialize, Serialize};
 
 /// First argument of the sandboxed child.
 pub const SCAN: &str = "sandbox-scratch";
+
+/// First argument of the child that exports `/target` as a tar (the warm
+/// build, ADR 0008).
+pub const EXPORT: &str = "sandbox-scratch-export";
+
+/// Bounds of an export.
+const MAX_EXPORT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_EXPORT_ENTRIES: u64 = 1_000_000;
 
 /// Where the guest mounts the scratch disk; paths are reported below it.
 const MOUNT_POINT: &str = "/work";
@@ -40,7 +49,9 @@ const MAX_REPORT: u64 = 16 * 1024 * 1024;
 
 /// Paths below which writes are part of a normal `cargo check`, relative to
 /// the scratch root.
-const BUILD_AREAS: [&str; 2] = ["/target/", "/lost+found"];
+/// With a warm build cache, the job's own target writes land in the
+/// overlay's upper directory below `/.warm/`.
+const BUILD_AREAS: [&str; 3] = ["/target/", "/lost+found", "/.warm/"];
 
 /// Cargo's own state in `CARGO_HOME`: lock files and the cache database
 /// (with its journal files) by prefix, the rest by exact path, so nothing
@@ -235,7 +246,8 @@ impl Scanner<'_> {
             let in_build = BUILD_AREAS
                 .iter()
                 .any(|area| relative.starts_with(area) || format!("{relative}/") == *area)
-                || relative == "/target";
+                || relative == "/target"
+                || relative == "/.warm";
             let cargo_state = CARGO_STATE_PREFIXES.iter().any(|p| relative.starts_with(p))
                 || CARGO_STATE_PATHS.contains(&relative.as_str());
             let planted = self.spec.planted.contains(&guest);
@@ -256,7 +268,9 @@ impl Scanner<'_> {
                 }
                 FileType::Regular => {
                     r.files += 1;
-                    if let Some(name) = relative.strip_prefix("/target/debug/deps/")
+                    if let Some(name) = relative
+                        .strip_prefix("/target/debug/deps/")
+                        .or_else(|| relative.strip_prefix("/.warm/upper/debug/deps/"))
                         && !name.contains('/')
                         && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e))
                     {
@@ -273,7 +287,10 @@ impl Scanner<'_> {
                         self.search(&child, &guest)?
                     };
                     let executable = item.mode & 0o111 != 0 || elf;
-                    if executable && !relative.starts_with("/target/") {
+                    if executable
+                        && !relative.starts_with("/target/")
+                        && !relative.starts_with("/.warm/upper/")
+                    {
                         let r = &mut self.report;
                         push(&mut r.executables_outside_target, &mut r.omitted, item);
                     }
@@ -286,6 +303,10 @@ impl Scanner<'_> {
                         push(&mut r.links_outside, &mut r.omitted, item);
                     }
                 }
+                // Overlayfs records a deleted lower file as a character
+                // device (a whiteout), prepared in its work directory and
+                // moved into the upper one.
+                FileType::CharacterDevice if relative.starts_with("/.warm/") => {}
                 _ => push(&mut r.special, &mut r.omitted, item),
             }
         }
@@ -361,6 +382,215 @@ pub fn scan_in_sandbox(exe: &Path, image: &Path, spec: &ScanSpec) -> Result<Scra
     serde_json::from_slice(&out).map_err(|e| format!("scanner report: {e}"))
 }
 
+/// The crate a unit's file or directory in the target directory belongs to,
+/// with `-` as `_`: `.fingerprint/<package>-<hash>`, `build/<package>-<hash>`,
+/// `deps/lib<crate>-<hash>.<ext>` and `deps/<crate>-<hash>.d`.
+#[must_use]
+pub fn unit_owner(parent: &str, name: &str) -> Option<String> {
+    let strip_hash = |stem: &str| {
+        let (owner, hash) = stem.rsplit_once('-')?;
+        (hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+            .then(|| owner.replace('-', "_"))
+    };
+    match parent.rsplit('/').next()? {
+        ".fingerprint" | "build" => strip_hash(name),
+        "deps" => {
+            let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+            strip_hash(stem.strip_prefix("lib").unwrap_or(stem)).or_else(|| strip_hash(stem))
+        }
+        _ => None,
+    }
+}
+
+/// Writes the directories and regular files below `/target` of `fs` as a
+/// tar with Crateward's own headers: paths `target/…`, modes without set ID
+/// bits, owners kept, time zero. Links, devices, FIFOs and sockets are left
+/// out, and so are the units of the crates in `excluded` (names with `-`
+/// or `_`). Returns entries and bytes written.
+///
+/// # Errors
+///
+/// Fails on a read or write error, or when the bounds are exceeded.
+pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, u64), String> {
+    let excluded: HashSet<String> = excluded.iter().map(|n| n.replace('-', "_")).collect();
+    let mut builder = tar::Builder::new(out);
+    let mut stack = vec![(ExtPath::new("/target"), 0_usize)];
+    let (mut entries, mut bytes) = (0_u64, 0_u64);
+    while let Some((dir, depth)) = stack.pop() {
+        if depth > MAX_DEPTH {
+            return Err("the target directory is nested too deeply".into());
+        }
+        let meta = fs.metadata(dir.as_path()).map_err(|e| e.to_string())?;
+        let name = String::from_utf8(dir.as_ref().get(1..).unwrap_or_default().to_vec())
+            .map_err(|_| "a path is not UTF-8".to_owned())?;
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(u32::from(meta.mode() & 0o777));
+        header.set_uid(u64::from(meta.uid()));
+        header.set_gid(u64::from(meta.gid()));
+        header.set_mtime(0);
+        builder
+            .append_data(&mut header, format!("{name}/"), std::io::empty())
+            .map_err(|e| e.to_string())?;
+        for entry in fs.read_dir(dir.as_path()).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            if matches!(entry.file_name().as_ref(), b"." | b"..") {
+                continue;
+            }
+            entries += 1;
+            if entries > MAX_EXPORT_ENTRIES {
+                return Err("too many entries".into());
+            }
+            let path = entry.path();
+            let file_name = render(entry.file_name().as_ref());
+            if unit_owner(&name, &file_name).is_some_and(|owner| excluded.contains(&owner)) {
+                continue;
+            }
+            let meta = entry.metadata().map_err(|e| e.to_string())?;
+            match meta.file_type() {
+                FileType::Directory => stack.push((path, depth + 1)),
+                FileType::Regular => {
+                    let name =
+                        String::from_utf8(path.as_ref().get(1..).unwrap_or_default().to_vec())
+                            .map_err(|_| "a path is not UTF-8".to_owned())?;
+                    bytes = bytes.saturating_add(meta.len());
+                    if bytes > MAX_EXPORT_BYTES {
+                        return Err("the target directory is too large".into());
+                    }
+                    let mut header = tar::Header::new_gnu();
+                    header.set_entry_type(tar::EntryType::Regular);
+                    header.set_size(meta.len());
+                    header.set_mode(u32::from(meta.mode() & 0o777));
+                    header.set_uid(u64::from(meta.uid()));
+                    header.set_gid(u64::from(meta.gid()));
+                    header.set_mtime(0);
+                    let file = fs.open(path.as_path()).map_err(|e| e.to_string())?;
+                    // A reader that yields exactly the announced size.
+                    let mut data = Vec::new();
+                    file.take(meta.len())
+                        .read_to_end(&mut data)
+                        .map_err(|e| e.to_string())?;
+                    if data.len() as u64 != meta.len() {
+                        return Err(format!("{name} is shorter than its size"));
+                    }
+                    builder
+                        .append_data(&mut header, &name, data.as_slice())
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => {}
+            }
+        }
+    }
+    builder
+        .into_inner()
+        .and_then(|mut w| w.flush())
+        .map_err(|e| e.to_string())?;
+    Ok((entries, bytes))
+}
+
+/// Packs `/target` of the scratch image at `image` into an EROFS image at
+/// `out`, through two sandboxed children: the export reads the ext4 image,
+/// `mkfs.erofs` writes the result.
+///
+/// # Errors
+///
+/// Fails if either child fails.
+pub fn export_to_erofs(
+    exe: &Path,
+    image: &Path,
+    out: &Path,
+    excluded: &[String],
+) -> Result<(), String> {
+    let input = std::fs::File::open(image).map_err(|e| format!("{}: {e}", image.display()))?;
+    let mut exporter = Command::new(exe)
+        .arg(EXPORT)
+        .args(excluded)
+        .env_clear()
+        .stdin(input)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("starting the export: {e}"))?;
+    let tar = exporter.stdout.take().ok_or("no stdout")?;
+    let mut mkfs = Command::new(exe)
+        .arg(crate::payload::MKFS)
+        .arg(out)
+        .env_clear()
+        .stdin(tar)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("starting mkfs: {e}"))?;
+    let read_errors = |child: &mut std::process::Child| {
+        let mut text = String::new();
+        if let Some(stderr) = child.stderr.take() {
+            let _ = stderr.take(64 * 1024).read_to_string(&mut text);
+        }
+        text
+    };
+    let export_errors = read_errors(&mut exporter);
+    let exported = exporter.wait().map_err(|e| e.to_string())?;
+    let mkfs_errors = read_errors(&mut mkfs);
+    let built = mkfs.wait().map_err(|e| e.to_string())?;
+    if !exported.success() {
+        return Err(format!("export {exported}: {}", export_errors.trim()));
+    }
+    if !built.success() {
+        return Err(format!("mkfs {built}: {}", mkfs_errors.trim()));
+    }
+    Ok(())
+}
+
+/// Enters the sandbox for reading a scratch image from stdin, and returns
+/// that image.
+fn enter_sandbox() -> Result<std::fs::File, String> {
+    let image = std::io::stdin()
+        .as_fd()
+        .try_clone_to_owned()
+        .map(std::fs::File::from)
+        .map_err(|e| format!("stdin: {e}"))?;
+    sandbox::isolate_network()
+        .and_then(|()| {
+            sandbox::limit(Limits {
+                address_space: 2 << 30,
+                cpu_seconds: 600,
+                file_size: 0,
+                open_files: 16,
+            })
+        })
+        .and_then(|()| sandbox::restrict_fs(&FsAccess::default()))
+        .map_err(|e| e.to_string())?;
+    Ok(image)
+}
+
+/// Runs the export child if `args` names it: stdin is the image, stdout the
+/// tar.
+#[must_use]
+pub fn dispatch_export(args: &[String]) -> Option<std::process::ExitCode> {
+    if args.get(1).map(String::as_str) != Some(EXPORT) {
+        return None;
+    }
+    let fail = |message: &str| {
+        eprintln!("crateward sandbox: {message}");
+        std::process::ExitCode::FAILURE
+    };
+    let image = match enter_sandbox() {
+        Ok(image) => image,
+        Err(error) => return Some(fail(&error)),
+    };
+    let fs = match Ext4::load(Box::new(image)) {
+        Ok(fs) => fs,
+        Err(error) => return Some(fail(&format!("not a readable ext4 image: {error}"))),
+    };
+    let out = std::io::BufWriter::new(std::io::stdout().lock());
+    let excluded = args.get(2..).unwrap_or_default();
+    match export(&fs, out, excluded) {
+        Ok(_) => Some(std::process::ExitCode::SUCCESS),
+        Err(error) => Some(fail(&error)),
+    }
+}
+
 /// Runs the scanning child if `args` names it: stdin is the image, the
 /// first argument the [`ScanSpec`] as JSON.
 #[must_use]
@@ -378,23 +608,10 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
     else {
         return Some(fail("usage: sandbox-scratch <spec json> < image"));
     };
-    let image = match std::io::stdin().as_fd().try_clone_to_owned() {
-        Ok(fd) => std::fs::File::from(fd),
-        Err(error) => return Some(fail(&format!("stdin: {error}"))),
+    let image = match enter_sandbox() {
+        Ok(image) => image,
+        Err(error) => return Some(fail(&error)),
     };
-    let entered = sandbox::isolate_network()
-        .and_then(|()| {
-            sandbox::limit(Limits {
-                address_space: 2 << 30,
-                cpu_seconds: 300,
-                file_size: 0,
-                open_files: 16,
-            })
-        })
-        .and_then(|()| sandbox::restrict_fs(&FsAccess::default()));
-    if let Err(error) = entered {
-        return Some(fail(&error.to_string()));
-    }
     let report = match Ext4::load(Box::new(image)) {
         Ok(fs) => scan(&fs, &spec),
         Err(error) => ScratchReport {
@@ -518,6 +735,77 @@ mod tests {
         assert!(report.planted_changed.is_empty());
         assert!(report.files >= 7);
         assert_eq!(report.units, ["libx-0123abcd.rmeta"]);
+    }
+
+    #[test]
+    fn exports_the_target_directory_only() {
+        let Some(data) = image(&[
+            ("/target/debug/deps/libx-0123.rmeta", b"metadata", 0o4755),
+            ("/target/debug/.fingerprint/x-0123/lib-x", b"fp", 0o644),
+            (
+                "/target/debug/.fingerprint/stub-crate-0123456789abcdef/lib",
+                b"fp",
+                0o644,
+            ),
+            (
+                "/target/debug/deps/libstub_crate-0123456789abcdef.rmeta",
+                b"m",
+                0o644,
+            ),
+            (
+                "/target/debug/deps/stub_crate-0123456789abcdef.d",
+                b"d",
+                0o644,
+            ),
+            ("/home/.cargo/credentials.toml", b"secret", 0o600),
+        ]) else {
+            return;
+        };
+        let fs = Ext4::load(Box::new(data)).unwrap();
+        let mut tar = Vec::new();
+        export(&fs, &mut tar, &["stub-crate".into()]).unwrap();
+        let mut archive = tar::Archive::new(tar.as_slice());
+        let mut seen = Vec::new();
+        for entry in archive.entries().unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            if path.ends_with(".rmeta") {
+                // Set ID bits never survive.
+                assert_eq!(entry.header().mode().unwrap(), 0o755);
+            }
+            seen.push(path);
+        }
+        assert!(seen.contains(&"target/debug/deps/libx-0123.rmeta".to_owned()));
+        assert!(seen.contains(&"target/debug/.fingerprint/x-0123/lib-x".to_owned()));
+        assert!(seen.iter().all(|p| p.starts_with("target/")));
+        assert!(seen.iter().all(|p| !p.contains("stub")), "{seen:?}");
+    }
+
+    #[test]
+    fn unit_owners_follow_cargo_names() {
+        let h = "0123456789abcdef";
+        assert_eq!(
+            unit_owner("target/debug/.fingerprint", &format!("serde-json-{h}")).as_deref(),
+            Some("serde_json")
+        );
+        assert_eq!(
+            unit_owner("target/debug/deps", &format!("libserde_json-{h}.rmeta")).as_deref(),
+            Some("serde_json")
+        );
+        assert_eq!(
+            unit_owner("target/debug/deps", &format!("serde_json-{h}.d")).as_deref(),
+            Some("serde_json")
+        );
+        assert_eq!(
+            unit_owner("target/debug/deps", &format!("liblibc-{h}.rmeta")).as_deref(),
+            Some("libc")
+        );
+        assert_eq!(
+            unit_owner("target/debug/build", &format!("ring-{h}")).as_deref(),
+            Some("ring")
+        );
+        assert_eq!(unit_owner("target/debug", "deps"), None);
+        assert_eq!(unit_owner("target/debug/deps", "short-123.rmeta"), None);
     }
 
     #[test]

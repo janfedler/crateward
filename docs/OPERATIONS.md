@@ -70,7 +70,8 @@ publishes the share of versions with dynamic results.
 | RSS poll | every 2 minutes |
 | Database dump | daily |
 | Canaries | hourly |
-| Image refresh (Debian packages, toolchain, warm set) | weekly, at night; dynamic stage paused while the warmer runs |
+| Image refresh (Debian packages, toolchain) | weekly, at night |
+| Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs; jobs wait meanwhile); stop and start the orchestrator to refresh it |
 | Guest kernel rebuild | only when its version or configuration changes |
 | Retention | daily |
 | Heartbeat | every minute |

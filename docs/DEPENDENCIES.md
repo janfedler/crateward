@@ -9,7 +9,7 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | Crate | Used by | Why |
 |-------|---------|-----|
 | `serde` | core | Derived, well audited (de)serialization for configuration and events. |
-| `toml` | core | Parses the configuration file; the format Cargo users already know. |
+| `toml` | core, orchestrator | Parses the configuration file; the format Cargo users already know. The orchestrator rewrites manifests into stubs for the warm build. |
 | `thiserror` | core | Typed error enums without boilerplate, no runtime cost. |
 | `secrecy` | core | Secret strings whose `Debug` output is redacted, so logs cannot leak them. |
 | `url` | core | Correct URL parsing for configuration validation; the WHATWG reference parser for Rust. |

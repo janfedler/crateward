@@ -65,6 +65,7 @@ fn job(script: &str) -> JobInput {
         workspace: Workspace::default(),
         drives: None,
         network_log: None,
+        scratch_mib: 0,
     }
 }
 

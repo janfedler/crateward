@@ -29,7 +29,7 @@ use crate::scratch::{ScanSpec, ScratchReport};
 use crate::trace::TraceSummary;
 
 /// UID and GID of the guest's `builder` user.
-const BUILDER: u32 = 1000;
+pub(crate) const BUILDER: u32 = 1000;
 
 /// Output kept per stream in the report.
 const OUTPUT_TAIL: usize = 16 * 1024;
@@ -267,10 +267,10 @@ fn tail(bytes: &[u8]) -> String {
 
 /// A locked package as the fetch stage recorded it.
 #[derive(Debug, Clone, Deserialize)]
-struct Locked {
-    name: String,
-    version: String,
-    checksum: String,
+pub(crate) struct Locked {
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) checksum: String,
 }
 
 /// Paths and limits the worker needs.
@@ -284,6 +284,10 @@ pub struct WorkerSetup {
     pub scratch_mib: u64,
     /// Guest side limit for `cargo check`.
     pub check_timeout: Duration,
+    /// The warm build cache jobs mount, if one was built (ADR 0008).
+    pub warm: Option<PathBuf>,
+    /// The empty file the base snapshot's warm drive points at.
+    pub warm_placeholder: PathBuf,
 }
 
 /// The worker of one slot.
@@ -454,6 +458,9 @@ impl SandboxWorker {
             version,
             lockfile,
             packages,
+            extra_probes: Vec::new(),
+            files: Vec::new(),
+            stubs: Vec::new(),
         };
         let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
         self.store
@@ -463,6 +470,8 @@ impl SandboxWorker {
             payload: payload.to_path_buf(),
             scratch: scratch.to_path_buf(),
             network: network.to_path_buf(),
+            warm: self.setup.warm.clone(),
+            warm_placeholder: self.setup.warm_placeholder.clone(),
         };
         let mut report = execute(
             &self.backend,
@@ -473,6 +482,7 @@ impl SandboxWorker {
             spec,
             &tokens,
             &files,
+            &RunPlan::check(self.setup.check_timeout),
         )
         .await?;
         report.missing_packages = missing;
@@ -501,9 +511,39 @@ pub struct JobFiles {
     pub scratch: PathBuf,
     /// The fake internet's event log.
     pub network: PathBuf,
+    /// The warm build cache to mount, if there is one (ADR 0008).
+    pub warm: Option<PathBuf>,
+    /// An empty file that stands in for the warm image when there is none.
+    pub warm_placeholder: PathBuf,
 }
 
-/// Builds the payload and scratch disk, runs `cargo check` in `slot` with
+/// What runs in the VM.
+#[derive(Debug, Clone)]
+pub struct RunPlan {
+    /// The command.
+    pub argv: Vec<String>,
+    /// Its working directory.
+    pub cwd: String,
+    /// Guest side wall clock limit.
+    pub timeout: Duration,
+}
+
+impl RunPlan {
+    /// `cargo check` of the probe, the analysis every dynamic job gets.
+    #[must_use]
+    pub fn check(timeout: Duration) -> Self {
+        Self {
+            argv: ["cargo", "check", "--locked", "--offline"]
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+            cwd: PROBE_DIR.into(),
+            timeout,
+        }
+    }
+}
+
+/// Builds the payload and scratch disk, runs `plan` in `slot` with
 /// the given honeytokens planted, and analyzes the fake internet's log. No
 /// database access, so the canary test can call it directly.
 ///
@@ -520,33 +560,17 @@ pub async fn execute(
     spec: PayloadSpec,
     tokens: &Honeytokens,
     files: &JobFiles,
+    plan: &RunPlan,
 ) -> Result<RunReport, Failure> {
     let stats = build_payload(setup, blobs, spec, &files.payload).await?;
     make_scratch(setup.scratch_mib, &files.scratch).await?;
     crate::jail::acl::grant_user(&files.scratch, backend.slot_uid(slot))
         .map_err(Failure::infrastructure)?;
 
-    let mut directories = vec![PathSpec {
-        path: "/work/target".into(),
-        owner: BUILDER,
-        mode: 0o755,
-    }];
+    let (mounts, mut directories) = job_mounts(files.warm.is_some());
     directories.extend(tokens.directories.clone());
     let workspace = Workspace {
-        mounts: vec![
-            MountSpec {
-                device: "/dev/vdb".into(),
-                target: "/cw".into(),
-                fstype: "erofs".into(),
-                read_only: true,
-            },
-            MountSpec {
-                device: "/dev/vdc".into(),
-                target: "/work".into(),
-                fstype: "ext4".into(),
-                read_only: false,
-            },
-        ],
+        mounts,
         directories: directories.clone(),
         files: tokens.files.clone(),
     };
@@ -563,17 +587,14 @@ pub async fn execute(
     .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
     .collect();
     env.extend(tokens.env.clone());
-    let timeout = setup.check_timeout;
+    let timeout = plan.timeout;
     let input = JobInput {
         spec: JobSpec {
             job_id,
             wall_clock: now(),
-            argv: ["cargo", "check", "--locked", "--offline"]
-                .iter()
-                .map(|s| (*s).to_owned())
-                .collect(),
+            argv: plan.argv.clone(),
             env,
-            cwd: PROBE_DIR.into(),
+            cwd: plan.cwd.clone(),
             timeout_secs: u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX),
             output_limit: OUTPUT_LIMIT,
         },
@@ -581,8 +602,13 @@ pub async fn execute(
         drives: Some(JobDrives {
             payload: files.payload.clone(),
             scratch: files.scratch.clone(),
+            warm: files
+                .warm
+                .clone()
+                .unwrap_or_else(|| files.warm_placeholder.clone()),
         }),
         network_log: Some(files.network.clone()),
+        scratch_mib: setup.scratch_mib,
     };
     let run = backend
         .run_job(slot, input, timeout + HOST_MARGIN)
@@ -677,6 +703,70 @@ pub async fn execute(
         missing_packages: Vec::new(),
     };
     Ok(report)
+}
+
+/// Where the warm image is mounted in the guest, and the overlay's
+/// writable directories, all on the scratch disk.
+pub const WARM_IMAGE_DIR: &str = "/work/.warm/image";
+const WARM_UPPER: &str = "/work/.warm/upper";
+const WARM_WORK: &str = "/work/.warm/work";
+/// The target directory, as cargo sees it.
+pub const TARGET_DIR: &str = "/work/target";
+
+/// The mounts of a job, and the directories to create before it runs. With
+/// `warm`, the warm image's target directory lies under the job's own
+/// writable layer at [`TARGET_DIR`] (ADR 0008); without it, the target
+/// directory is a plain directory on the scratch disk.
+#[must_use]
+pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
+    let mut mounts = vec![
+        MountSpec {
+            device: "/dev/vdb".into(),
+            target: crate::payload::MOUNT_POINT.into(),
+            fstype: "erofs".into(),
+            read_only: true,
+            executable: false,
+            options: None,
+        },
+        MountSpec {
+            device: "/dev/vdc".into(),
+            target: "/work".into(),
+            fstype: "ext4".into(),
+            read_only: false,
+            executable: false,
+            options: None,
+        },
+    ];
+    if !warm {
+        return (
+            mounts,
+            vec![PathSpec {
+                path: TARGET_DIR.into(),
+                owner: BUILDER,
+                mode: 0o755,
+            }],
+        );
+    }
+    mounts.push(MountSpec {
+        device: "/dev/vdd".into(),
+        target: WARM_IMAGE_DIR.into(),
+        fstype: "erofs".into(),
+        read_only: true,
+        // Compiled build scripts and proc macros run from here.
+        executable: true,
+        options: None,
+    });
+    mounts.push(MountSpec {
+        device: "overlay".into(),
+        target: TARGET_DIR.into(),
+        fstype: "overlay".into(),
+        read_only: false,
+        executable: false,
+        options: Some(format!(
+            "lowerdir={WARM_IMAGE_DIR}/target,upperdir={WARM_UPPER},workdir={WARM_WORK}"
+        )),
+    });
+    (mounts, Vec::new())
 }
 
 /// Reads the scratch disk in the sandboxed scanner. A failure of the

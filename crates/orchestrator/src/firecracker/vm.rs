@@ -44,6 +44,7 @@ const NEW_MEMORY: &str = "snapshot.mem";
 const VSOCK: &str = "vsock.sock";
 const PAYLOAD: &str = "payload.img";
 const SCRATCH: &str = "scratch.img";
+const WARM: &str = "warm.img";
 
 /// Tap device of every slot. Each jail has its own network namespace, so
 /// the name is the same everywhere, as the snapshot requires.
@@ -158,14 +159,18 @@ pub struct Launch {
     pub isolation: Isolation,
 }
 
-/// The per job drives: the read only payload (`/dev/vdb` in the guest) and
-/// the writable scratch disk (`/dev/vdc`).
+/// The per job drives: the read only payload (`/dev/vdb` in the guest),
+/// the writable scratch disk (`/dev/vdc`) and the read only warm build
+/// cache (`/dev/vdd`, ADR 0008).
 #[derive(Debug, Clone)]
 pub struct JobDrives {
     /// EROFS image with the job's sources.
     pub payload: PathBuf,
     /// ext4 image the job may write.
     pub scratch: PathBuf,
+    /// EROFS image with the warm target directory, or an empty placeholder
+    /// file when there is none.
+    pub warm: PathBuf,
 }
 
 /// Resources of a VM that is booted from scratch.
@@ -247,9 +252,10 @@ impl Exposed {
         }
     }
 
-    fn drives(drives: &JobDrives) -> [Self; 2] {
+    fn drives(drives: &JobDrives) -> [Self; 3] {
         [
             Self::read_only(&drives.payload, PAYLOAD),
+            Self::read_only(&drives.warm, WARM),
             Self {
                 host: drives.scratch.clone(),
                 name: SCRATCH,
@@ -436,6 +442,7 @@ impl Vm {
             for (id, host, name, read_only) in [
                 ("payload", &drives.payload, PAYLOAD, true),
                 ("scratch", &drives.scratch, SCRATCH, false),
+                ("warm", &drives.warm, WARM, true),
             ] {
                 vm.api
                     .put(
@@ -528,6 +535,7 @@ impl Vm {
             for (id, host, name) in [
                 ("payload", &drives.payload, PAYLOAD),
                 ("scratch", &drives.scratch, SCRATCH),
+                ("warm", &drives.warm, WARM),
             ] {
                 vm.api
                     .patch(

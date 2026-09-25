@@ -13,6 +13,9 @@ fn main() -> ExitCode {
     if let Some(code) = crateward_orchestrator::scratch::dispatch(&args) {
         return code;
     }
+    if let Some(code) = crateward_orchestrator::scratch::dispatch_export(&args) {
+        return code;
+    }
     crateward_core::app::run_component(
         crateward_orchestrator::COMPONENT,
         crateward_orchestrator::run,

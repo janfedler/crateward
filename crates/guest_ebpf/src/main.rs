@@ -43,7 +43,7 @@
 use core::ptr::{addr_of_mut, read_volatile};
 
 use aya_ebpf::helpers::{
-    bpf_get_current_pid_tgid, bpf_get_current_uid_gid, bpf_ktime_get_ns, bpf_probe_read_kernel,
+    bpf_get_current_pid_tgid, bpf_get_current_task, bpf_ktime_get_ns, bpf_probe_read_kernel,
     bpf_probe_read_kernel_str_bytes, bpf_probe_read_user_buf, generated::bpf_d_path,
 };
 use aya_ebpf::macros::{btf_tracepoint, lsm, map};
@@ -68,6 +68,13 @@ const PATH_LEN: usize = 512;
 const ADDR_LEN: usize = 112;
 const FSTYPE_LEN: usize = 32;
 
+/// Files the kernel opens for its own use (`include/linux/fs.h`, 6.18):
+/// `FMODE_BACKING` for overlayfs's files on the underlying filesystem, and
+/// `FMODE_NOACCOUNT` for those and for its copy up temporary files. The
+/// open the process made on the overlay is traced; these would only repeat
+/// it with internal paths. No open from user space carries either flag.
+const FMODE_KERNEL_INTERNAL: u32 = (1 << 24) | (1 << 29);
+
 /// Starts every record. 24 bytes.
 #[repr(C)]
 struct Header {
@@ -76,7 +83,8 @@ struct Header {
     tgid: u32,
     /// Thread ID of the current task.
     tid: u32,
-    /// Real user ID of the current task.
+    /// Effective user ID of the current task, from its objective
+    /// credentials.
     uid: u32,
     /// `CLOCK_MONOTONIC` time in nanoseconds.
     time_ns: u64,
@@ -170,6 +178,10 @@ static OFF_TASK_MM: u32 = 0;
 #[unsafe(no_mangle)]
 static OFF_TASK_EXIT_CODE: u32 = 0;
 #[unsafe(no_mangle)]
+static OFF_TASK_REAL_CRED: u32 = 0;
+#[unsafe(no_mangle)]
+static OFF_CRED_EUID: u32 = 0;
+#[unsafe(no_mangle)]
 static OFF_MM_ARG_START: u32 = 0;
 #[unsafe(no_mangle)]
 static OFF_MM_ARG_END: u32 = 0;
@@ -179,6 +191,8 @@ static OFF_BINPRM_FILENAME: u32 = 0;
 static OFF_FILE_PATH: u32 = 0;
 #[unsafe(no_mangle)]
 static OFF_FILE_FLAGS: u32 = 0;
+#[unsafe(no_mangle)]
+static OFF_FILE_MODE: u32 = 0;
 #[unsafe(no_mangle)]
 static OFF_SOCKET_TYPE: u32 = 0;
 #[unsafe(no_mangle)]
@@ -208,11 +222,28 @@ fn config_usize(value: &u32) -> usize {
     config(value) as usize
 }
 
-/// The current task's process and thread IDs and user ID.
+/// The current task's process and thread IDs and effective user ID.
+///
+/// The user comes from the task's objective credentials (`real_cred`), not
+/// from `bpf_get_current_uid_gid`, which reads the subjective ones: the
+/// kernel overrides those temporarily, for example overlayfs with its
+/// mounter's (root) credentials during a copy up. A real change of user
+/// (a set user ID program, or an exploit that commits new credentials)
+/// shows in both.
 #[inline(always)]
 fn current() -> (u32, u32, u32) {
     let pid_tgid = bpf_get_current_pid_tgid();
-    let uid = bpf_get_current_uid_gid() as u32;
+    // SAFETY: the helper returns the current task, valid while the program
+    // runs; the reads go through `bpf_probe_read_kernel`.
+    let uid = unsafe {
+        let task = bpf_get_current_task() as *const u8;
+        let cred = field_u64(task, &OFF_TASK_REAL_CRED) as *const u8;
+        if cred.is_null() {
+            u32::MAX
+        } else {
+            field_u32(cred, &OFF_CRED_EUID)
+        }
+    };
     ((pid_tgid >> 32) as u32, pid_tgid as u32, uid)
 }
 
@@ -368,6 +399,10 @@ pub fn file_open(ctx: LsmContext) -> i32 {
         return 0;
     }
     let file: *const u8 = ctx.arg(0);
+    // SAFETY: `file` is the hook's argument.
+    if unsafe { field_u32(file, &OFF_FILE_MODE) } & FMODE_KERNEL_INTERNAL != 0 {
+        return 0;
+    }
     let Some(mut entry) = EVENTS.reserve::<Open>(0) else {
         dropped();
         return 0;

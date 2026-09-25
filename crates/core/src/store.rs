@@ -799,6 +799,93 @@ impl Store {
         Ok(rows.iter().map(|r| r.get(0)).collect())
     }
 
+    /// Recent fetch records that have a lockfile, newest first: job, crate
+    /// name, version, lockfile and locked packages. The warm build replays
+    /// them (ADR 0008).
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn recent_fetches(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<(JobId, String, String, String, Value)>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT j.id, j.crate_name, j.version, f.lockfile, f.packages
+                 FROM job_fetches f JOIN jobs j ON j.id = f.job_id
+                 WHERE f.lockfile IS NOT NULL AND f.packages IS NOT NULL
+                 ORDER BY f.fetched_at DESC LIMIT $1",
+                &[&limit],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| {
+                Ok((
+                    JobId(r.try_get(0)?),
+                    r.try_get(1)?,
+                    r.try_get(2)?,
+                    r.try_get(3)?,
+                    r.try_get(4)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// The BLAKE3 blob names of the given crate files (SHA-256) that are
+    /// stored.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn crate_blobs(
+        &self,
+        sha256: &[Vec<u8>],
+    ) -> Result<Vec<(Vec<u8>, String)>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT sha256, blake3 FROM crate_files
+                 WHERE sha256 = ANY($1) AND blake3 IS NOT NULL",
+                &[&sha256],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
+            .collect()
+    }
+
+    /// Of the given crate files (SHA-256), those Crateward stored at least
+    /// `min_age_secs` ago that have a static report and no report with a
+    /// high severity finding, with the BLAKE3 name of their blob. This is the
+    /// gate of the warm build cache (ADR 0008).
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn warm_eligible(
+        &self,
+        sha256: &[Vec<u8>],
+        min_age_secs: f64,
+    ) -> Result<Vec<(Vec<u8>, String)>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT cf.sha256, cf.blake3 FROM crate_files cf
+                 WHERE cf.sha256 = ANY($1)
+                   AND cf.fetched_at <= now() - make_interval(secs => $2)
+                   AND EXISTS (SELECT 1 FROM static_reports s WHERE s.sha256 = cf.sha256)
+                   AND NOT EXISTS (SELECT 1 FROM static_reports s
+                                   WHERE s.sha256 = cf.sha256 AND s.max_severity = 'high')",
+                &[&sha256, &min_age_secs],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
+            .collect()
+    }
+
     /// Records the static analysis decision of a job.
     ///
     /// # Errors

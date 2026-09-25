@@ -819,6 +819,7 @@ dependencies = [
 name = "crateward_orchestrator"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "bytes",
  "crateward_core",
  "crateward_fake_internet",
@@ -835,6 +836,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.21",
  "tokio",
+ "toml",
  "tracing",
 ]
 

@@ -125,10 +125,10 @@ cargo run -p crateward_cli -- state-machine diagram
 |-----------|-------|-------|
 | M0 | Foundation: workspace, CI, config, core types, state machine, docs | done |
 | M1 | Firecracker platform: guest kernel and rootfs, orchestrator, rootless jail, limits, cleanup | done |
-| M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | after M4 (its measurement needs `cargo check` in VMs) |
+| M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | done: warm target image from replayed dependency builds, 28% less run time measured (ADR 0008) |
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
-| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | in progress: runs, fake internet with TLS and packet capture, honeytokens and eBPF tracing work; disk diff open |
+| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | done: VM runs, eBPF trace, fake internet with TLS and packet capture, honeytokens, scratch disk scan; cross target checks later |
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | planned |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | planned |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | planned |

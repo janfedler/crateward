@@ -33,7 +33,7 @@ use crateward_orchestrator::firecracker::vm::{BootSpec, JobDrives};
 use crateward_orchestrator::honeytokens::Honeytokens;
 use crateward_orchestrator::payload::{Package, PayloadSpec};
 use crateward_orchestrator::trace::Role;
-use crateward_orchestrator::worker::{JobFiles, WorkerSetup, execute};
+use crateward_orchestrator::worker::{JobFiles, RunPlan, WorkerSetup, execute};
 
 const NAME: &str = "canary-exfil";
 const VERSION: &str = "0.1.0";
@@ -159,7 +159,11 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         fake_internet: Some(fake_internet),
         authority: Some(root().join("target/guest/ca/authority.pem")),
     };
-    for placeholder in ["placeholder-payload.img", "placeholder-scratch.img"] {
+    for placeholder in [
+        "placeholder-payload.img",
+        "placeholder-scratch.img",
+        "placeholder-warm.img",
+    ] {
         std::fs::File::create(work.join(placeholder)).unwrap();
     }
     let boot = BootSpec {
@@ -175,6 +179,7 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         drives: Some(JobDrives {
             payload: work.join("placeholder-payload.img"),
             scratch: work.join("placeholder-scratch.img"),
+            warm: work.join("placeholder-warm.img"),
         }),
         network: true,
     };
@@ -201,20 +206,28 @@ async fn a_build_script_that_steals_a_token_is_caught() {
             checksum,
             blake3: blob.blake3,
         }],
+        extra_probes: Vec::new(),
+        files: Vec::new(),
+        stubs: Vec::new(),
     };
     let setup = WorkerSetup {
         exe: PathBuf::from(env!("CARGO_BIN_EXE_crateward_orchestrator")),
         work_dir: work.clone(),
         scratch_mib: 2048,
         check_timeout: Duration::from_secs(300),
+        warm: None,
+        warm_placeholder: work.join("placeholder-warm.img"),
     };
     let files = JobFiles {
         payload: work.join("job.payload"),
         scratch: work.join("job.scratch"),
         network: work.join("job.network"),
+        warm: None,
+        warm_placeholder: work.join("placeholder-warm.img"),
     };
     let tokens = Honeytokens::generate(&mut rand::rng(), 1000);
-    let report = execute(&backend, 0, &setup, &blobs, 1, spec, &tokens, &files)
+    let plan = RunPlan::check(Duration::from_secs(300));
+    let report = execute(&backend, 0, &setup, &blobs, 1, spec, &tokens, &files, &plan)
         .await
         .unwrap();
     eprintln!("{}", serde_json::to_string_pretty(&report).unwrap());

@@ -234,7 +234,9 @@ starts it in a rootless jail ([ADR 0012](adr/0012-rootless-jail.md)).
   relative paths the snapshot expects.
 * **Payload.** The host builds a read only EROFS image of the job's vendored
   sources in tmpfs and swaps it in with `PATCH /drives/{id}` after restore.
-  Inside the guest, overlayfs stacks it with the warm dependency pool.
+  The warm build cache is a third drive, switched the same way; inside the
+  guest, overlayfs stacks its target directory under the job's own
+  writable layer.
 * **One channel.** The host initiates the only vsock connection
   (`CONNECT <port>`). It never listens on `<uds_path>_<port>`, so every guest
   initiated vsock connection is refused by Firecracker.
@@ -265,13 +267,14 @@ still open.
 
 ## Build cache
 
-A prewarmed base snapshot and a read only sccache instance reduce the work
-per job. The warmer compiles the most depended upon crates inside a VM, but
-the snapshot jobs restore is taken from a fresh clean boot with the warmed
-images attached read only, never from the VM that ran build scripts. Only
-versions at least 14 days old that Crateward itself scored low risk enter the
-warm set. sccache cannot cache `cargo check` output or proc macro crates, so
-the prewarmed target directory carries most of the benefit. See
+At startup the orchestrator replays the dependency builds of recent jobs in
+a VM, with each crate under analysis replaced by a stub, and packs the
+resulting target directory into a read only image. Every job then mounts it
+under its own writable layer and compiles only what the image lacks. Only
+versions Crateward has stored for two weeks, seen in several jobs and found
+without high severity static findings enter it; the warm build is analyzed
+like a job and a promotion check guards its use. In the measurement, run
+time fell by 28 percent. See
 [ADR 0008](adr/0008-prewarmed-snapshot-and-shared-sccache.md).
 
 ## Storage layout

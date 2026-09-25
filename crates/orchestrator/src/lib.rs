@@ -34,6 +34,7 @@ pub mod jail;
 pub mod payload;
 pub mod scratch;
 pub mod trace;
+pub mod warm;
 pub mod worker;
 
 use std::sync::Arc;
@@ -96,8 +97,12 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 memory_mib: sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB,
                 pids: 64,
             },
-            // Firecracker writes the base snapshot's memory file.
-            max_file_size: (sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB) << 20,
+            // Firecracker writes the base snapshot's memory file and the
+            // scratch disks (a job's, or the larger one of the warm build).
+            max_file_size: (sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB)
+                .max(sandbox.scratch_mib_per_slot)
+                .max(sandbox.warm.as_ref().map_or(0, warm::scratch_mib))
+                << 20,
             fake_internet: Some(sandbox.fake_internet_bin.clone()),
             authority: Some(sandbox.fake_internet_authority.clone()),
         };
@@ -119,8 +124,13 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let placeholders = JobDrives {
             payload: work.join("placeholder-payload.img"),
             scratch: work.join("placeholder-scratch.img"),
+            warm: work.join("placeholder-warm.img"),
         };
-        for file in [&placeholders.payload, &placeholders.scratch] {
+        for file in [
+            &placeholders.payload,
+            &placeholders.scratch,
+            &placeholders.warm,
+        ] {
             std::fs::File::create(file).map_err(fatal)?;
         }
         let boot = BootSpec {
@@ -153,15 +163,10 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         store.migrate().await.map_err(fatal)?;
         let blobs = BlobStore::open(&config.instance.data_dir.join("cas")).map_err(fatal)?;
         let policies = Policies::from_config(&config.stages).map_err(fatal)?;
-        let setup = WorkerSetup {
-            exe: std::env::current_exe().map_err(fatal)?,
-            work_dir: work.clone(),
-            scratch_mib: sandbox.scratch_mib_per_slot,
-            check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
-        };
-        let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
-
+        // Installed before the warm build, so a stop request during it ends
+        // its VM through reconciliation instead of leaving it behind.
         let stop = Arc::new(AtomicBool::new(false));
+        let (stopped_tx, stopped) = tokio::sync::watch::channel(false);
         let mut terminate =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                 .map_err(fatal)?;
@@ -172,7 +177,53 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 _ = tokio::signal::ctrl_c() => {}
             }
             flag.store(true, Ordering::SeqCst);
+            let _ = stopped_tx.send(true);
         });
+        let mut setup = WorkerSetup {
+            exe: std::env::current_exe().map_err(fatal)?,
+            work_dir: work.clone(),
+            scratch_mib: sandbox.scratch_mib_per_slot,
+            check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
+            warm: None,
+            warm_placeholder: work.join("placeholder-warm.img"),
+        };
+        // The warm build cache (ADR 0008). Any failure means cold builds,
+        // never a failed start.
+        if let Some(warm_config) = &sandbox.warm {
+            match warm::plan_from_store(&store, warm_config).await {
+                Ok(plan) if plan.probes.is_empty() => {
+                    tracing::info!("nothing qualifies for the warm build cache");
+                }
+                Ok(plan) => {
+                    tracing::info!(
+                        probes = plan.probes.len(),
+                        units = plan.units,
+                        packages = plan.packages.len(),
+                        replayed = %plan.stubs.join(" "),
+                        "building the warm build cache"
+                    );
+                    let mut stopping = stopped.clone();
+                    let built = tokio::select! {
+                        built = warm::build(&backend, 0, &setup, &blobs, warm_config, &plan) => built,
+                        _ = stopping.wait_for(|s| *s) => {
+                            let reconciled = backend.reconcile().await.map_err(fatal)?;
+                            tracing::info!(?reconciled, "stopped during the warm build");
+                            return Ok(());
+                        }
+                    };
+                    match built {
+                        Ok(image) => {
+                            tracing::info!(image = ?image, "warm build cache ready");
+                            setup.warm = image;
+                        }
+                        Err(error) => tracing::warn!(%error, "no warm build cache"),
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "cannot plan the warm build cache"),
+            }
+        }
+        let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
+
 
         let mut tasks = Vec::new();
         for slot in 0..sandbox.slots {

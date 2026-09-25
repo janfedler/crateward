@@ -147,6 +147,20 @@ slots_dir = "/run/crateward/slots"
 slot_uid_base = 200000
 slot_gid_base = 200000
 
+# The warm build cache (ADR 0008): the orchestrator replays the dependency
+# builds of recent jobs in a VM and mounts the result read only under every
+# job's target directory. Leave this table out to build every job cold.
+[sandbox.warm]
+# Recent fetches to choose from, and how many of them to replay at most.
+sample_jobs = 400
+max_probes = 80
+# A crate version enters only if this many sampled jobs lock it, and only
+# if Crateward stored its file at least this long ago (two weeks).
+min_jobs = 3
+min_age_hours = 336
+timeout_secs = 5400
+max_image_mib = 6144
+
 [storage]
 # Above this usage the maintainer is alerted.
 disk_alert_percent = 85

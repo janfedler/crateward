@@ -95,6 +95,18 @@ Facts verified on 2026-09-25:
   reading the credentials file is different from a build script doing it,
   which is why each access names its process.
 
+## Revision (2026-09-25, with ADR 0008)
+
+* The user in every record is the effective user of the task's objective
+  credentials (`task->real_cred->euid`), not of the subjective ones that
+  `bpf_get_current_uid_gid` reads: overlayfs replaces those with its
+  mounter's root credentials during a copy up, which made build processes
+  look like root. A real change of user shows in both.
+* `file_open` skips files the kernel opens for its own use
+  (`FMODE_BACKING` and `FMODE_NOACCOUNT` in `f_mode`): overlayfs's backing
+  files and copy up temporary files, which would repeat the job's own
+  opens under internal paths.
+
 ## Sources
 
 * aya `README.md` and aya template, `https://github.com/aya-rs/aya`,

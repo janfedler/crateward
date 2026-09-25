@@ -26,7 +26,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Version of this protocol. Bumped on any incompatible change.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 /// The vsock port the guest agent listens on.
 pub const AGENT_PORT: u32 = 1024;
@@ -90,17 +90,22 @@ pub struct Workspace {
     pub files: Vec<FileSpec>,
 }
 
-/// One mount of a block device.
+/// One mount: a block device, or an overlay of mounted directories.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MountSpec {
-    /// Device, `/dev/vd` followed by one letter from `b` on.
+    /// Device, `/dev/vd` followed by one letter from `b` on, or `overlay`.
     pub device: String,
-    /// Mount point; must exist.
+    /// Mount point. Must exist for block devices; created for overlays.
     pub target: String,
-    /// `erofs` or `ext4`.
+    /// `erofs`, `ext4` or `overlay`.
     pub fstype: String,
     /// Mount read only.
     pub read_only: bool,
+    /// Programs may run from an `erofs` mount. Crate sources never do;
+    /// the warm build cache does (ADR 0008).
+    pub executable: bool,
+    /// For `overlay` only: `lowerdir=…,upperdir=…,workdir=…`.
+    pub options: Option<String>,
 }
 
 /// A directory with its owner and mode.
@@ -213,7 +218,7 @@ pub struct TraceEvent {
     pub pid: u32,
     /// Thread ID.
     pub tid: u32,
-    /// Real user ID.
+    /// Effective user ID, from the task's objective credentials.
     pub uid: u32,
     /// What happened.
     pub kind: TraceKind,

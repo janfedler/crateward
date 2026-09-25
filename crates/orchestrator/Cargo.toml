@@ -17,6 +17,7 @@ name = "crateward-vmjail"
 path = "src/bin/vmjail.rs"
 
 [dependencies]
+blake3.workspace = true
 bytes.workspace = true
 crateward_fake_internet.workspace = true
 # Reads scratch disks in a sandboxed child (`scratch`).
@@ -26,6 +27,8 @@ http-body-util.workspace = true
 rand.workspace = true
 semver.workspace = true
 tar.workspace = true
+# Rewrites manifests into stubs for the warm build (ADR 0008).
+toml.workspace = true
 rustix = { workspace = true, features = ["fs", "mount", "process", "system", "thread", "stdio"] }
 hyper.workspace = true
 hyper-util.workspace = true
