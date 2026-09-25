@@ -70,8 +70,13 @@ database):
 
 ## Consequences
 
-* After the recalibration, the 625 finished dev versions scored none 494,
-  low 127, medium 3, high 0. The point values are a first calibration;
+* After the recalibration and the confirmation runs, the 672 dev versions
+  scored none 496, low 165, medium 10, high 1. The one high verdict is a
+  crate whose dependency (`rustpython-vm`) writes the build environment,
+  including the planted `GITHUB_TOKEN`, into generated source; the
+  evidence names that dependency. Evidence is deduplicated with cargo's
+  unit hashes removed from paths, so a behavior seen in both runs counts
+  once. The point values are a first calibration;
   M7 measures precision on live traffic and the canaries pin the extremes
   (the known bad canary is critical, the known good one scores nothing).
 * The analyzer links the orchestrator and static analysis packages for

@@ -32,7 +32,7 @@ use crateward_static_analysis::diff::VersionDiff;
 use crateward_static_analysis::findings::{Finding, FindingKind, Severity};
 
 /// Bumped whenever scoring changes, so old verdicts can be recomputed.
-pub const ANALYZER_VERSION: u32 = 2;
+pub const ANALYZER_VERSION: u32 = 3;
 
 /// Everything scoring reads about one version.
 #[derive(Debug, Clone, Copy)]
@@ -93,12 +93,16 @@ impl Groups {
         package: Option<String>,
         location: Option<String>,
     ) {
-        // The same signal at the same place counts once, whichever run saw it.
-        if self
-            .items
-            .iter()
-            .any(|(_, e)| e.signal == signal && e.location == location && e.package == package)
-        {
+        // The same signal at the same place counts once, whichever run saw
+        // it. Cargo puts a unit's outputs in a directory named with a hash
+        // of its settings, which differs between `cargo check` and `cargo
+        // build`; the place is compared without it.
+        let place = location.as_deref().map(without_unit_hash);
+        if self.items.iter().any(|(_, e)| {
+            e.signal == signal
+                && e.package == package
+                && e.location.as_deref().map(without_unit_hash) == place
+        }) {
             return;
         }
         self.items.push((
@@ -154,6 +158,21 @@ fn package_of(pid: u32, processes: &HashMap<u32, &Process>) -> Option<String> {
         current = p.ppid.and_then(|pp| processes.get(&pp).copied());
     }
     None
+}
+
+/// A path with every `-<16 hex digits>` directory suffix removed.
+fn without_unit_hash(path: &str) -> String {
+    path.split('/')
+        .map(|part| match part.rsplit_once('-') {
+            Some((stem, hash))
+                if hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()) =>
+            {
+                stem
+            }
+            _ => part,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// `<package>` from a path inside a build script's directory,
@@ -707,6 +726,24 @@ mod tests {
         assert_eq!(read.package.as_deref(), Some("evil"));
         assert!(v.profile.contains(&"read:cargo-credentials".to_owned()));
         assert!(!should_escalate(&v));
+    }
+
+    #[test]
+    fn one_behavior_in_two_runs_counts_once() {
+        let copy = |dir: &str| {
+            run(json!({"tokens_on_disk": [{"kind": "github_token_env",
+                "via": format!("/work/target/debug/build/dep-{dir}/out/env.rs")}]}))
+        };
+        let runs = [copy("0123456789abcdef"), copy("fedcba9876543210")];
+        let v = score(&inputs(&runs));
+        let copies: Vec<_> = v
+            .evidence
+            .iter()
+            .filter(|e| e.signal == "honeytoken_copied")
+            .collect();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(copies[0].package.as_deref(), Some("dep"));
+        assert_eq!(v.level, RiskLevel::High);
     }
 
     #[test]
