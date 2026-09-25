@@ -233,6 +233,16 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
         run_ip(&[
             "tuntap", "add", "dev", tap, "mode", "tap", "user", &owner, "group", &owner,
         ])?;
+        // A fixed host side MAC lets the fake internet skip frames the host
+        // sent, and without an IPv6 link local address the host sends no
+        // IPv6 at all: every IPv6 frame on the tap is the guest's.
+        let mac = crateward_fake_internet::capture::HOST_MAC
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(":");
+        run_ip(&["link", "set", "dev", tap, "address", &mac])?;
+        run_ip(&["link", "set", "dev", tap, "addrgenmode", "none"])?;
         run_ip(&["link", "set", tap, "up"])?;
         if spec.sinks.is_some() {
             run_ip(&[
@@ -292,11 +302,13 @@ fn start_sinks(
             .map_err(step("duplicating /dev/null"))?
             .into(),
     };
+    // Started with the namespace's privileges so that it can open its
+    // packet socket; it switches to the slot's user itself before it reads
+    // anything from the guest.
     let mut child = Command::new(FAKE_INTERNET_IN_JAIL)
         .arg("slot")
+        .arg(INSIDE_VM_ID.to_string())
         .env_clear()
-        .uid(INSIDE_VM_ID)
-        .gid(INSIDE_VM_ID)
         .stdin(stdin)
         .stdout(events)
         .stderr(errors)

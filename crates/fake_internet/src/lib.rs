@@ -21,11 +21,16 @@
 //!   stdin from the launcher and never exists inside a VM. Clients that
 //!   bring their own root list refuse the handshake; the server name is
 //!   logged either way.
+//! * A packet socket on the tap device logs every frame the proxies do not
+//!   see, such as IPv6 and ICMP. The process opens it with the namespace's
+//!   privileges, then drops to the slot's user before it reads anything
+//!   from the guest.
 //! * Parsers of guest traffic are property tested and fuzz targets, because
 //!   the guest controls every byte they see.
 
 #![forbid(unsafe_code)]
 
+pub mod capture;
 pub mod dns;
 pub mod server;
 pub mod sniff;
@@ -54,8 +59,9 @@ pub fn run(_config: &Config) -> Result<(), ComponentError> {
     })
 }
 
-/// Runs the per slot server if `args` names it: enters its sandbox, then
-/// serves until killed, logging to stdout.
+/// Runs the per slot server if `args` names it (`slot <uid>`): opens the
+/// packet socket, switches to `uid`, enters its sandbox, then serves until
+/// killed, logging to stdout.
 #[must_use]
 pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
     use crateward_core::sandbox::{self, FsAccess, Limits};
@@ -88,6 +94,30 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
         }
     };
     drop(pem);
+    let Some(uid) = args.get(2).and_then(|a| a.parse::<u32>().ok()) else {
+        return Some(fail("usage: slot <uid>"));
+    };
+    let capture = match capture::open() {
+        Ok(socket) => socket,
+        Err(error) => return Some(fail(&format!("opening the packet socket: {error}"))),
+    };
+    // Still single threaded, so the switch covers every thread started
+    // later. Moving every UID away from 0 clears all capabilities.
+    let switched = rustix::thread::set_thread_res_gid(
+        rustix::process::Gid::from_raw(uid),
+        rustix::process::Gid::from_raw(uid),
+        rustix::process::Gid::from_raw(uid),
+    )
+    .and_then(|()| {
+        let id = rustix::process::Uid::from_raw(uid);
+        rustix::thread::set_thread_res_uid(id, id, id)
+    });
+    if let Err(error) = switched {
+        return Some(fail(&format!("switching to user {uid}: {error}")));
+    }
+    if rustix::process::getuid().as_raw() == 0 {
+        return Some(fail("still root after switching users"));
+    }
     let entered = sandbox::limit(Limits {
         address_space: 1 << 30,
         cpu_seconds: 3_600,
@@ -99,7 +129,7 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
         return Some(fail(&error.to_string()));
     }
     let out = Box::new(std::io::stdout());
-    match server::serve(server::SlotConfig::default(), out, tls) {
+    match server::serve(server::SlotConfig::default(), out, tls, Some(capture)) {
         Ok(()) => Some(std::process::ExitCode::SUCCESS),
         Err(error) => Some(fail(&error.to_string())),
     }

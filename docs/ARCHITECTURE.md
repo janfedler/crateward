@@ -118,7 +118,8 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    its output and an eBPF trace (processes, file opens, connections, tamper
    attempts; [ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) over the
    single vsock connection. The fake internet records every network attempt
-   as host side ground truth. Planned: cross target checks where the crate
+   as host side ground truth, including frames no proxy sees
+   ([ADR 0018](adr/0018-frames-the-proxies-do-not-see.md)). Planned: cross target checks where the crate
    has platform specific code, and a scratch disk diff.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.

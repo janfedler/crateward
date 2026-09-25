@@ -107,6 +107,19 @@ pub enum EventKind {
         /// The destination the guest dialed.
         dst: String,
     },
+    /// A frame no proxy saw: IPv6, ICMP, another IP protocol or raw
+    /// Ethernet ([`crate::capture`]).
+    Packet {
+        /// What it was, for example `ipv6 tcp [fd00::2]:40000 -> [2001:db8::1]:443`.
+        summary: String,
+        /// Length of the frame.
+        bytes: u64,
+        /// The first [`crate::capture::PACKET_CAPTURE`] bytes of the frame,
+        /// hex encoded.
+        data: String,
+    },
+    /// Frames beyond [`crate::capture::MAX_PACKETS`] were only counted.
+    PacketLimit,
     /// Events beyond [`MAX_EVENTS`] were not logged.
     Truncated,
 }
@@ -397,6 +410,7 @@ fn serve_tcp(listener: &TcpListener, log: &Shared, tls: Option<&Arc<rustls::Serv
 
 /// Binds the sinks and serves until the process is killed. Events go to
 /// `out`, one JSON line each. With `tls`, TLS connections are terminated.
+/// With `capture`, a packet socket, frames that no proxy sees are logged.
 ///
 /// # Errors
 ///
@@ -405,6 +419,7 @@ pub fn serve(
     config: SlotConfig,
     out: Box<dyn Write + Send>,
     tls: Option<Arc<rustls::ServerConfig>>,
+    capture: Option<std::os::fd::OwnedFd>,
 ) -> std::io::Result<()> {
     let at = |port| SocketAddr::from((config.address, port));
     let dns_socket = UdpSocket::bind(at(config.dns_port))?;
@@ -420,6 +435,22 @@ pub fn serve(
     std::thread::spawn(move || serve_dns(&dns_socket, address, &dns_log));
     let udp_log = Arc::clone(&log);
     std::thread::spawn(move || serve_udp(&udp_socket, &udp_log));
+    if let Some(socket) = capture {
+        let packet_log = Arc::clone(&log);
+        std::thread::spawn(move || {
+            crate::capture::run(&socket, |packet| {
+                let kind = match packet {
+                    Some((summary, bytes, data)) => EventKind::Packet {
+                        summary,
+                        bytes,
+                        data: hex(data),
+                    },
+                    None => EventKind::PacketLimit,
+                };
+                emit(&packet_log, kind);
+            });
+        });
+    }
     serve_tcp(&listener, &log, tls.as_ref());
     Ok(())
 }

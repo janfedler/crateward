@@ -120,6 +120,12 @@ pub struct NetworkSummary {
     pub udp_datagrams: u32,
     /// Connections refused because too many were open.
     pub refused: u32,
+    /// Frames no proxy saw (IPv6, ICMP, other protocols), described.
+    #[serde(default)]
+    pub packets: Vec<String>,
+    /// More such frames arrived than the fake internet logs.
+    #[serde(default)]
+    pub packets_truncated: bool,
     /// The log hit its event limit.
     pub truncated: bool,
 }
@@ -228,6 +234,17 @@ fn analyze_network(
                 leak(&unhex(&data).unwrap_or_default(), "udp");
                 summary.udp_datagrams = summary.udp_datagrams.saturating_add(1);
             }
+            EventKind::Packet {
+                summary: what,
+                data,
+                ..
+            } => {
+                leak(&unhex(&data).unwrap_or_default(), "packet");
+                if summary.packets.len() < MAX_LISTED {
+                    summary.packets.push(what);
+                }
+            }
+            EventKind::PacketLimit => summary.packets_truncated = true,
             EventKind::Refused { .. } => summary.refused = summary.refused.saturating_add(1),
             EventKind::Truncated => summary.truncated = true,
         }

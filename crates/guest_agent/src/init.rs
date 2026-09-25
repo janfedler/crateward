@@ -78,6 +78,20 @@ pub fn mount_filesystems() -> Result<(), AgentError> {
     Ok(())
 }
 
+/// Turns IPv6 off on the network interfaces. The guest has no IPv6 route
+/// anyway; without this its kernel announces itself on the link after every
+/// restore, which would put the same frames into every job's packet log. A
+/// program that tries IPv6 still appears in the trace, and guest root that
+/// turns it back on appears on the host.
+pub fn disable_ipv6() {
+    for conf in ["default", "all", "eth0"] {
+        let path = format!("/proc/sys/net/ipv6/conf/{conf}/disable_ipv6");
+        if let Err(error) = std::fs::write(&path, "1") {
+            eprintln!("crateward agent: {path}: {error}");
+        }
+    }
+}
+
 /// Syncs and restarts the VM. With `reboot=k` on the kernel command line,
 /// Firecracker exits when the guest restarts, which ends the VM.
 pub fn shut_down() -> ! {

@@ -92,7 +92,7 @@ test. Nothing is marked Built before the code exists.
 |------------|--------|-----------|
 | Per slot network namespace with only the tap device and the fake internet; no uplink and no route out ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)) | Built | M4 |
 | Every guest DNS query, TCP connection and UDP datagram redirected to the fake internet by nftables in the slot namespace; nothing else is reachable | Built | M4 |
-| IPv6 attempts logged | Planned | M4 |
+| Frames no proxy sees (IPv6, ICMP, other protocols, raw Ethernet) logged by a packet socket on the tap, opened before the fake internet drops to the slot user; IPv6 attempts also appear in the eBPF trace ([ADR 0018](adr/0018-frames-the-proxies-do-not-see.md)) | Tested (canary) | M4 |
 | Fake internet runs as the slot's user with Landlock (no filesystem) and rlimits; its DNS, HTTP and TLS parsers are property tested | Tested | M4 |
 | The fake internet's parsers as fuzz targets | Planned | M7 |
 | The fake internet's log (every DNS query, connection and datagram with its first 64 KiB) is owned by the orchestrator and read after the run as ground truth; the job's honeytokens are searched in it | Tested (canary) | M4 |
