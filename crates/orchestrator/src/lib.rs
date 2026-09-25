@@ -84,6 +84,10 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         .map_err(fatal)?;
     runtime.block_on(async {
         let sandbox = &config.sandbox;
+        // Reconciliation removes every slot's leftovers, so a second
+        // instance would tear down the first one's jails. The lock is held
+        // until the process ends.
+        let _instance = lock_instance(&config.instance.run_dir)?;
         let cgroups = CgroupTree::own().map_err(fatal)?;
         let memory_mib = u32::try_from(sandbox.memory_mib_per_slot).map_err(fatal)?;
         let fc = FirecrackerConfig {
@@ -294,11 +298,53 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
     })
 }
 
+/// Takes the lock that allows one orchestrator per `run_dir`.
+fn lock_instance(run_dir: &std::path::Path) -> Result<std::fs::File, ComponentError> {
+    std::fs::create_dir_all(run_dir).map_err(fatal)?;
+    let path = run_dir.join("orchestrator.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| fatal(format!("{}: {e}", path.display())))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(fatal(format!(
+            "another orchestrator holds {}; stop it first",
+            path.display()
+        ))),
+        Err(std::fs::TryLockError::Error(e)) => {
+            Err(fatal(format!("locking {}: {e}", path.display())))
+        }
+    }
+}
+
 /// A snapshot value for the reconciling backend, which never restores.
 fn placeholder_snapshot() -> firecracker::vm::Snapshot {
     firecracker::vm::Snapshot {
         state: std::path::PathBuf::new(),
         memory: std::path::PathBuf::new(),
         rootfs: std::path::PathBuf::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_instance_is_refused_until_the_first_ends() {
+        let dir = std::env::temp_dir().join(format!(
+            "cw-lock-{}-{}",
+            std::process::id(),
+            rand::random::<u32>()
+        ));
+        let first = lock_instance(&dir).unwrap();
+        let second = lock_instance(&dir).unwrap_err().to_string();
+        assert!(second.contains("another orchestrator"), "{second}");
+        drop(first);
+        drop(lock_instance(&dir).unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -315,7 +315,14 @@ impl FirecrackerBackend {
             Some(root) if crate::jail::decoy::touched(root) => JobEnd::DecoyTouched,
             _ => end,
         };
-        vm.destroy().await?;
+        // Whatever touched the decoy may also have broken the jail's
+        // cleanup; a failed cleanup must not hide the indicator.
+        match vm.destroy().await {
+            Err(error) if end == JobEnd::DecoyTouched => {
+                tracing::warn!(slot, %error, "cleanup failed after the decoy was touched");
+            }
+            destroyed => destroyed?,
+        }
         Ok(JobRun { end, restore, run })
     }
 }
