@@ -131,13 +131,13 @@ cargo run -p crateward_cli -- state-machine diagram
 | M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | done: VM runs, eBPF trace, fake internet with TLS and packet capture, honeytokens, scratch disk scan; cross target checks later |
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | done: breakers, quarantine, pauses, canaries, deadlines, alerts, heartbeat (ADR 0020) |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | done: scoring and review inbox (ADR 0021), dashboard (loopback, reached through an SSH tunnel) and public export (ADR 0022) |
-| M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | planned |
+| M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | done: 13 fuzz targets, host escape detection and retention (ADR 0023), [security checklist](docs/SECURITY_CHECKLIST.md), measured storage budget; the offsite backup target waits for the maintainer |
 | M8 | Launch: deployment, runbook, disclosure workflow, write up | planned |
 
 ## Documentation
 
 * [Architecture](docs/ARCHITECTURE.md) and [threat model](docs/THREAT_MODEL.md)
-* [Security policy](docs/SECURITY.md) and [disclosure workflow](docs/DISCLOSURE.md)
+* [Security policy](docs/SECURITY.md), [security checklist](docs/SECURITY_CHECKLIST.md) and [disclosure workflow](docs/DISCLOSURE.md)
 * [Runbook](docs/RUNBOOK.md), [operations](docs/OPERATIONS.md) and [testing](docs/TESTING.md)
 * [Dependencies](docs/DEPENDENCIES.md), one line of justification each
 * [Architecture decision records](docs/adr/README.md)

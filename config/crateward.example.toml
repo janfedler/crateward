@@ -192,6 +192,16 @@ breaker_cooldown_secs = 300
 breaker_max_cooldown_secs = 7200
 # The same alert is sent again at most this often.
 alert_repeat_hours = 24
+# Minutes between two checks of the files in the integrity manifest
+# (`crateward integrity record` writes it after every deploy).
+integrity_interval_minutes = 60
+# Decoy files: planted when missing, and any open of one raises a sandbox
+# escape alert. Exclude them from backups and indexers.
+decoys = [
+    "/home/crateward/.aws/credentials",
+    "/home/crateward/.ssh/id_ed25519_github",
+    "/var/lib/crateward/decoys/deploy-token",
+]
 
 [notifier]
 kind = "ntfy"

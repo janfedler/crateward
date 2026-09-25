@@ -82,10 +82,13 @@ with an evidence pack.
 ## Sandbox escape indicator
 
 **Meaning.** Something suggests a crate may have escaped its microVM:
-Firecracker exited after a forbidden system call or a fatal signal, a host
-honeytoken was touched (M7), or the host changed unexpectedly (M7). A guest
-that merely stopped itself is not an escape indicator; it is recorded as a
-result.
+Firecracker exited after a forbidden system call or a fatal signal,
+something read the decoy in a jail root (the job ends as a suspected
+compromise), something opened a decoy on the host, a process runs with a
+slot UID that the jail did not start, or a file of the integrity manifest
+changed ([ADR 0023](adr/0023-host-escape-detection-and-retention.md)). The
+pause detail in `crateward status` lists the findings. A guest that merely
+stopped itself is not an escape indicator; it is recorded as a result.
 
 **Already done.** Quarantine: the whole pipeline paused. The job that was
 running is failed and will not be retried automatically.
@@ -95,13 +98,19 @@ running is failed and will not be retried automatically.
 2. Copy the jail directory of the slot, the tap capture and the job's
    evidence pack to the HDD archive.
 3. Check the host for persistence: new users, systemd units, cron entries,
-   changed binaries (integrity monitoring, M7), unknown processes.
+   changed binaries (`crateward integrity --config <file> check`), unknown
+   processes (`ps -eo pid,ppid,uid,comm` for the slot UIDs).
+   An integrity finding right after a deploy usually means the manifest was
+   not recorded again; confirm the deploy changed exactly those files.
 4. If anything is confirmed, treat the host as compromised: rotate the
    WireGuard keys, the deploy key, the ntfy topic and the heartbeat URL,
    then reinstall from the Ansible playbooks and restore data from backup.
 5. Report a Firecracker or KVM escape to the respective project's security
    contact.
-6. Lift quarantine only after the cause is understood:
+6. Before lifting, run `crateward integrity --config <file> record` if the
+   manifest was the cause and the new files are the deployed ones;
+   otherwise the next check quarantines the pipeline again.
+7. Lift quarantine only after the cause is understood:
    `crateward quarantine lift`. `crateward status` shows what is paused.
 
 ## Decommissioning the server

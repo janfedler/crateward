@@ -169,7 +169,8 @@ pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child
 }
 
 /// Prepares a slot's root directory: empty, owned by the orchestrator, and
-/// accessible to the slot's subordinate UID through an ACL entry only.
+/// accessible to the slot's subordinate UID through an ACL entry only,
+/// with a [decoy](super::decoy) in it.
 ///
 /// # Errors
 ///
@@ -182,7 +183,8 @@ pub fn prepare_root(root: &Path, vm_uid: u32) -> Result<(), JailError> {
     std::fs::create_dir_all(root).map_err(io("creating the jail root"))?;
     std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))
         .map_err(io("restricting the jail root"))?;
-    super::acl::grant_user(root, vm_uid).map_err(io("setting the jail root ACL"))
+    super::acl::grant_user(root, vm_uid).map_err(io("setting the jail root ACL"))?;
+    super::decoy::plant(root).map_err(io("planting the jail decoy"))
 }
 
 /// Host path of a file Firecracker sees at `name` in the jail root.

@@ -115,7 +115,7 @@ async fn migrations_are_idempotent() {
         return;
     };
     let mut store = db.store().await;
-    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
     assert!(store.migrate().await.unwrap().is_empty());
     db.drop().await;
 }
@@ -720,5 +720,86 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
     );
     // Neither job is finished, so nothing is outdated yet.
     assert!(store.outdated_verdicts(2, 10).await.unwrap().is_empty());
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn old_unflagged_runs_lose_their_raw_data_only() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let report = serde_json::json!({
+        "stdout_tail": "out", "stderr_tail": "err",
+        "trace": {"processes": [{"pid": 1}, {"pid": 2}], "processes_omitted": 3,
+                  "sockets": [{"to": "example.com"}]},
+        "network": {"lookups": 1}
+    });
+    let mut jobs = Vec::new();
+    for (version, score, review) in [
+        ("1.0.0", 5, Review::None),
+        ("2.0.0", 70, Review::Pending),
+        ("3.0.0", 5, Review::None),
+    ] {
+        let job = store
+            .enqueue(&new_job("kept", version, 0))
+            .await
+            .unwrap()
+            .unwrap();
+        store
+            .record_run(job, "check", "Built", &report)
+            .await
+            .unwrap();
+        store
+            .record_verdict(
+                job,
+                &Verdict {
+                    score,
+                    level: RiskLevel::from_score(score),
+                    coverage: Coverage::DynamicLinux,
+                    evidence: Vec::new(),
+                    profile: Vec::new(),
+                    new_behavior: Vec::new(),
+                    analyzer_version: 1,
+                },
+            )
+            .await
+            .unwrap();
+        store.set_review(job, review, None).await.unwrap();
+        jobs.push(job);
+    }
+    let raw = db.raw().await;
+    raw.batch_execute(&format!(
+        "SET search_path TO {}; UPDATE jobs SET state = 'Done';
+         UPDATE job_runs SET recorded_at = now() - interval '9 days'
+         WHERE job_id IN ({}, {})",
+        db.schema, jobs[0].0, jobs[1].0
+    ))
+    .await
+    .unwrap();
+
+    assert_eq!(store.trim_raw_runs(7, 100).await.unwrap(), 1);
+    assert_eq!(store.trim_raw_runs(7, 100).await.unwrap(), 0);
+    let trimmed = &store.job_runs(jobs[0]).await.unwrap()[0].1;
+    assert_eq!(trimmed["stderr_tail"], "");
+    assert_eq!(trimmed["trimmed"], true);
+    assert_eq!(trimmed["trace"]["processes"], serde_json::json!([]));
+    assert_eq!(trimmed["trace"]["processes_omitted"], 5);
+    assert_eq!(trimmed["trace"]["sockets"], report["trace"]["sockets"]);
+    assert_eq!(trimmed["network"], report["network"]);
+    for job in &jobs[1..] {
+        assert_eq!(store.job_runs(*job).await.unwrap()[0].1, report);
+    }
+    // A trimmed job keeps its verdict when the analyzer changes.
+    let outdated: Vec<_> = store
+        .outdated_verdicts(2, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|j| j.id)
+        .collect();
+    assert!(!outdated.contains(&jobs[0]));
+    assert!(outdated.contains(&jobs[2]));
     db.drop().await;
 }

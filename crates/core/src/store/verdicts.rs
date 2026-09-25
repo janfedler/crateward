@@ -160,6 +160,7 @@ impl Store {
     }
 
     /// Finished jobs whose verdict an older analyzer produced, oldest first.
+    /// Jobs with trimmed runs keep their verdict (see `retention`).
     ///
     /// # Errors
     ///
@@ -176,6 +177,8 @@ impl Store {
                 &format!(
                     "SELECT {} FROM jobs j JOIN verdicts v ON v.job_id = j.id
                      WHERE j.state = 'Done' AND v.analyzer_version < $1
+                       AND NOT EXISTS (SELECT 1 FROM job_runs r
+                                       WHERE r.job_id = j.id AND r.trimmed_at IS NOT NULL)
                      ORDER BY v.scored_at LIMIT $2",
                     super::COLUMNS_J
                 ),

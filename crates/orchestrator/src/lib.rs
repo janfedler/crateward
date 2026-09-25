@@ -119,6 +119,13 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         }
         drop(fake_internet);
         std::fs::create_dir_all(&fc.slots_dir).map_err(fatal)?;
+        // The jail decoys rely on reads updating the access time (ADR 0023).
+        if !jail::decoy::atime_works(&fc.slots_dir).map_err(fatal)? {
+            return Err(fatal(format!(
+                "reads do not update access times below {}; mount it with relatime or strictatime",
+                fc.slots_dir.display()
+            )));
+        }
         let work = config.instance.run_dir.join("orchestrator");
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work).map_err(fatal)?;

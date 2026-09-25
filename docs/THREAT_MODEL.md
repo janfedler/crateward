@@ -56,7 +56,7 @@ test. Nothing is marked Built before the code exists.
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| Fresh microVM per job from a clean snapshot; never reused | Planned | M1 |
+| Fresh microVM per job from a clean snapshot; never reused | Built | M1 |
 | Firecracker always started in the rootless jail: distinct subordinate UID per slot, mount, network, IPC and UTS namespaces, `pivot_root` with only the needed files, no capabilities, `no_new_privs` ([ADR 0012](adr/0012-rootless-jail.md)) | Tested | M1 |
 | Firecracker's default seccomp filters; never `--no-seccomp` | Tested | M1 |
 | No process runs as root for the sandbox; the orchestrator and the launcher are unprivileged | Built | M1 |
@@ -66,13 +66,13 @@ test. Nothing is marked Built before the code exists.
 | Drive and network rate limiters: 256 MiB/s and 50,000 operations per second per drive, 4 MiB/s and 2000 packets per second on the network | Built | M4 |
 | SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Built (verified on the host) | M1 |
 | KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand; Ansible in M8) | M1 |
-| Guest kernel without module support, so guest root cannot load a rootkit module | Planned | M1 |
+| Guest kernel without module support (`CONFIG_MODULES` off), so guest root cannot load a rootkit module | Built | M1 |
 | Check that guest visible CPU mitigations are not weaker than the host's; the stock Debian 6.12 host kernel is outside Firecracker's validated matrix | Tested | M1 |
 | Startup reconciliation removes slot cgroups and directories left by a crash; namespaces and tap devices cannot outlive their process | Tested | M1 |
 | eBPF programs loaded at boot trace every process of the job, its file opens, socket destinations and tamper attempts (`bpf`, `ptrace`, `mount`); a base snapshot is refused when tracing does not start ([ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) | Tested (canary) | M4 |
 | The trace is the guest's account and can be blinded by guest root; it is read next to host ground truth, and a trace without its closing totals is marked incomplete | Built | M4 |
 | Firecracker exits after a forbidden system call or a fatal signal quarantine the pipeline and raise a sandbox escape indicator; a guest that stops itself is a result, never retried, so it cannot pause the sandbox stage ([ADR 0020](adr/0020-autonomy-breakers-quarantine-canaries-alerts.md)) | Tested | M5 |
-| Host honeytokens and integrity monitoring detect a successful escape | Planned | M7 |
+| A decoy in every jail root whose access time shows a read; decoys on the host watched with inotify; processes with a slot UID that the jail did not start; a BLAKE3 manifest of the binaries and images the sandbox trusts. Any finding quarantines the pipeline ([ADR 0023](adr/0023-host-escape-detection-and-retention.md)) | Tested | M7 |
 
 ### The single host channel (T1; B3)
 
@@ -81,7 +81,7 @@ test. Nothing is marked Built before the code exists.
 | Host initiated vsock connection only; no host listener for guest initiated connections | Built | M1 |
 | Frames with a u32 length prefix, a 64 KiB frame cap and per job byte and frame budgets | Tested | M1 |
 | Schema validated decoding with a version field | Tested | M1 |
-| The decoder as a fuzz target | Planned | M7 |
+| The decoder and the trace records as fuzz targets (`fuzz/`, run before every release) | Built | M7 |
 | Workspace paths checked by the agent: absolute, no `..`, only the job's drives, the payload mounted `noexec` | Tested | M4 |
 | No host secret ever enters the guest; the guest agent does not link the host configuration harness | Built | M0 |
 | Trace events from the guest are bounded on the host (processes, list entries, string lengths) and rendered with control and bidirectional characters escaped | Tested | M4 |
@@ -94,7 +94,7 @@ test. Nothing is marked Built before the code exists.
 | Every guest DNS query, TCP connection and UDP datagram redirected to the fake internet by nftables in the slot namespace; nothing else is reachable | Built | M4 |
 | Frames no proxy sees (IPv6, ICMP, other protocols, raw Ethernet) logged by a packet socket on the tap, opened before the fake internet drops to the slot user; IPv6 attempts also appear in the eBPF trace ([ADR 0018](adr/0018-frames-the-proxies-do-not-see.md)) | Tested (canary) | M4 |
 | Fake internet runs as the slot's user with Landlock (no filesystem) and rlimits; its DNS, HTTP and TLS parsers are property tested | Tested | M4 |
-| The fake internet's parsers as fuzz targets | Planned | M7 |
+| The fake internet's DNS parser and protocol sniffer as fuzz targets | Built | M7 |
 | The fake internet's log (every DNS query, connection and datagram with its first 64 KiB) is owned by the orchestrator and read after the run as ground truth; the job's honeytokens are searched in it | Tested (canary) | M4 |
 | TLS terminated with Crateward's own authority, which the guest image trusts, so HTTPS content is visible; the private key reaches the fake internet only through a pipe | Tested (canary) | M4 |
 
@@ -113,7 +113,8 @@ test. Nothing is marked Built before the code exists.
 | Evidence escapes control, bidi and invisible characters, so stored and displayed findings cannot hide code (Trojan Source) | Tested | M3 |
 | Payload images written from the blob store with Crateward's own tar headers and built by `mkfs.erofs` in a sandboxed child; no crate archive is extracted on the host | Built | M4 |
 | Guest disk images parsed on the host only in a sandboxed subprocess: the scratch disk is read with `ext4-view` in a child without network or filesystem access, with bounded walks ([ADR 0019](adr/0019-scratch-disk-scan.md)) | Tested (canary) | M4 |
-| No README or other crate text rendered as raw HTML; autoescaping templates; strict CSP | Planned | M6 |
+| Host parsers of hostile input as fuzz targets: archives, static analysis, Rust sources, manifests, lockfiles, index lines, the RSS feed, the scratch disk, BTF. The scratch disk target found a superblock that made `ext4-view` reserve 8 GiB; its geometry is now checked against the image first | Tested | M7 |
+| No README or other crate text rendered as raw HTML; autoescaping templates; strict CSP | Tested | M6 |
 
 ### Cache poisoning (T4; B6)
 
@@ -130,15 +131,15 @@ test. Nothing is marked Built before the code exists.
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| TLS to crates.io hosts; checksums from the index verified for every file | Planned | M2 |
-| Repeated checksum mismatches open the fetch circuit breaker | Planned | M5 |
-| Egress allowlisted per service user with nftables | Planned | M1 |
+| TLS to crates.io hosts (the client refuses plain HTTP); checksums from the index verified for every file | Built | M2 |
+| Repeated checksum mismatches open the fetch circuit breaker. Not built: a mismatch is a transient failure that uses up the job's attempts, and the breaker counts only infrastructure failures | Planned | M8 |
+| Egress allowlisted per service user with nftables (host rules need root; the maintainer applies them) | Planned | M8 |
 
 ### External services and the public site (T6, T8; B7, B8, B9)
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| No inbound service except WireGuard on one UDP port | Planned | M1 |
+| No inbound service except WireGuard on one UDP port (host firewall, applied by the maintainer) | Planned | M8 |
 | Admin dashboard binds to loopback only; configuration rejects any other address. Reaching it needs WireGuard and an SSH login, whose key authenticates the maintainer ([ADR 0022](adr/0022-dashboard-and-public-export.md)) | Tested | M6 |
 | Dashboard: Host check against DNS rebinding, same origin checks for writes, strict Content Security Policy, compile time escaping, read only page queries | Tested | M6 |
 | Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Tested | M5 |
@@ -165,8 +166,9 @@ forge them. It cannot reach the server or read undisclosed findings.
 |------------|--------|-----------|
 | md RAID1 with a monthly `mdcheck` scrub (detects, cannot choose the right copy) | Built | M1 |
 | Content addressed blobs verified by BLAKE3 on every read | Tested | M2 |
-| PostgreSQL data checksums (the Debian cluster needs `pg_checksums --enable`; waiting for the maintainer) | Planned | M2 |
-| BLAKE3 manifests for images and evidence, verified on read | Planned | M1.5 |
+| PostgreSQL data checksums (`data_checksums` is on) | Built (verified on the host) | M2 |
+| BLAKE3 manifests: warm images named by digest; the guest kernel, root filesystem and host binaries in the integrity manifest, checked every hour. Evidence in PostgreSQL relies on data checksums | Partly built | M1.5, M7 |
+| Raw run data (process lists, output tails) of unflagged runs trimmed after `storage.raw_log_retention_days`; flagged runs and all evidence kept ([ADR 0023](adr/0023-host-escape-detection-and-retention.md)) | Tested | M7 |
 
 ## Residual risks
 

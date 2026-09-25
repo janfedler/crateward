@@ -10,6 +10,7 @@
 mod diagram;
 mod docs_lint;
 mod firecracker;
+mod fuzz;
 mod guest_ebpf;
 mod guest_kernel;
 mod images;
@@ -60,6 +61,12 @@ enum Task {
         #[arg(long, default_value_t = 50)]
         jobs: u32,
     },
+    /// Run every fuzz target for a while (needs `cargo fuzz`).
+    Fuzz {
+        /// Seconds per target.
+        #[arg(long, default_value_t = 30)]
+        seconds: u32,
+    },
     /// Run the canary: a fixture crate that steals a honeytoken inside a
     /// microVM must be caught.
     Canary,
@@ -98,6 +105,7 @@ fn main() -> ExitCode {
         Task::Rootfs => rootfs::run(&workspace_root()),
         Task::Soak { jobs } => soak(jobs),
         Task::Canary => canary(),
+        Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

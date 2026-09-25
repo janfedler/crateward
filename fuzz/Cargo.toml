@@ -1,0 +1,116 @@
+[package]
+name = "crateward_fuzz"
+description = "Fuzz targets for every parser of hostile input (M7)."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: it builds with the nightly pin and sanitizer flags.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ext4-view = { version = "1.0", features = ["std"] }
+crateward_core = { path = "../crates/core" }
+crateward_fake_internet = { path = "../crates/fake_internet" }
+crateward_fetcher = { path = "../crates/fetcher" }
+crateward_guest_agent = { path = "../crates/guest_agent" }
+crateward_orchestrator = { path = "../crates/orchestrator" }
+crateward_static_analysis = { path = "../crates/static_analysis" }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "archive"
+path = "fuzz_targets/archive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "btf"
+path = "fuzz_targets/btf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns"
+path = "fuzz_targets/dns.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "index_line"
+path = "fuzz_targets/index_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lockfile"
+path = "fuzz_targets/lockfile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "protocol"
+path = "fuzz_targets/protocol.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rss"
+path = "fuzz_targets/rss.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rust_source"
+path = "fuzz_targets/rust_source.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scratch"
+path = "fuzz_targets/scratch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sniff"
+path = "fuzz_targets/sniff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "static_analysis"
+path = "fuzz_targets/static_analysis.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stub_manifest"
+path = "fuzz_targets/stub_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trace_record"
+path = "fuzz_targets/trace_record.rs"
+test = false
+doc = false
+bench = false

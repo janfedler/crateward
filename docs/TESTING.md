@@ -17,7 +17,7 @@ server.
 | Documentation checks | Writing style, generated diagram up to date | `cargo xtask docs-lint`, `cargo xtask state-diagram` |
 | Integration tests | Feed and fetcher against a mock crates.io; Postgres job store | M2 |
 | End to end tests | Canary crates through the whole pipeline with the fake VM backend | M5 |
-| Fuzz targets | Extraction, event decoding, DNS and HTTP sinks | M7 (`cargo fuzz`) |
+| Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly); `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default; run on the server with `--ignored` |
 | Soak test | Sequential jailed jobs, a host side timeout and crash reconciliation, then checks for leaked processes, cgroups, directories, network interfaces, file descriptors and memory | `cargo xtask soak --jobs 50`, on the server |
 

@@ -27,6 +27,7 @@
 //! disappear with it, so they cannot leak.
 
 pub mod acl;
+pub mod decoy;
 pub mod host;
 pub mod launcher;
 

@@ -306,7 +306,7 @@ impl Fetcher {
         let digest: [u8; 32] = hasher.finalize().into();
         if &Sha256Digest::from_bytes(digest) != sha256 {
             // Could be a truncated download; persistent mismatches exhaust
-            // the attempts and trip the fetch circuit breaker (M5).
+            // the attempts. They do not count toward the breaker yet (THREAT_MODEL).
             tracing::warn!(%name, %version, expected = %sha256, "checksum mismatch");
             return Err(FetchFailure::transient(format!(
                 "checksum mismatch for {name} {version}"

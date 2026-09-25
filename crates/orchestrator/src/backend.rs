@@ -52,6 +52,9 @@ pub enum JobEnd {
     /// signal. It handles guest input, so this may mean the guest attacked
     /// it: a sandbox escape indicator.
     VmmCrashed(String),
+    /// Something read the decoy in the jail root, which only a process
+    /// outside the VM can reach (ADR 0023): a sandbox escape indicator.
+    DecoyTouched,
     /// KVM refused to run the VM. The host is at fault.
     KvmError(String),
     /// The VM stopped without the agent reporting an end and without a
@@ -308,6 +311,10 @@ impl FirecrackerBackend {
             }
         };
         drop(agent);
+        let end = match vm.jail_root() {
+            Some(root) if crate::jail::decoy::touched(root) => JobEnd::DecoyTouched,
+            _ => end,
+        };
         vm.destroy().await?;
         Ok(JobRun { end, restore, run })
     }

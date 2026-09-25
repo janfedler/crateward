@@ -542,6 +542,63 @@ pub fn export_to_erofs(
     Ok(())
 }
 
+/// Checks that the geometry a superblock claims fits in the image.
+/// `ext4-view` reserves memory for every block group descriptor the
+/// superblock counts before it reads one, so a crafted count asks for
+/// gigabytes (found by the `scratch` fuzz target). A filesystem the guest
+/// wrote to its disk cannot be larger than that disk, and its descriptors
+/// must be on it.
+///
+/// # Errors
+///
+/// Returns why the geometry is impossible.
+pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), String> {
+    let u32_at = |offset: usize| {
+        superblock
+            .get(offset..offset + 4)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+            .ok_or("the superblock is truncated")
+    };
+    let blocks = u64::from(u32_at(0x150)?) << 32 | u64::from(u32_at(0x4)?);
+    let first_data_block = u64::from(u32_at(0x14)?);
+    let log_block_size = u32_at(0x18)?;
+    let blocks_per_group = u64::from(u32_at(0x20)?);
+    let incompat = u32_at(0x60)?;
+    let desc_size = u32_at(0xfc)? >> 16;
+    if log_block_size > 6 || blocks_per_group == 0 {
+        return Err("impossible block geometry".into());
+    }
+    let block_size = 1024_u64 << log_block_size;
+    let desc_size = if incompat & 0x80 == 0 {
+        32
+    } else {
+        u64::from(desc_size).max(64)
+    };
+    let groups = blocks
+        .saturating_sub(first_data_block)
+        .div_ceil(blocks_per_group);
+    if blocks.saturating_mul(block_size) > image_len || groups.saturating_mul(desc_size) > image_len
+    {
+        return Err(format!(
+            "the superblock claims {blocks} blocks in {groups} groups, more than the image holds"
+        ));
+    }
+    Ok(())
+}
+
+/// Loads a scratch image after [`check_geometry`].
+fn load(image: std::fs::File) -> Result<Ext4, String> {
+    use std::os::unix::fs::FileExt as _;
+    let len = image.metadata().map_err(|e| e.to_string())?.len();
+    let mut superblock = [0_u8; 1024];
+    image
+        .read_exact_at(&mut superblock, 1024)
+        .map_err(|e| format!("reading the superblock: {e}"))?;
+    check_geometry(&superblock, len)?;
+    Ext4::load(Box::new(image)).map_err(|e| e.to_string())
+}
+
 /// Enters the sandbox for reading a scratch image from stdin, and returns
 /// that image.
 fn enter_sandbox() -> Result<std::fs::File, String> {
@@ -579,7 +636,7 @@ pub fn dispatch_export(args: &[String]) -> Option<std::process::ExitCode> {
         Ok(image) => image,
         Err(error) => return Some(fail(&error)),
     };
-    let fs = match Ext4::load(Box::new(image)) {
+    let fs = match load(image) {
         Ok(fs) => fs,
         Err(error) => return Some(fail(&format!("not a readable ext4 image: {error}"))),
     };
@@ -612,7 +669,7 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
         Ok(image) => image,
         Err(error) => return Some(fail(&error)),
     };
-    let report = match Ext4::load(Box::new(image)) {
+    let report = match load(image) {
         Ok(fs) => scan(&fs, &spec),
         Err(error) => ScratchReport {
             error: Some(format!("not a readable ext4 image: {error}")),
@@ -806,6 +863,25 @@ mod tests {
         );
         assert_eq!(unit_owner("target/debug", "deps"), None);
         assert_eq!(unit_owner("target/debug/deps", "short-123.rmeta"), None);
+    }
+
+    #[test]
+    fn a_superblock_larger_than_its_image_is_rejected() {
+        // The shape of the fuzz finding: a huge block count and one block
+        // per group, which asked `ext4-view` for 8 GiB.
+        let mut sb = vec![0_u8; 1024];
+        sb[0x4..0x8].copy_from_slice(&u32::MAX.to_le_bytes());
+        sb[0x20..0x24].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(check_geometry(&sb, 1 << 20).is_err());
+        sb[0x4..0x8].copy_from_slice(&1024_u32.to_le_bytes());
+        assert!(check_geometry(&sb, 1 << 20).is_ok());
+        sb[0x150..0x154].copy_from_slice(&1_u32.to_le_bytes());
+        assert!(check_geometry(&sb, 1 << 20).is_err());
+        assert!(check_geometry(&sb[..100], 1 << 20).is_err());
+        let Some(data) = image(&[("/target/debug/x", b"x", 0o644)]) else {
+            return;
+        };
+        assert!(check_geometry(&data[1024..2048], data.len() as u64).is_ok());
     }
 
     #[test]

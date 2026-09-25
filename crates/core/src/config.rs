@@ -396,6 +396,13 @@ pub struct SupervisorConfig {
     pub breaker_max_cooldown_secs: u64,
     /// The same alert is sent again at most this often.
     pub alert_repeat_hours: u64,
+    /// Minutes between two checks of the integrity manifest (ADR 0023).
+    pub integrity_interval_minutes: u64,
+    /// Decoy files on the host. The supervisor plants each one that is
+    /// missing and treats any open of one as a sign of compromise. Backups
+    /// and indexers must skip them.
+    #[serde(default)]
+    pub decoys: Vec<PathBuf>,
 }
 
 /// Where alerts go.
@@ -839,6 +846,14 @@ impl Config {
             "supervisor.alert_repeat_hours",
             "must be at least 1",
         );
+        v.check(
+            sup.integrity_interval_minutes >= 1,
+            "supervisor.integrity_interval_minutes",
+            "must be at least 1",
+        );
+        for decoy in &sup.decoys {
+            v.absolute(decoy, "supervisor.decoys");
+        }
         match &self.notifier {
             NotifierConfig::Log => {}
             NotifierConfig::Ntfy { server_url, topic } => {

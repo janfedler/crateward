@@ -786,6 +786,13 @@ pub async fn execute(
                 escalation: None,
             });
         }
+        JobEnd::DecoyTouched => {
+            return Err(Failure {
+                class: FailureClass::SuspectedCompromise,
+                message: "something read the decoy in the jail root".to_owned(),
+                escalation: None,
+            });
+        }
         JobEnd::KvmError(reason) => {
             return Err(Failure {
                 class: FailureClass::Infrastructure,

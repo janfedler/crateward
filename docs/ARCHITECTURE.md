@@ -195,6 +195,13 @@ Notes on the design:
   claiming in the affected stages only. The supervisor decides from the job
   events and delivers alerts
   ([ADR 0020](adr/0020-autonomy-breakers-quarantine-canaries-alerts.md)).
+* Escape tripwires outside the VM also quarantine the pipeline: a read of
+  the decoy in a jail root ends the job as a suspected compromise, and the
+  supervisor watches decoys on the host, processes with a slot UID and the
+  integrity manifest of the binaries and images
+  ([ADR 0023](adr/0023-host-escape-detection-and-retention.md)).
+* Each supervisor round trims the raw data of old unflagged run reports;
+  verdicts and evidence stay.
 * A crate that fails to build is a result (`BuildOutcome::Failed`), not a
   failure of the pipeline.
 * Escalation to a full build and test happens at most once. Together with

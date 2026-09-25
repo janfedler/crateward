@@ -23,6 +23,8 @@ http = ["dep:reqwest", "dep:tokio", "dep:bytes"]
 sandbox = ["dep:rustix", "dep:landlock"]
 # The content addressed blob store of crate archives (ADR 0014).
 blobs = ["dep:blake3", "dep:zstd"]
+# The host integrity manifest (ADR 0023).
+integrity = ["dep:blake3"]
 
 [dependencies]
 blake3 = { workspace = true, optional = true }

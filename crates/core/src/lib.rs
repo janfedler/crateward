@@ -33,6 +33,8 @@ pub mod escalation;
 pub mod failure;
 #[cfg(feature = "http")]
 pub mod http;
+#[cfg(feature = "integrity")]
+pub mod integrity;
 pub mod job;
 pub mod name;
 pub mod protocol;

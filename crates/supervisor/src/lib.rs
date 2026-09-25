@@ -14,6 +14,12 @@
 //! * it scores jobs that waited too long for a VM slot as static only;
 //! * it checks disk usage, and pauses the sandbox stage while the scratch
 //!   filesystem is too full;
+//! * it trims the raw data (process lists, output tails) of unflagged runs
+//!   older than `storage.raw_log_retention_days`;
+//! * it looks for signs of a host escape (ADR 0023): files that differ
+//!   from the integrity manifest, any access to a decoy file, and
+//!   processes running as a slot UID that the jail did not start; any of
+//!   them quarantines the pipeline;
 //! * it reads the canary results the orchestrator records and pauses the
 //!   producing stages while a canary gives the wrong result;
 //! * it delivers alerts from the closed list in `crateward_core::escalation`
@@ -28,6 +34,7 @@
 #![forbid(unsafe_code)]
 
 pub mod checks;
+pub mod integrity;
 pub mod notify;
 
 use std::path::Path;
@@ -52,6 +59,9 @@ pub const COMPONENT: Component = Component::Supervisor;
 /// The name the supervisor uses when it holds a lease.
 const WORKER: &str = "supervisor";
 
+/// Run reports trimmed per round at most, so one round stays short.
+const TRIM_BATCH: i64 = 500;
+
 fn fatal(error: impl std::fmt::Display) -> ComponentError {
     ComponentError::Fatal {
         component: COMPONENT,
@@ -65,6 +75,7 @@ struct Supervisor<'a> {
     store: Store,
     policies: Policies,
     notifier: Notifier,
+    integrity: integrity::Integrity,
 }
 
 impl Supervisor<'_> {
@@ -90,6 +101,14 @@ impl Supervisor<'_> {
             );
         }
         self.disks().await?;
+        let trimmed = self
+            .store
+            .trim_raw_runs(self.config.storage.raw_log_retention_days, TRIM_BATCH)
+            .await?;
+        if trimmed > 0 {
+            tracing::info!(trimmed, "trimmed raw data of old unflagged runs");
+        }
+        self.escape().await?;
         self.canaries().await?;
         self.alerts().await
     }
@@ -147,6 +166,28 @@ impl Supervisor<'_> {
             tracing::info!("sandbox stage resumed: scratch filesystem has room again");
         }
         Ok(())
+    }
+
+    async fn escape(&mut self) -> Result<(), StoreError> {
+        let sandbox = &self.config.sandbox;
+        // The spare slot, used for the base snapshot, is included.
+        let slot_uids = sandbox.slot_uid_base..=sandbox.slot_uid_base.saturating_add(sandbox.slots);
+        let mut findings = self.integrity.manifest();
+        findings.extend(self.integrity.decoys(&self.config.supervisor.decoys));
+        findings.extend(self.integrity.processes(slot_uids));
+        if findings.is_empty() {
+            return Ok(());
+        }
+        for finding in &findings {
+            tracing::error!(%finding, "sandbox escape indicator");
+        }
+        let detail = format!("host escape indicator: {}", findings.join("; "));
+        self.store
+            .pause(PauseReason::Quarantine, None, &detail)
+            .await?;
+        self.store
+            .raise_alert(&HumanEscalation::SandboxEscapeIndicator { job: None })
+            .await
     }
 
     async fn canaries(&mut self) -> Result<(), StoreError> {
@@ -264,6 +305,16 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             store,
             policies: Policies::from_config(&config.stages).map_err(fatal)?,
             notifier: Notifier::new(&config.notifier, &client).map_err(fatal)?,
+            integrity: integrity::Integrity::new(
+                &config.instance.data_dir,
+                Duration::from_secs(
+                    config
+                        .supervisor
+                        .integrity_interval_minutes
+                        .saturating_mul(60),
+                ),
+            )
+            .map_err(fatal)?,
         };
 
         let stop = Arc::new(AtomicBool::new(false));

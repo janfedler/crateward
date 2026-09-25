@@ -53,6 +53,14 @@ enum Command {
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
+    /// The host integrity manifest (ADR 0023).
+    Integrity {
+        #[command(subcommand)]
+        command: IntegrityCommand,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
     /// Circuit breaker control.
     Breaker {
         #[command(subcommand)]
@@ -61,6 +69,14 @@ enum Command {
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum IntegrityCommand {
+    /// Record the digests of the trusted files, after a deploy.
+    Record,
+    /// Compare the trusted files with the manifest.
+    Check,
 }
 
 #[derive(Debug, Subcommand)]
@@ -134,6 +150,57 @@ where
     }
 }
 
+/// Records or checks the manifest in `instance.data_dir`. The Crateward
+/// binaries are the ones next to this tool.
+fn integrity(config: &Path, command: &IntegrityCommand) -> ExitCode {
+    use crateward_core::integrity;
+    let config = match Config::load(config) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(EXIT_CONFIG);
+        }
+    };
+    let manifest = config.instance.data_dir.join(integrity::MANIFEST);
+    let result =
+        match command {
+            IntegrityCommand::Record => std::env::current_exe()
+                .map_err(|e| e.to_string())
+                .and_then(|exe| {
+                    let dir = exe.parent().ok_or("the tool has no directory")?;
+                    let files = integrity::covered(&config, dir).map_err(|e| e.to_string())?;
+                    let text = integrity::record(&files).map_err(|e| e.to_string())?;
+                    let temporary = manifest.with_extension("tmp");
+                    std::fs::write(&temporary, &text).map_err(|e| e.to_string())?;
+                    std::fs::rename(&temporary, &manifest).map_err(|e| e.to_string())?;
+                    println!("recorded {} files in {}", files.len(), manifest.display());
+                    Ok(())
+                }),
+            IntegrityCommand::Check => std::fs::read_to_string(&manifest)
+                .map_err(|e| format!("{}: {e}", manifest.display()))
+                .and_then(|text| integrity::parse(&text).map_err(|e| e.to_string()))
+                .and_then(|parsed| {
+                    let mismatches = integrity::verify(&parsed);
+                    for m in &mismatches {
+                        println!("MISMATCH {}: {}", m.path.display(), m.reason);
+                    }
+                    if mismatches.is_empty() {
+                        println!("{} files match", parsed.len());
+                        Ok(())
+                    } else {
+                        Err(format!("{} files differ", mismatches.len()))
+                    }
+                }),
+        };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 async fn status(store: Store) -> Result<(), String> {
     let now = store.now_epoch().await.map_err(|e| e.to_string())?;
     let pauses = store.pauses().await.map_err(|e| e.to_string())?;
@@ -187,6 +254,7 @@ fn main() -> ExitCode {
             }
             Ok(())
         }),
+        Command::Integrity { command, config } => integrity(&config, &command),
         Command::Breaker {
             command: BreakerCommand::Close { stage },
             config,

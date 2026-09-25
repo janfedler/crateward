@@ -44,17 +44,30 @@ PostgreSQL clusters are created with data checksums enabled.
 
 ## Storage budget
 
-Target 100 to 200 GB in steady state. Measured values replace the targets in
-M7.
+Target 100 to 200 GB in steady state. Measured on 2026-09-25 over the first
+live day: 2266 versions fetched, 734 dynamic runs, feed database of 190 MB.
+The rates below are per 1000 versions, from the two busiest hours (1466
+versions).
 
-| Item | Target |
-|------|--------|
-| Content addressed store (zstd) | to be measured |
-| Behavior profiles and diffs | to be measured |
-| Raw logs (flagged runs, plus 7 days of the rest) | to be measured |
-| Image archive (last two promoted versions) | to be measured |
-| Postgres | to be measured |
-| Database dump (latest only, streamed) | to be measured |
+| Item | Measured | Per 1000 versions |
+|------|----------|-------------------|
+| Content addressed store (zstd), crate files and their dependencies | 1.7 GB | about 540 MB; falls as dependencies repeat |
+| Original `.crate` files | 616 MB | about 300 MB |
+| Postgres, all tables | 190 MB | about 85 MB |
+| of which fetch records (lockfile and resolution) | 70 MB | 31 MB |
+| of which run reports, before trimming | 24 MB | 48 kB per run, up to 255 kB |
+| of which static reports | 14 MB | 6 MB |
+| Behavior profiles and diffs | inside the run reports and verdicts | |
+| Image archive (last two promoted versions) | not built yet (M8) | |
+| Database dump (latest only, streamed) | about the database size, compressed | |
+
+Retention trims the raw part of unflagged run reports (the process list
+and the output tails, 87 percent of the stored reports) after
+`storage.raw_log_retention_days`. The blob store and the originals have no
+retention yet: at the first day's rate they grow by about 0.85 GB per 1000
+versions, which reaches the target within months. Deduplication will lower
+the rate; how far is measured again after a week. Pruning originals that
+the blob store already holds is a decision for the maintainer.
 
 ## Capacity
 
@@ -73,7 +86,8 @@ publishes the share of versions with dynamic results.
 | Image refresh (Debian packages, toolchain) | weekly, at night |
 | Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs; jobs wait meanwhile); stop and start the orchestrator to refresh it |
 | Guest kernel rebuild | only when its version or configuration changes |
-| Retention | daily |
+| Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every supervisor round |
+| Integrity manifest check | every `supervisor.integrity_interval_minutes` (60) |
 | Heartbeat | every minute |
 
 ## Host setup done by hand (Ansible in M8)
@@ -135,7 +149,21 @@ The orchestrator user has requirements of its own (ADR 0012):
 | healthchecks.io | dead man's switch | ping URL |
 | ntfy.sh | alerts | topic name |
 
+## Deploying a new build
+
+1. Build the release binaries and install them next to each other.
+2. Restart the services.
+3. Record the integrity manifest:
+   `crateward integrity --config /etc/crateward/crateward.toml record`.
+   Without this step the supervisor quarantines the pipeline within
+   `supervisor.integrity_interval_minutes`, since the binaries changed.
+
+The decoys in `supervisor.decoys` look like credentials. Backups, indexers
+and anything else that reads the home directories must exclude them, or
+they raise a sandbox escape indicator.
+
 ## Backups
 
 Encrypted offsite backups with tested restores are required. The offsite
-target is not chosen yet; it is decided with the maintainer before M7.
+target is not chosen yet; it waits for the maintainer's decision. Backups
+must exclude the decoys listed in `supervisor.decoys`.
