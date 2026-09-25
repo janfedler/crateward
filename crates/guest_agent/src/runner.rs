@@ -6,18 +6,27 @@
 //! writer. Output beyond the job's limit is dropped after one
 //! `OutputTruncated` message; the process keeps running, because a crate
 //! that writes a lot of output is behavior worth observing, not an error.
+//!
+//! With tracing active, a third thread streams the eBPF trace through the
+//! same channel. After the job's process group is gone, the trace is
+//! drained and closed with `TraceEnd` before `Exited`.
 
 use std::io::{Read, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crateward_core::protocol::{
-    ExitStatus, GuestMessage, JobSpec, MAX_OUTPUT_CHUNK, OutputStream, write_message,
+    ExitStatus, GuestMessage, JobSpec, MAX_OUTPUT_CHUNK, OutputStream, TraceTotals, write_message,
 };
 
 use crate::AgentError;
+use crate::trace::{Batch, Tracer, monotonic_ns};
+
+/// How long the agent waits for the trace to drain after the job ended.
+const TRACE_DRAIN: Duration = Duration::from_secs(10);
 
 /// How the job's process is started.
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +39,40 @@ pub struct RunOptions {
 enum Event {
     Output(OutputStream, Vec<u8>),
     Closed,
+    Trace(Batch),
+}
+
+/// Forwards events to the host and keeps the output budget.
+struct Forwarder<'a, W> {
+    out: &'a mut W,
+    limit: u64,
+    forwarded: u64,
+    truncated: bool,
+    open_streams: u32,
+    totals: Option<TraceTotals>,
+}
+
+impl<W: Write> Forwarder<'_, W> {
+    fn handle(&mut self, event: Event) -> Result<(), AgentError> {
+        match event {
+            Event::Output(stream, data) => {
+                let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
+                if self.forwarded.saturating_add(len) <= self.limit {
+                    self.forwarded += len;
+                    write_message(self.out, &GuestMessage::Output { stream, data })?;
+                } else if !self.truncated {
+                    self.truncated = true;
+                    write_message(self.out, &GuestMessage::OutputTruncated)?;
+                }
+            }
+            Event::Closed => self.open_streams = self.open_streams.saturating_sub(1),
+            Event::Trace(Batch::Events(events)) => {
+                write_message(self.out, &GuestMessage::Trace(events))?;
+            }
+            Event::Trace(Batch::Done(totals)) => self.totals = Some(totals),
+        }
+        Ok(())
+    }
 }
 
 fn spawn_reader<R: Read + Send + 'static>(
@@ -63,9 +106,9 @@ fn kill_group(pid: u32) {
     }
 }
 
-/// Runs the job and writes `Started`, `Output`, `OutputTruncated` and
-/// `Exited` messages to `out`. A job that cannot be started produces an
-/// `Error` message instead.
+/// Runs the job and writes `Started`, `Output`, `OutputTruncated`,
+/// `Trace`, `TraceEnd` and `Exited` messages to `out`. A job that cannot be
+/// started produces an `Error` message instead.
 ///
 /// # Errors
 ///
@@ -73,6 +116,7 @@ fn kill_group(pid: u32) {
 pub fn run_job<W: Write>(
     spec: &JobSpec,
     options: RunOptions,
+    tracer: Option<&mut Tracer>,
     out: &mut W,
 ) -> Result<(), AgentError> {
     let Some((program, args)) = spec.argv.split_first() else {
@@ -92,6 +136,12 @@ pub fn run_job<W: Write>(
     if let Some((uid, gid)) = options.identity {
         command.uid(uid).gid(gid);
     }
+    let tracing = tracer.is_some();
+    let mut tracer = tracer;
+    if let Some(tracer) = tracer.as_deref_mut() {
+        tracer.clear();
+    }
+    let start_ns = monotonic_ns();
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -110,29 +160,64 @@ pub fn run_job<W: Write>(
         spawn_reader(stdout, OutputStream::Stdout, sender.clone());
     }
     if let Some(stderr) = child.stderr.take() {
-        spawn_reader(stderr, OutputStream::Stderr, sender);
+        spawn_reader(stderr, OutputStream::Stderr, sender.clone());
     }
-
+    let stop = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(u64::from(spec.timeout_secs));
-    let limit = u64::from(spec.output_limit);
-    let mut forwarded: u64 = 0;
-    let mut truncated = false;
-    let mut open_streams = 2;
+    let mut forwarder = Forwarder {
+        out,
+        limit: u64::from(spec.output_limit),
+        forwarded: 0,
+        truncated: false,
+        open_streams: 2,
+        totals: None,
+    };
+    std::thread::scope(|scope| {
+        if let Some(tracer) = tracer {
+            let sender = sender.clone();
+            let stop = &stop;
+            scope.spawn(move || {
+                tracer.stream(start_ns, stop, |batch| {
+                    sender.send(Event::Trace(batch)).is_ok()
+                });
+            });
+        }
+        drop(sender);
+        let result = supervise(&mut child, pid, deadline, &events, &mut forwarder);
+        // The trace ends only after the job's process group is gone.
+        stop.store(true, Ordering::Release);
+        let exit = result?;
+        let drain_until = Instant::now() + TRACE_DRAIN;
+        while tracing && forwarder.totals.is_none() {
+            let left = drain_until.saturating_duration_since(Instant::now());
+            match events.recv_timeout(left) {
+                Ok(event) => forwarder.handle(event)?,
+                Err(_) => break,
+            }
+        }
+        if tracing {
+            let totals = forwarder.totals.unwrap_or_default();
+            write_message(forwarder.out, &GuestMessage::TraceEnd(totals))?;
+        }
+        write_message(forwarder.out, &GuestMessage::Exited(exit))?;
+        Ok(())
+    })
+}
+
+/// Forwards events until the job's streams close and its process exits,
+/// or the deadline passes. Kills the process group either way.
+fn supervise<W: Write>(
+    child: &mut std::process::Child,
+    pid: u32,
+    deadline: Instant,
+    events: &mpsc::Receiver<Event>,
+    forwarder: &mut Forwarder<'_, W>,
+) -> Result<ExitStatus, AgentError> {
     let mut timed_out = false;
-    while open_streams > 0 {
+    while forwarder.open_streams > 0 {
         let remaining = deadline.saturating_duration_since(Instant::now());
         match events.recv_timeout(remaining) {
-            Ok(Event::Output(stream, data)) => {
-                let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
-                if forwarded.saturating_add(len) <= limit {
-                    forwarded += len;
-                    write_message(out, &GuestMessage::Output { stream, data })?;
-                } else if !truncated {
-                    truncated = true;
-                    write_message(out, &GuestMessage::OutputTruncated)?;
-                }
-            }
-            Ok(Event::Closed) => open_streams -= 1,
+            Ok(event) => forwarder.handle(event)?,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 timed_out = true;
                 kill_group(pid);
@@ -154,21 +239,25 @@ pub fn run_job<W: Write>(
             timed_out = true;
             kill_group(pid);
         }
-        std::thread::sleep(Duration::from_millis(20));
+        match events.recv_timeout(Duration::from_millis(20)) {
+            Ok(event) => forwarder.handle(event)?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
     };
     // Nothing of the job may outlive it: processes that stayed in the group
     // are killed here. A process that left the group with `setsid` dies with
     // the VM, which ends after every job.
     kill_group(pid);
-    let exit = if timed_out {
+    Ok(if timed_out {
         ExitStatus::TimedOut
     } else if let Some(code) = status.code() {
         ExitStatus::Code(code)
     } else {
         ExitStatus::Signal(status.signal().unwrap_or(0))
-    };
-    write_message(out, &GuestMessage::Exited(exit))?;
-    Ok(())
+    })
 }
 
 #[cfg(test)]
@@ -191,7 +280,7 @@ mod tests {
 
     fn run(spec: &JobSpec) -> Vec<GuestMessage> {
         let mut wire = Vec::new();
-        run_job(spec, RunOptions { identity: None }, &mut wire).unwrap();
+        run_job(spec, RunOptions { identity: None }, None, &mut wire).unwrap();
         let mut reader = wire.as_slice();
         let mut messages = Vec::new();
         while let Some(m) = read_message(&mut reader, MAX_FRAME_LEN).unwrap() {

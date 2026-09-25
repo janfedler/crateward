@@ -25,6 +25,7 @@ use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
 use crate::firecracker::vm::JobDrives;
 use crate::honeytokens::{HOME, Honeytokens};
 use crate::payload::{PROBE_DIR, Package, PayloadSpec, PayloadStats, build_image};
+use crate::trace::TraceSummary;
 
 /// UID and GID of the guest's `builder` user.
 const BUILDER: u32 = 1000;
@@ -99,6 +100,13 @@ pub struct RunReport {
     pub network: NetworkSummary,
     /// Honeytokens that left the VM.
     pub leaked: Vec<Leak>,
+    /// The guest's eBPF trace. Absent when the run ended without a report.
+    #[serde(default)]
+    pub trace: TraceSummary,
+    /// Honeytokens the trace shows inside the VM, for example in a
+    /// program's arguments. `via` names the process or path.
+    #[serde(default)]
+    pub tokens_in_trace: Vec<Leak>,
 }
 
 /// The guest's network activity, as the fake internet saw it.
@@ -555,7 +563,7 @@ pub async fn execute(
         .run_job(slot, input, timeout + HOST_MARGIN)
         .await
         .map_err(Failure::infrastructure)?;
-    let (outcome, exit, stdout, stderr, truncated) = match &run.end {
+    let (outcome, exit, stdout, stderr, truncated, trace) = match &run.end {
         JobEnd::Finished(o) => {
             let outcome = match o.exit {
                 ExitStatus::Code(0) => BuildOutcome::Succeeded,
@@ -568,10 +576,25 @@ pub async fn execute(
                 o.stdout.as_slice(),
                 o.stderr.as_slice(),
                 o.truncated,
+                (*o.trace).clone(),
             )
         }
-        JobEnd::HostTimeout => (BuildOutcome::TimedOut, None, &[][..], &[][..], false),
-        JobEnd::ResourceLimit => (BuildOutcome::ResourceLimit, None, &[][..], &[][..], false),
+        JobEnd::HostTimeout => (
+            BuildOutcome::TimedOut,
+            None,
+            &[][..],
+            &[][..],
+            false,
+            TraceSummary::default(),
+        ),
+        JobEnd::ResourceLimit => (
+            BuildOutcome::ResourceLimit,
+            None,
+            &[][..],
+            &[][..],
+            false,
+            TraceSummary::default(),
+        ),
         // A VM that died without a report is not a build result. The
         // supervisor (M5) treats repeats as an escape indicator.
         JobEnd::UnexpectedExit(reason) => {
@@ -581,7 +604,21 @@ pub async fn execute(
         }
     };
     let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
+    let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
+    let tokens_in_trace = trace
+        .find(&values)
+        .into_iter()
+        .filter_map(|(i, via)| {
+            tokens.tokens.get(i).map(|t| Leak {
+                kind: t.kind.to_owned(),
+                via,
+            })
+        })
+        .take(MAX_LISTED)
+        .collect();
     let report = RunReport {
+        trace,
+        tokens_in_trace,
         network,
         leaked,
         outcome,

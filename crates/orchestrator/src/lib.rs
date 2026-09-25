@@ -32,6 +32,7 @@ pub mod firecracker;
 pub mod honeytokens;
 pub mod jail;
 pub mod payload;
+pub mod trace;
 pub mod worker;
 
 use std::sync::Arc;

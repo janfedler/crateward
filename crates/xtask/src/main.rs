@@ -10,6 +10,7 @@
 mod diagram;
 mod docs_lint;
 mod firecracker;
+mod guest_ebpf;
 mod guest_kernel;
 mod images;
 mod rootfs;
@@ -43,6 +44,8 @@ enum Task {
     },
     /// Build the guest agent for the musl target and verify it is static.
     GuestAgent,
+    /// Build the guest's eBPF programs with the pinned nightly and linker.
+    GuestEbpf,
     /// Vendor all dependencies into a reproducible tarball for a release.
     Vendor,
     /// Download and verify the pinned Firecracker release.
@@ -88,6 +91,7 @@ fn main() -> ExitCode {
         Task::DocsLint => docs_lint(),
         Task::StateDiagram { write } => diagram::run(&workspace_root(), write),
         Task::GuestAgent => guest_agent(),
+        Task::GuestEbpf => guest_ebpf::run(&workspace_root()),
         Task::Vendor => vendor(),
         Task::Firecracker => firecracker::run(&workspace_root()),
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
@@ -174,9 +178,22 @@ fn ci() -> Result<(), TaskError> {
         &[("RUSTDOCFLAGS", "-D warnings")],
     )?;
     guest_agent()?;
+    guest_ebpf::run(&workspace_root())?;
     docs_lint()?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;
+    // The eBPF package has its own lockfile; the root deny.toml applies.
+    run(
+        "cargo",
+        &[
+            "deny",
+            "--manifest-path",
+            "crates/guest_ebpf/Cargo.toml",
+            "--locked",
+            "check",
+        ],
+        &[],
+    )?;
     run("cargo", &["audit"], &[])?;
     run("cargo", &["vet", "--locked"], &[])?;
     eprintln!("xtask: all checks passed");

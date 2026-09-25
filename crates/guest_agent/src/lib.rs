@@ -20,14 +20,17 @@
 //! * Jobs run as an unprivileged user in their own process group, with a
 //!   cleared environment, bounded output and a guest side timeout. The host
 //!   enforces its own limits independently.
-//! * eBPF tracing arrives in M4 (ADR 0006), in a separate package because it
-//!   builds for a different target with a pinned nightly toolchain.
+//! * eBPF programs (ADR 0006, ADR 0017), loaded at boot, trace every process
+//!   of the job. They live in a separate package because they build for
+//!   the BPF target with a pinned nightly toolchain.
 
 #![forbid(unsafe_code)]
 
+pub mod btf;
 pub mod init;
 pub mod runner;
 pub mod server;
+pub mod trace;
 pub mod workspace;
 
 use crateward_core::component::Component;

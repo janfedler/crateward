@@ -128,7 +128,7 @@ cargo run -p crateward_cli -- state-machine diagram
 | M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | after M4 (its measurement needs `cargo check` in VMs) |
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
-| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | in progress: runs, fake internet and honeytokens work; eBPF, TLS and disk diff open |
+| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | in progress: runs, fake internet with TLS, honeytokens and eBPF tracing work; disk diff and IPv6 logging open |
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | planned |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | planned |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | planned |

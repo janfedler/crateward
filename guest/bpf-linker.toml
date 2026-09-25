@@ -1,0 +1,12 @@
+# Pinned bpf-linker release. `cargo xtask guest-ebpf` downloads it into
+# target/guest/bin and refuses anything whose SHA-256 differs.
+#
+# bpf-linker links LLVM bitcode, so it must use the same LLVM version as the
+# compiler: v0.11.1 was built against LLVM 23.1.1, the LLVM of
+# nightly-2026-09-07 (crates/guest_ebpf/rust-toolchain.toml). The digest is
+# the one GitHub publishes for the release asset, confirmed against a
+# download on 2026-09-25.
+
+version = "v0.11.1"
+url = "https://github.com/aya-rs/bpf-linker/releases/download/v0.11.1/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+sha256 = "e058a6aecc9e65fa4c977b298a8e4b738424d7629769fd352eed409fb57e16e8"

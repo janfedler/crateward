@@ -13,8 +13,8 @@
 //! 3. The fake internet's TLS authority, added to the system trust bundle.
 //!    It is created once per installation under `target/guest/ca` (mode
 //!    0600) and reused, because the orchestrator needs its private key.
-//! 4. The guest agent, appended to a copy of the base tarball with root
-//!    ownership.
+//! 4. The guest agent and its eBPF programs, appended to a copy of the base
+//!    tarball with root ownership.
 //!
 //! The result is packed with `mkfs.erofs` into a compressed, read only
 //! image with a fixed timestamp on every file.
@@ -27,6 +27,10 @@ use crate::{GUEST_TARGET, TaskError, run_in};
 
 /// Where the agent lives in the guest, and the kernel's `init=`.
 pub const AGENT_PATH_IN_GUEST: &str = "usr/sbin/crateward-agent";
+
+/// Where the agent loads the eBPF programs from
+/// (`crateward_guest_agent::trace::OBJECT_PATH`).
+const EBPF_PATH_IN_GUEST: &str = "usr/lib/crateward/guest-ebpf.o";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -130,6 +134,13 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         std::fs::create_dir_all(parent).map_err(io(parent))?;
     }
     std::fs::copy(&agent, &staged_agent).map_err(io(&agent))?;
+    crate::guest_ebpf::run(root)?;
+    let ebpf = crate::guest_ebpf::object_path(root);
+    let staged_ebpf = staging.join(EBPF_PATH_IN_GUEST);
+    if let Some(parent) = staged_ebpf.parent() {
+        std::fs::create_dir_all(parent).map_err(io(parent))?;
+    }
+    std::fs::copy(&ebpf, &staged_ebpf).map_err(io(&ebpf))?;
     let tarball = work.join("rootfs.tar");
     std::fs::copy(&base, &tarball).map_err(io(&base))?;
     let tar = tarball.to_string_lossy().into_owned();
@@ -187,6 +198,24 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
             "-C",
             &staging_dir,
             AGENT_PATH_IN_GUEST,
+        ],
+        &[],
+    )?;
+    run_in(
+        root,
+        "tar",
+        &[
+            "--append",
+            "--file",
+            &tar,
+            "--owner=0",
+            "--group=0",
+            "--numeric-owner",
+            "--mode=0644",
+            &format!("--mtime=@{epoch}"),
+            "-C",
+            &staging_dir,
+            EBPF_PATH_IN_GUEST,
         ],
         &[],
     )?;

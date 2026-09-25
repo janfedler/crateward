@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crateward_core::protocol::{
     Decoder, ExitStatus, GuestMessage, HostMessage, JobSpec, Limits, OutputStream,
-    PROTOCOL_VERSION, ProtocolError, Workspace, encode,
+    PROTOCOL_VERSION, ProtocolError, TracingStatus, Workspace, encode,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -58,6 +58,8 @@ pub struct RunOutcome {
     pub stderr: Vec<u8>,
     /// Whether output was dropped, by the agent or by the host.
     pub truncated: bool,
+    /// The guest's eBPF trace.
+    pub trace: Box<crate::trace::TraceSummary>,
 }
 
 /// An open conversation with the guest agent.
@@ -67,6 +69,8 @@ pub struct AgentConnection {
     decoder: Decoder<GuestMessage>,
     /// Version reported by the agent.
     pub agent_version: String,
+    /// Whether the agent's tracing works.
+    pub tracing: TracingStatus,
 }
 
 async fn handshake(stream: &mut UnixStream, port: u32) -> Result<(), AgentError> {
@@ -111,6 +115,7 @@ impl AgentConnection {
             stream,
             decoder: Decoder::new(limits),
             agent_version: String::new(),
+            tracing: TracingStatus::Unavailable("no Hello yet".into()),
         };
         connection
             .send(&HostMessage::Hello {
@@ -121,8 +126,10 @@ impl AgentConnection {
             GuestMessage::Hello {
                 version,
                 agent_version,
+                tracing,
             } if version == PROTOCOL_VERSION => {
                 connection.agent_version = agent_version;
+                connection.tracing = tracing;
                 Ok(connection)
             }
             GuestMessage::Hello { version, .. } => {
@@ -221,7 +228,9 @@ impl AgentConnection {
             stdout: Vec::new(),
             stderr: Vec::new(),
             truncated: false,
+            trace: Box::default(),
         };
+        let mut trace = crate::trace::TraceBuilder::default();
         loop {
             match self.recv().await? {
                 GuestMessage::Started { .. } => {}
@@ -238,8 +247,15 @@ impl AgentConnection {
                     }
                 }
                 GuestMessage::OutputTruncated => outcome.truncated = true,
+                GuestMessage::Trace(events) => {
+                    for event in &events {
+                        trace.add(event);
+                    }
+                }
+                GuestMessage::TraceEnd(totals) => trace.end(totals),
                 GuestMessage::Exited(exit) => {
                     outcome.exit = exit;
+                    outcome.trace = Box::new(trace.finish());
                     return Ok(outcome);
                 }
                 GuestMessage::Error(message) => return Err(AgentError::Agent(message)),

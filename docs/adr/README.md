@@ -23,3 +23,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0014](0014-resolve-fetch-validate.md) | Resolve with Cargo, fetch and validate ourselves, never extract | Accepted |
 | [0015](0015-static-analysis-and-triage.md) | Static analysis in a sandboxed child, reports per crate file, rule based triage | Accepted |
 | [0016](0016-dynamic-runs-payload-fake-internet-honeytokens.md) | Dynamic runs with payload images, a fake internet per slot and honeytokens | Accepted |
+| [0017](0017-ebpf-tracing-in-the-guest.md) | eBPF tracing in the guest | Accepted |

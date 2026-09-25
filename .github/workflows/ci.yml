@@ -100,6 +100,21 @@ jobs:
       - name: Build and verify that no dynamic loader is requested
         run: cargo xtask guest-agent
 
+  guest-ebpf:
+    name: guest eBPF programs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchains
+        run: |
+          rustup toolchain install
+          cd crates/guest_ebpf && rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Build with the pinned bpf-linker and check the license section
+        run: cargo xtask guest-ebpf
+
   docs:
     name: documentation checks
     runs-on: ubuntu-24.04
@@ -126,5 +141,6 @@ jobs:
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2,cargo-vet@0.10.2
       - run: cargo deny --locked check
+      - run: cargo deny --manifest-path crates/guest_ebpf/Cargo.toml --locked check
       - run: cargo audit
       - run: cargo vet --locked

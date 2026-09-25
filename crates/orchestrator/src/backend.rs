@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crateward_core::protocol::{JobSpec, Workspace};
+use crateward_core::protocol::{JobSpec, TracingStatus, Workspace};
 use tokio::time::Instant;
 
 use crate::cgroup::{CgroupError, CgroupTree, SLOT_PREFIX, SlotLimits};
@@ -104,6 +104,10 @@ pub enum BackendError {
     /// The slot number is outside the configured slots.
     #[error("slot {0} does not exist")]
     NoSuchSlot(u32),
+    /// The agent's eBPF tracing did not start, so no base snapshot is
+    /// taken: a dynamic run without a trace would look cleaner than it is.
+    #[error("guest tracing unavailable: {0}")]
+    TracingUnavailable(String),
 }
 
 /// What the sandbox stage needs from a VM implementation.
@@ -192,12 +196,15 @@ impl FirecrackerBackend {
         let snapshot = async {
             let mut agent = vm.agent(Instant::now() + BASE_BOOT_TIMEOUT).await?;
             agent.ping().await.map_err(VmError::from)?;
+            if let TracingStatus::Unavailable(reason) = &agent.tracing {
+                return Err(BackendError::TracingUnavailable(reason.clone()));
+            }
             drop(agent);
-            vm.snapshot(&launch, &boot.rootfs, out).await
+            Ok(vm.snapshot(&launch, &boot.rootfs, out).await?)
         }
         .await;
         vm.destroy().await?;
-        Ok(snapshot?)
+        snapshot
     }
 
     /// The launch description of a slot, in its own cgroup.
@@ -420,6 +427,7 @@ mod tests {
             stdout: vec![],
             stderr: vec![],
             truncated: false,
+            trace: Box::default(),
         });
         let backend = FakeBackend::new([finished.clone(), JobEnd::HostTimeout]);
         let d = Duration::from_secs(1);

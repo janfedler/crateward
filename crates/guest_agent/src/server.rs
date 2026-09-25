@@ -10,11 +10,12 @@ use std::io::{Read, Write};
 
 use crateward_core::protocol::{
     GuestMessage, HostMessage, JobSpec, MAX_FRAME_LEN, PROTOCOL_VERSION, ProtocolError,
-    read_message, write_message,
+    TracingStatus, read_message, write_message,
 };
 use vsock::{VMADDR_CID_ANY, VsockListener};
 
 use crate::runner::{RunOptions, run_job};
+use crate::trace::Tracer;
 use crate::{AgentError, BUILDER_GID, BUILDER_UID};
 
 /// What the agent does after a conversation ends.
@@ -43,7 +44,11 @@ fn set_clock(spec: &JobSpec) {
 /// # Errors
 ///
 /// Fails on protocol errors or when the connection breaks.
-pub fn converse<S: Read + Write>(stream: &mut S, options: RunOptions) -> Result<Next, AgentError> {
+pub fn converse<S: Read + Write>(
+    stream: &mut S,
+    options: RunOptions,
+    tracer: &mut Result<Tracer, String>,
+) -> Result<Next, AgentError> {
     match read_message::<_, HostMessage>(stream, MAX_FRAME_LEN)? {
         Some(HostMessage::Hello { version }) if version == PROTOCOL_VERSION => {}
         Some(HostMessage::Hello { version }) => {
@@ -64,6 +69,10 @@ pub fn converse<S: Read + Write>(stream: &mut S, options: RunOptions) -> Result<
         &GuestMessage::Hello {
             version: PROTOCOL_VERSION,
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
+            tracing: match tracer {
+                Ok(_) => TracingStatus::Active,
+                Err(reason) => TracingStatus::Unavailable(reason.clone()),
+            },
         },
     )?;
     loop {
@@ -86,7 +95,7 @@ pub fn converse<S: Read + Write>(stream: &mut S, options: RunOptions) -> Result<
                 if options.identity.is_some() {
                     set_clock(&spec);
                 }
-                run_job(&spec, options, stream)?;
+                run_job(&spec, options, tracer.as_mut().ok(), stream)?;
             }
             Some(HostMessage::Shutdown) => return Ok(Next::ShutDown),
             Some(HostMessage::Hello { .. }) => {
@@ -108,11 +117,17 @@ pub fn serve(port: u32) -> Result<(), AgentError> {
     let options = RunOptions {
         identity: Some((BUILDER_UID, BUILDER_GID)),
     };
+    // Loaded before the first connection, so the base snapshot contains
+    // the attached programs.
+    let mut tracer = Tracer::start(BUILDER_UID);
+    if let Err(reason) = &tracer {
+        eprintln!("crateward agent: tracing unavailable: {reason}");
+    }
     loop {
         let (mut stream, _) = listener
             .accept()
             .map_err(AgentError::io("accepting a vsock connection"))?;
-        match converse(&mut stream, options) {
+        match converse(&mut stream, options, &mut tracer) {
             Ok(Next::Accept) => {}
             Ok(Next::ShutDown) => return Ok(()),
             // A broken conversation ends only that connection; the host
@@ -178,7 +193,10 @@ mod tests {
             },
             HostMessage::Ping,
         ]);
-        assert_eq!(converse(&mut s, HOST).unwrap(), Next::Accept);
+        assert_eq!(
+            converse(&mut s, HOST, &mut Err("host test".into())).unwrap(),
+            Next::Accept
+        );
         let r = replies(&s.output);
         assert!(matches!(
             r.as_slice(),
@@ -189,7 +207,7 @@ mod tests {
     #[test]
     fn wrong_version_is_refused() {
         let mut s = script(&[HostMessage::Hello { version: 99 }]);
-        assert!(converse(&mut s, HOST).is_err());
+        assert!(converse(&mut s, HOST, &mut Err("host test".into())).is_err());
         assert!(matches!(
             replies(&s.output).as_slice(),
             [GuestMessage::Error(_)]
@@ -214,7 +232,10 @@ mod tests {
             HostMessage::Run(job),
             HostMessage::Shutdown,
         ]);
-        assert_eq!(converse(&mut s, HOST).unwrap(), Next::ShutDown);
+        assert_eq!(
+            converse(&mut s, HOST, &mut Err("host test".into())).unwrap(),
+            Next::ShutDown
+        );
         let r = replies(&s.output);
         assert!(r.contains(&GuestMessage::Exited(
             crateward_core::protocol::ExitStatus::Code(0)

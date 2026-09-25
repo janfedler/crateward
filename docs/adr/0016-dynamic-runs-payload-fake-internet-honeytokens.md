@@ -97,8 +97,8 @@ Facts verified on the server on 2026-09-25:
 * The fake internet runs as the slot's user, like Firecracker. A guest
   that compromises it gains nothing it could not reach by escaping
   Firecracker, and the network namespace has no uplink either way.
-* eBPF tracing inside the guest (ADR 0006) waits for a license decision:
-  its programs must carry a GPL compatible license.
+* eBPF tracing inside the guest (ADR 0006) is described in
+  [ADR 0017](0017-ebpf-tracing-in-the-guest.md).
 
 ## Sources
 

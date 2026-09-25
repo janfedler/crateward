@@ -26,7 +26,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Version of this protocol. Bumped on any incompatible change.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// The vsock port the guest agent listens on.
 pub const AGENT_PORT: u32 = 1024;
@@ -161,6 +161,8 @@ pub enum GuestMessage {
         version: u16,
         /// The agent's package version.
         agent_version: String,
+        /// Whether the eBPF tracing is attached.
+        tracing: TracingStatus,
     },
     /// Answers `Ping`.
     Pong,
@@ -180,10 +182,125 @@ pub enum GuestMessage {
     },
     /// Output beyond the job's limit was dropped.
     OutputTruncated,
+    /// Events the eBPF programs recorded, in order. Only sent while
+    /// tracing is active.
+    Trace(Vec<TraceEvent>),
+    /// The trace of the job is complete. Sent before `Exited` when tracing
+    /// is active.
+    TraceEnd(TraceTotals),
     /// The job's process ended.
     Exited(ExitStatus),
     /// The agent could not do what was asked.
     Error(String),
+}
+
+/// Whether the agent's eBPF tracing works.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TracingStatus {
+    /// The programs are loaded and attached.
+    Active,
+    /// Tracing could not start, and why.
+    Unavailable(String),
+}
+
+/// One event recorded by the eBPF programs (ADR 0017). Process and user IDs
+/// are the guest's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceEvent {
+    /// Milliseconds since the job started.
+    pub ms: u32,
+    /// Process ID.
+    pub pid: u32,
+    /// Thread ID.
+    pub tid: u32,
+    /// Real user ID.
+    pub uid: u32,
+    /// What happened.
+    pub kind: TraceKind,
+}
+
+/// What a traced process did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceKind {
+    /// It started a new process.
+    Fork {
+        /// The new process.
+        child: u32,
+    },
+    /// It executed a program.
+    Exec {
+        /// The path the kernel executed, as given to `execve`.
+        filename: Vec<u8>,
+        /// The argument vector of the new program, possibly cut short.
+        argv: Vec<Vec<u8>>,
+    },
+    /// It ended.
+    Exit {
+        /// Kernel exit code: status in bits 8 to 15, signal in 0 to 6.
+        code: u32,
+    },
+    /// It opened a file.
+    Open {
+        /// The path the kernel resolved, possibly cut short.
+        path: Vec<u8>,
+        /// `O_*` flags.
+        flags: u32,
+    },
+    /// It connected a socket.
+    Connect {
+        /// `SOCK_*` type.
+        sock_type: u32,
+        /// The destination.
+        address: SocketAddress,
+    },
+    /// It sent a message with an explicit destination.
+    Send {
+        /// `SOCK_*` type.
+        sock_type: u32,
+        /// The destination.
+        address: SocketAddress,
+    },
+    /// It used the `bpf` system call.
+    Bpf {
+        /// The command.
+        cmd: u32,
+    },
+    /// It asked for ptrace access to another process.
+    Ptrace {
+        /// The target process.
+        target: u32,
+        /// The access mode.
+        mode: u32,
+    },
+    /// It tried to mount a filesystem.
+    Mount {
+        /// The filesystem type.
+        fstype: Vec<u8>,
+    },
+}
+
+/// A socket destination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SocketAddress {
+    /// IPv4 or IPv6.
+    Ip(std::net::SocketAddr),
+    /// A Unix socket path; abstract names start with a NUL byte.
+    Unix(Vec<u8>),
+    /// Another address family.
+    Other(u16),
+}
+
+/// Counters that end a job's trace.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceTotals {
+    /// Events sent.
+    pub events: u64,
+    /// Events the kernel dropped because the ring buffer was full.
+    pub dropped_in_kernel: u64,
+    /// Events the agent dropped over its own limit.
+    pub dropped_by_agent: u64,
+    /// Records that did not decode.
+    pub malformed: u64,
 }
 
 /// Budgets for one connection.
@@ -415,8 +532,20 @@ mod tests {
             GuestMessage::Hello {
                 version: PROTOCOL_VERSION,
                 agent_version: "0.1.0".into(),
+                tracing: TracingStatus::Unavailable("no BTF".into()),
             },
             GuestMessage::Pong,
+            GuestMessage::Trace(vec![TraceEvent {
+                ms: 3,
+                pid: 10,
+                tid: 11,
+                uid: 1000,
+                kind: TraceKind::Connect {
+                    sock_type: 1,
+                    address: SocketAddress::Ip("10.0.2.1:443".parse().unwrap()),
+                },
+            }]),
+            GuestMessage::TraceEnd(TraceTotals::default()),
             GuestMessage::Started { pid: 42 },
             GuestMessage::Output {
                 stream: OutputStream::Stderr,

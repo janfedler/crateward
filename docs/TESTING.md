@@ -41,7 +41,7 @@ These need `/dev/kvm`, so CI skips them. On the server:
 ```sh
 cargo xtask firecracker     # pinned release, SHA-256 verified
 cargo xtask guest-kernel    # pinned source, fragment checked
-cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1
+cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1, eBPF programs
 cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-threads 1
 cargo xtask soak --jobs 50  # needs a delegated cgroup; xtask starts a systemd user scope
 ```
@@ -66,10 +66,18 @@ runner without unprivileged user namespaces skips it, unless
 
 `cargo xtask canary` runs the end to end canary on the server: a fixture
 crate whose build script reads the job's cargo token and posts it to a
-made up host. Its source exists only as strings in
-`crates/orchestrator/tests/canary.rs`; it is compiled and run only inside
-a microVM. The test passes when the fake internet recorded the lookup and
-the orchestrator found the token in what left the VM.
+made up host and has `curl` post the AWS credentials over HTTPS. Its
+source exists only as strings in `crates/orchestrator/tests/canary.rs`; it
+is compiled and run only inside a microVM. The test passes when the fake
+internet recorded the lookup, the orchestrator found both tokens in what
+left the VM, and the eBPF trace shows the build script reading the cargo
+credentials and connecting out, and `curl`, started by the build script,
+reading the AWS file.
+
+The eBPF programs themselves only run in the guest kernel. On the host,
+tests cover the agent's record decoder (including every truncation of a
+record), its BTF reader (on built fixtures and on the host kernel's own
+BTF) and the orchestrator's bounded trace summary.
 
 Detectors are tested on fixtures too, including the false positives found
 on live crates (URLs in doc comments and error messages, bidi characters
@@ -82,9 +90,10 @@ cargo xtask ci
 ```
 
 runs formatting, clippy with warnings denied, all tests, rustdoc with
-warnings denied, the static musl build of the guest agent, the
-documentation checks, `cargo deny`, `cargo audit` and `cargo vet`, in the
-same order as CI.
+warnings denied, the static musl build of the guest agent, the eBPF
+programs (format, clippy and build with the pinned nightly and
+`bpf-linker`), the documentation checks, `cargo deny` for both lockfiles,
+`cargo audit` and `cargo vet`, in the same order as CI.
 
 ## Writing style
 

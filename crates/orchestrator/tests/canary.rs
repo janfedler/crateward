@@ -32,6 +32,7 @@ use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
 use crateward_orchestrator::firecracker::vm::{BootSpec, JobDrives};
 use crateward_orchestrator::honeytokens::Honeytokens;
 use crateward_orchestrator::payload::{Package, PayloadSpec};
+use crateward_orchestrator::trace::Role;
 use crateward_orchestrator::worker::{JobFiles, WorkerSetup, execute};
 
 const NAME: &str = "canary-exfil";
@@ -223,5 +224,34 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         "the key sent over HTTPS was not found: {:?}",
         report.leaked
     );
+    // The guest's own account (eBPF): the build script read the cargo
+    // credentials, connected out and started curl, which read the AWS file.
+    let trace = &report.trace;
+    assert!(trace.complete, "the trace did not end: {:?}", trace.totals);
+    let script = trace
+        .processes
+        .iter()
+        .find(|p| p.role == Role::BuildScript && p.exe.contains("canary-exfil"))
+        .expect("the build script is in the trace");
+    let opened = |pid: u32, file: &str| {
+        trace
+            .sensitive_opens
+            .iter()
+            .any(|f| f.pid == pid && f.path.ends_with(file))
+    };
+    assert!(opened(script.pid, "/.cargo/credentials.toml"));
+    assert!(
+        trace
+            .sockets
+            .iter()
+            .any(|s| s.pid == script.pid && s.how == "connect" && s.address.ends_with(":80"))
+    );
+    let curl = trace
+        .processes
+        .iter()
+        .find(|p| p.ppid == Some(script.pid) && p.exe.ends_with("/curl"))
+        .expect("curl, started by the build script, is in the trace");
+    assert!(opened(curl.pid, "/.aws/credentials"));
+    assert!(curl.argv.iter().any(|a| a.ends_with("/.aws/credentials")));
     std::fs::remove_dir_all(&work).unwrap();
 }

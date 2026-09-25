@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Builds for the BPF target with its own nightly toolchain and lockfile
+# (ADR 0006); `cargo xtask guest-ebpf` builds it.
+exclude = ["crates/guest_ebpf"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,6 +16,7 @@ repository = "https://github.com/janfedler/crateward"
 homepage = "https://crateward.com"
 
 [workspace.dependencies]
+aya = { version = "0.14", default-features = false }
 crateward_core = { path = "crates/core" }
 crateward_fake_internet = { path = "crates/fake_internet" }
 blake3 = "1.8"

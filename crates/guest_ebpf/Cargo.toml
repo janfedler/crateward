@@ -1,0 +1,32 @@
+[package]
+name = "crateward_guest_ebpf"
+description = "eBPF programs the guest agent loads to trace a build (ADR 0006)."
+version = "0.1.0"
+edition = "2024"
+# The kernel only lets GPL compatible programs call the helpers these
+# programs need (Documentation/bpf/bpf_licensing.rst). This package is
+# therefore GPL-2.0-only, independent of the rest of the project.
+license = "GPL-2.0-only"
+publish = false
+repository = "https://github.com/janfedler/crateward"
+
+# Its own workspace: it builds for `bpfel-unknown-none` with a nightly
+# toolchain, which the main workspace must not inherit.
+[workspace]
+
+[dependencies]
+aya-ebpf = { version = "0.2.1", default-features = false }
+
+[[bin]]
+name = "crateward-guest-ebpf"
+path = "src/main.rs"
+test = false
+bench = false
+
+[profile.dev]
+panic = "abort"
+opt-level = 3
+
+[profile.release]
+panic = "abort"
+codegen-units = 1

@@ -1,3 +1,4 @@
 /target
 /vendor
 *.profraw
+/crates/guest_ebpf/target

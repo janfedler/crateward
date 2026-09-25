@@ -115,10 +115,11 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    plant fresh honeytokens
    ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)).
 6. **guest agent** runs `cargo check` as an unprivileged user and streams
-   its output over the single vsock connection. The fake internet records
-   every network attempt as host side ground truth. Planned: cross target
-   checks where the crate has platform specific code, eBPF tracing, and a
-   scratch disk diff.
+   its output and an eBPF trace (processes, file opens, connections, tamper
+   attempts; [ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) over the
+   single vsock connection. The fake internet records every network attempt
+   as host side ground truth. Planned: cross target checks where the crate
+   has platform specific code, and a scratch disk diff.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
 8. **supervisor** and **api** publish the verdict, raise alerts from the
@@ -307,7 +308,7 @@ response to unauthenticated packets. See
 | `crateward_static_analysis` | trusted | M3 |
 | `crateward_orchestrator` | untrusted | M1, warmer in M1.5 |
 | `crateward_guest_agent` | guest | M4 |
-| `crateward_guest_ebpf` (planned) | guest | M4 |
+| `crateward_guest_ebpf` (GPL-2.0-only, own workspace) | guest | M4 |
 | `crateward_fake_internet` | untrusted | M4 |
 | `crateward_analyzer` | control plane | M6 |
 | `crateward_api` | control plane | M6 |

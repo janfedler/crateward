@@ -63,12 +63,14 @@ test. Nothing is marked Built before the code exists.
 | Serial console output rate limited, since it carries guest controlled text into the host log | Built | M1 |
 | Per slot cgroup: `cpu.max`, `memory.max`, `memory.swap.max` 0, `pids.max`; host side wall clock that ends a slot with `cgroup.kill` | Tested | M1 |
 | Fixed size scratch disk per job: a sparse ext4 image on tmpfs, writable only by the slot's UID, deleted after the run ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)) | Built | M4 |
-| Drive and network rate limiters | Planned | M4 |
+| Drive and network rate limiters: 256 MiB/s and 50,000 operations per second per drive, 4 MiB/s and 2000 packets per second on the network | Built | M4 |
 | SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Built (verified on the host) | M1 |
 | KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand; Ansible in M8) | M1 |
 | Guest kernel without module support, so guest root cannot load a rootkit module | Planned | M1 |
 | Check that guest visible CPU mitigations are not weaker than the host's; the stock Debian 6.12 host kernel is outside Firecracker's validated matrix | Tested | M1 |
 | Startup reconciliation removes slot cgroups and directories left by a crash; namespaces and tap devices cannot outlive their process | Tested | M1 |
+| eBPF programs loaded at boot trace every process of the job, its file opens, socket destinations and tamper attempts (`bpf`, `ptrace`, `mount`); a base snapshot is refused when tracing does not start ([ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) | Tested (canary) | M4 |
+| The trace is the guest's account and can be blinded by guest root; it is read next to host ground truth, and a trace without its closing totals is marked incomplete | Built | M4 |
 | Unexpected VM exits, Firecracker crashes and seccomp violations raise a sandbox escape indicator | Planned | M5 |
 | Host honeytokens and integrity monitoring detect a successful escape | Planned | M7 |
 
@@ -82,6 +84,7 @@ test. Nothing is marked Built before the code exists.
 | The decoder as a fuzz target | Planned | M7 |
 | Workspace paths checked by the agent: absolute, no `..`, only the job's drives, the payload mounted `noexec` | Tested | M4 |
 | No host secret ever enters the guest; the guest agent does not link the host configuration harness | Built | M0 |
+| Trace events from the guest are bounded on the host (processes, list entries, string lengths) and rendered with control and bidirectional characters escaped | Tested | M4 |
 
 ### Network (T1; B4)
 
