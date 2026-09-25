@@ -20,8 +20,9 @@ use crateward_core::job::{JobEvent, JobState, Limits, Stage, StageLimits, Triage
 use crateward_core::name::CrateName;
 use crateward_core::retry::RetryPolicy;
 use crateward_core::store::{
-    AlertOutcome, CrateFile, NewJob, PauseReason, Policies, Store, StoreError,
+    AlertOutcome, CrateFile, NewJob, PauseReason, Policies, Review, Store, StoreError,
 };
+use crateward_core::verdict::{Coverage, RiskLevel, Verdict};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -114,7 +115,7 @@ async fn migrations_are_idempotent() {
         return;
     };
     let mut store = db.store().await;
-    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3, 4, 5, 6]);
+    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3, 4, 5, 6, 7]);
     assert!(store.migrate().await.unwrap().is_empty());
     db.drop().await;
 }
@@ -655,5 +656,69 @@ async fn alerts_are_recorded_and_marked() {
     let latest = store.latest_canaries().await.unwrap();
     assert_eq!(latest.len(), 1);
     assert!(latest[0].1);
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let old = store
+        .enqueue(&new_job("demo", "1.2.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let new = store
+        .enqueue(&new_job("demo", "1.10.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let verdict = |score, profile: &[&str]| Verdict {
+        score,
+        level: RiskLevel::from_score(score),
+        coverage: Coverage::DynamicLinux,
+        evidence: Vec::new(),
+        profile: profile.iter().map(|p| (*p).to_owned()).collect(),
+        new_behavior: Vec::new(),
+        analyzer_version: 1,
+    };
+    store
+        .record_verdict(old, &verdict(10, &["exec:shell"]))
+        .await
+        .unwrap();
+    store
+        .record_verdict(new, &verdict(70, &["net:example.com"]))
+        .await
+        .unwrap();
+    let (stored, review) = store.verdict(new).await.unwrap().unwrap();
+    assert_eq!((stored.score, review), (70, Review::None));
+    assert!(
+        store
+            .set_review(new, Review::Pending, Some("look"))
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        store.verdict(new).await.unwrap().unwrap().1,
+        Review::Pending
+    );
+    // Semantic version order: 1.2.0 comes before 1.10.0.
+    let previous = store
+        .previous_profile("demo", &"1.10.0".parse().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(previous, Some(vec!["exec:shell".to_owned()]));
+    assert_eq!(
+        store
+            .previous_profile("demo", &"1.2.0".parse().unwrap())
+            .await
+            .unwrap(),
+        None
+    );
+    // Neither job is finished, so nothing is outdated yet.
+    assert!(store.outdated_verdicts(2, 10).await.unwrap().is_empty());
     db.drop().await;
 }

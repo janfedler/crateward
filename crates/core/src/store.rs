@@ -12,7 +12,9 @@
 //! Enabled with the `store` feature; the guest agent never links it.
 
 mod autonomy;
+mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
+pub use verdicts::Review;
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime};
@@ -36,6 +38,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (4, include_str!("../migrations/0004_static.sql")),
     (5, include_str!("../migrations/0005_dynamic.sql")),
     (6, include_str!("../migrations/0006_autonomy.sql")),
+    (7, include_str!("../migrations/0007_verdicts.sql")),
 ];
 
 /// The server's message for database errors, which the error's own
@@ -229,6 +232,8 @@ fn stored(row: &Row) -> Result<StoredJob, StoreError> {
 }
 
 const COLUMNS: &str = "id, crate_name, version, cksum, priority, job, index_entry";
+/// [`COLUMNS`] for queries that alias `jobs` as `j`.
+const COLUMNS_J: &str = "j.id, j.crate_name, j.version, j.cksum, j.priority, j.job, j.index_entry";
 
 fn lease_interval(lease: Duration) -> f64 {
     lease.as_secs_f64()

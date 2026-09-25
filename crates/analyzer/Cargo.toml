@@ -9,7 +9,18 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-crateward_core = { workspace = true, features = ["app"] }
+crateward_core = { workspace = true, features = ["app", "store"] }
+# The report types the other stages store; only types are used, nothing of
+# these packages runs in the analyzer (ADR 0021).
+crateward_orchestrator.workspace = true
+crateward_static_analysis.workspace = true
+secrecy.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
 
 [lints]
 workspace = true

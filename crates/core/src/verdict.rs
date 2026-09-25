@@ -84,8 +84,122 @@ pub enum TargetNotApplicable {
     MissingSdk,
 }
 
+/// How risky a version looks. Ordered from `None` to `Critical`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    /// Nothing counted.
+    None,
+    /// Below 20 points.
+    Low,
+    /// 20 to 49 points.
+    Medium,
+    /// 50 to 79 points: a human looks at it.
+    High,
+    /// 80 points or more: a human looks at it first.
+    Critical,
+}
+
+impl RiskLevel {
+    /// The level of a score from 0 to 100.
+    #[must_use]
+    pub const fn from_score(score: u32) -> Self {
+        match score {
+            0 => Self::None,
+            1..=19 => Self::Low,
+            20..=49 => Self::Medium,
+            50..=79 => Self::High,
+            _ => Self::Critical,
+        }
+    }
+
+    /// Whether the verdict goes to the "needs you" inbox.
+    #[must_use]
+    pub const fn needs_review(self) -> bool {
+        matches!(self, Self::High | Self::Critical)
+    }
+
+    /// Name for labels.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+}
+
+/// Where a piece of evidence comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceSource {
+    /// Static analysis of the crate's own files.
+    Static,
+    /// The change against the previous version.
+    Diff,
+    /// The eBPF trace from inside the guest.
+    Trace,
+    /// The fake internet on the host.
+    Network,
+    /// The host's scan of the scratch disk.
+    Disk,
+    /// How the run ended.
+    Run,
+}
+
+/// One reason behind a score.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Evidence {
+    /// Stable name of the signal, for example `honeytoken_left_vm`.
+    pub signal: String,
+    /// Points it adds.
+    pub points: u32,
+    /// Where it comes from.
+    pub source: EvidenceSource,
+    /// One sentence for a human, with guest supplied text escaped.
+    pub summary: String,
+    /// The package responsible, when it can be told: the crate itself or a
+    /// dependency whose build script did it.
+    pub package: Option<String>,
+    /// File and line, process, path or destination.
+    pub location: Option<String>,
+}
+
+/// The analyzer's judgment of one version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Verdict {
+    /// 0 to 100.
+    pub score: u32,
+    /// The level of the score.
+    pub level: RiskLevel,
+    /// What the analysis covered.
+    pub coverage: Coverage,
+    /// Every point of the score, highest first.
+    pub evidence: Vec<Evidence>,
+    /// The version's behavior, as normalized entries such as `exec:curl`.
+    pub profile: Vec<String>,
+    /// Profile entries the previous analyzed version did not have.
+    pub new_behavior: Vec<String>,
+    /// The analyzer version that produced it.
+    pub analyzer_version: u32,
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn levels_follow_the_score() {
+        use super::RiskLevel;
+        assert_eq!(RiskLevel::from_score(0), RiskLevel::None);
+        assert_eq!(RiskLevel::from_score(19), RiskLevel::Low);
+        assert_eq!(RiskLevel::from_score(20), RiskLevel::Medium);
+        assert_eq!(RiskLevel::from_score(50), RiskLevel::High);
+        assert_eq!(RiskLevel::from_score(100), RiskLevel::Critical);
+        assert!(RiskLevel::High.needs_review() && !RiskLevel::Medium.needs_review());
+    }
+
     use super::*;
 
     #[test]

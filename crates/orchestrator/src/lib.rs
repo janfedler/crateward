@@ -185,6 +185,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             work_dir: work.clone(),
             scratch_mib: sandbox.scratch_mib_per_slot,
             check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
+            full_timeout: Duration::from_secs(sandbox.full_timeout_secs),
             warm: None,
             warm_placeholder: work.join("placeholder-warm.img"),
         };

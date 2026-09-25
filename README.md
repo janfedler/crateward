@@ -130,7 +130,7 @@ cargo run -p crateward_cli -- state-machine diagram
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
 | M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | done: VM runs, eBPF trace, fake internet with TLS and packet capture, honeytokens, scratch disk scan; cross target checks later |
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | done: breakers, quarantine, pauses, canaries, deadlines, alerts, heartbeat (ADR 0020) |
-| M6 | Analyzer and web: scoring, profiles, dashboard, public export | planned |
+| M6 | Analyzer and web: scoring, profiles, dashboard, public export | in progress: scoring, profiles and the review inbox done (ADR 0021); dashboard and export next |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | planned |
 | M8 | Launch: deployment, runbook, disclosure workflow, write up | planned |
 

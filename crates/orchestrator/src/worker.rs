@@ -14,7 +14,7 @@ use crateward_core::breaker::BreakerState;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
-use crateward_core::job::{BuildOutcome, JobEvent, Stage};
+use crateward_core::job::{BuildOutcome, JobEvent, RunKind, Stage};
 use crateward_core::name::CrateName;
 use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClock, Workspace};
 use crateward_core::store::{PauseReason, Policies, Store, StoreError, StoredJob, heartbeat};
@@ -290,6 +290,8 @@ pub struct WorkerSetup {
     pub scratch_mib: u64,
     /// Guest side limit for `cargo check`.
     pub check_timeout: Duration,
+    /// Guest side limit for the full build after an escalation.
+    pub full_timeout: Duration,
     /// The warm build cache jobs mount, if one was built (ADR 0008).
     pub warm: Option<PathBuf>,
     /// The empty file the base snapshot's warm drive points at.
@@ -578,7 +580,10 @@ impl SandboxWorker {
             spec,
             &tokens,
             &files,
-            &RunPlan::check(self.setup.check_timeout),
+            &match job.job.run_kind {
+                RunKind::Check => RunPlan::check(self.setup.check_timeout),
+                RunKind::Full => RunPlan::full(self.setup.full_timeout),
+            },
         )
         .await?;
         report.missing_packages = missing;
@@ -592,7 +597,7 @@ impl SandboxWorker {
             .and_then(|v| v.as_str().map(str::to_owned))
             .unwrap_or_default();
         self.store
-            .record_run(job.id, "check", &outcome_name, &value)
+            .record_run(job.id, job.job.run_kind.name(), &outcome_name, &value)
             .await?;
         Ok(report)
     }
@@ -630,6 +635,21 @@ impl RunPlan {
     pub fn check(timeout: Duration) -> Self {
         Self {
             argv: ["cargo", "check", "--locked", "--offline"]
+                .iter()
+                .map(|s| (*s).to_owned())
+                .collect(),
+            cwd: PROBE_DIR.into(),
+            timeout,
+        }
+    }
+
+    /// The confirmation run after an escalation (ADR 0021): a full build,
+    /// with code generation and linking, in a fresh VM with fresh
+    /// honeytokens.
+    #[must_use]
+    pub fn full(timeout: Duration) -> Self {
+        Self {
+            argv: ["cargo", "build", "--locked", "--offline"]
                 .iter()
                 .map(|s| (*s).to_owned())
                 .collect(),

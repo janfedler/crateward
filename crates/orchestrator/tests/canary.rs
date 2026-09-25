@@ -110,6 +110,7 @@ async fn canaries_give_their_known_results() {
         work_dir: work.clone(),
         scratch_mib: 2048,
         check_timeout: Duration::from_secs(300),
+        full_timeout: Duration::from_secs(600),
         warm: None,
         warm_placeholder: work.join("placeholder-warm.img"),
     };

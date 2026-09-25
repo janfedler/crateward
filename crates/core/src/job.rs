@@ -193,8 +193,21 @@ pub enum RunKind {
     /// `cargo check`, plus cross target checks when the crate has platform
     /// specific code. The default for every dynamic job.
     Check,
-    /// `cargo build` and `cargo test`, for suspicious or high value crates.
+    /// `cargo build` in a fresh VM, the confirmation run after a verdict of
+    /// medium or above (ADR 0021). Tests would need the crate's dev
+    /// dependencies, which the consumer probe does not resolve.
     Full,
+}
+
+impl RunKind {
+    /// Name stored with the run.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::Full => "full",
+        }
+    }
 }
 
 /// The decision static analysis makes about dynamic analysis.
@@ -567,7 +580,10 @@ impl Job {
     }
 
     /// Coverage label for the verdict about to be produced.
-    fn coverage_now(&self) -> Coverage {
+    /// What the analysis covered so far: dynamic once a VM run finished,
+    /// otherwise what triage decided.
+    #[must_use]
+    pub fn coverage_now(&self) -> Coverage {
         if self.dynamic_runs > 0 {
             return Coverage::DynamicLinux;
         }
