@@ -240,6 +240,10 @@ pub struct TriageConfig {
     pub dynamic_deadline_hours: u64,
     /// Reverse dependency count from which a crate counts as popular.
     pub popular_min_reverse_dependencies: u32,
+    /// All time downloads from which a crate counts as popular. Crates that
+    /// other crates pull in indirectly (platform shims, derive crates) have
+    /// few direct dependents but many downloads.
+    pub popular_min_downloads: u64,
 }
 
 /// MicroVM slots and hard limits.

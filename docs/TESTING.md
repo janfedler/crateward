@@ -55,6 +55,19 @@ grew by 4 KiB over 50 jobs, and nothing was left behind.
 The only programs these tests start inside the VM are the guest agent and
 standard tools of the guest image.
 
+## Sandboxed children
+
+The fetcher's and the static analyzer's children enter their sandbox (user
+and network namespaces, rlimits, Landlock) before they read input. The test
+`crates/static_analysis/tests/sandbox.rs` runs the real child binary on
+inert fixture tars; nothing in a fixture is ever executed. A kernel or CI
+runner without unprivileged user namespaces skips it, unless
+`CRATEWARD_REQUIRE_SANDBOX` is set, which the server's own runs do.
+
+Detectors are tested on fixtures too, including the false positives found
+on live crates (URLs in doc comments and error messages, bidi characters
+in images, `toast.txt` as an exfiltration host), so they stay fixed.
+
 ## Running the checks
 
 ```sh

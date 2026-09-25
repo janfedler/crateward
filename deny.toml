@@ -5,7 +5,23 @@ all-features = true
 
 [advisories]
 # Every RustSec advisory fails the build unless it is listed here with a reason.
-ignore = []
+# The same list is in .cargo/audit.toml for cargo-audit. Each entry names the
+# release that makes it obsolete; remove it then.
+ignore = [
+    # wasmtime 45 (through yara-x 1.20.0, the newest release, which requires
+    # ^45.0.3): stores can mix up type indices between engines. YARA-X creates
+    # a single global Engine (src/wasm/mod.rs, ENGINE.get_or_init), so there is
+    # no second engine. Remove when yara-x moves to wasmtime >= 46.0.3.
+    { id = "RUSTSEC-2026-0222", reason = "yara-x uses one global wasmtime Engine; see deny.toml" },
+    # wasmtime 45: WASI filesystem sandbox escape with trailing slashes.
+    # YARA-X does not enable WASI, and the analysis child has no filesystem
+    # access (Landlock). Remove with the entry above.
+    { id = "RUSTSEC-2026-0269", reason = "WASI is not used; the child has no filesystem access" },
+    # bincode 2 is unmaintained. YARA-X uses it only to (de)serialize compiled
+    # rules, which Crateward never loads from outside; rules are compiled from
+    # source embedded in the binary.
+    { id = "RUSTSEC-2025-0141", reason = "only for compiled rule serialization, unused" },
+]
 
 [licenses]
 # Permissive licenses only. Additions need a reason in the pull request.

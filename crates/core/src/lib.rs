@@ -20,6 +20,8 @@
 
 #[cfg(feature = "app")]
 pub mod app;
+#[cfg(feature = "blobs")]
+pub mod blobs;
 pub mod component;
 pub mod config;
 #[cfg(feature = "cratesio")]

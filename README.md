@@ -7,9 +7,11 @@ metal Linux server, scores the risk with reasons that link to evidence, and
 shows everything on a web dashboard. It asks its maintainer for help only
 when something genuinely needs a human.
 
-> **Status: milestone M1 (Firecracker platform) is done.** Jailed microVMs
-> boot, snapshot, restore and clean up without leaks. Nothing scans crates
-> yet. See [the milestones](#milestones).
+> **Status: milestones M0 to M3 are done.** Jailed microVMs boot, snapshot,
+> restore and clean up without leaks; new crates.io versions become jobs,
+> are fetched, validated and resolved, and get a static report with
+> evidence and a triage decision. Dynamic analysis follows with M4. See
+> [the milestones](#milestones).
 
 *A dashboard screenshot will appear here with milestone M6.*
 
@@ -122,10 +124,10 @@ cargo run -p crateward_cli -- state-machine diagram
 |-----------|-------|-------|
 | M0 | Foundation: workspace, CI, config, core types, state machine, docs | done |
 | M1 | Firecracker platform: guest kernel and rootfs, orchestrator, rootless jail, limits, cleanup | done |
-| M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | next |
-| M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | planned |
-| M3 | Static analysis: findings with evidence, cfg coverage, diffs | planned |
-| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | planned |
+| M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | after M4 (its measurement needs `cargo check` in VMs) |
+| M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
+| M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
+| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | next |
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | planned |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | planned |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | planned |

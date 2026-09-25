@@ -103,9 +103,11 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    on a generated consumer probe (sandboxed, no compiler), fetches and
    validates every locked crate, and stores them as content addressed blobs
    ([ADR 0014](adr/0014-resolve-fetch-validate.md)).
-3. **static analysis** parses every file with `syn` across all `cfg` branches,
-   runs detectors and YARA-X rules, diffs against the previous version, and
-   decides the triage: dynamic, static only, or not applicable on Linux.
+3. **static analysis** parses every Rust file with `syn` across all `cfg`
+   branches in a sandboxed child, runs detectors and YARA-X rules, diffs
+   against the previous version, and decides the triage: dynamic, static
+   only, or not applicable on Linux
+   ([ADR 0015](adr/0015-static-analysis-and-triage.md)).
 4. The job becomes ready for the sandbox, or goes straight to scoring.
 5. **orchestrator** claims the job when a VM slot is free, restores the warm
    snapshot, attaches the job's read only payload image, and starts the run.
@@ -189,8 +191,11 @@ vCPUs cannot run all of them, so:
 
 * every version gets static analysis;
 * a version gets a VM run only if it has build time code of its own (a build
-  script, `proc-macro = true`, or `links`), adds new build time dependencies,
-  has static findings, is a new crate, or updates a popular crate;
+  script, `proc-macro = true`, or `links`), has a high severity finding, or
+  locks an unfamiliar dependency with build time code
+  ([ADR 0015](adr/0015-static-analysis-and-triage.md));
+* new crates and updates of popular crates get a higher priority, so they
+  run first;
 * a job that waits longer than `triage.dynamic_deadline_hours` for a slot is
   scored as static only, and its label says why;
 * the dashboard publishes the share of versions with dynamic results.

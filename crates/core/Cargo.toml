@@ -21,8 +21,11 @@ cratesio = ["dep:serde_json", "dep:semver", "dep:quick-xml"]
 http = ["dep:reqwest", "dep:tokio", "dep:bytes"]
 # Namespaces, resource limits and Landlock for workers handling hostile input.
 sandbox = ["dep:rustix", "dep:landlock"]
+# The content addressed blob store of crate archives (ADR 0014).
+blobs = ["dep:blake3", "dep:zstd"]
 
 [dependencies]
+blake3 = { workspace = true, optional = true }
 bytes = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 landlock = { workspace = true, optional = true }
@@ -42,6 +45,7 @@ toml.workspace = true
 tracing = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 url.workspace = true
+zstd = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true

@@ -111,6 +111,10 @@ dynamic_deadline_hours = 12
 # Reverse dependencies from which a crate counts as popular; updates to
 # popular crates get dynamic analysis first.
 popular_min_reverse_dependencies = 100
+# All time downloads from which a crate counts as popular. A dependency with
+# build time code that is neither popular nor locked by an earlier version
+# makes a job dynamic.
+popular_min_downloads = 1000000
 
 [sandbox]
 # Physical cores with SMT disabled, and the cores kept for host services.

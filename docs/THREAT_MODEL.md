@@ -100,7 +100,8 @@ test. Nothing is marked Built before the code exists.
 | Archives never extracted on the host; validated in a sandboxed child (no filesystem, no network, rlimits); traversal, links, devices, special modes and case collisions reported; bombs aborted ([ADR 0014](adr/0014-resolve-fetch-validate.md)) | Tested | M2 |
 | Resolution through a generated consumer probe, so cargo never reads configuration shipped in the crate; `RUSTC` points nowhere, so nothing compiles | Built | M2 |
 | Resolution child: own user and network namespaces, only a loopback relay to the fetcher's index proxy, Landlock, rlimits | Built | M2 |
-| Static analysis in a separate process with rlimits, Landlock and seccomp | Planned | M3 |
+| Static analysis in a sandboxed child: own user and network namespaces, rlimits, no filesystem access (Landlock) ([ADR 0015](adr/0015-static-analysis-and-triage.md)) | Tested | M3 |
+| Evidence escapes control, bidi and invisible characters, so stored and displayed findings cannot hide code (Trojan Source) | Tested | M3 |
 | Guest disk images parsed on the host only in a sandboxed subprocess | Planned | M4 |
 | No README or other crate text rendered as raw HTML; autoescaping templates; strict CSP | Planned | M6 |
 

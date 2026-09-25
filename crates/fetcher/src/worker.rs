@@ -11,14 +11,14 @@ use crateward_core::failure::FailureClass;
 use crateward_core::http::{HttpError, PoliteClient};
 use crateward_core::job::{JobEvent, Stage};
 use crateward_core::name::CrateName;
-use crateward_core::store::{CrateFile, Policies, Store, StoreError, StoredJob};
+use crateward_core::store::{CrateFile, Policies, Store, StoreError, StoredJob, heartbeat};
 use sha2::Digest as _;
 
 use crate::archive::ArchiveLimits;
-use crate::blobs::BlobStore;
 use crate::proxy::IndexCache;
 use crate::resolve::{Resolution, locked_packages, resolve};
 use crate::sandboxed::{MAX_CRATE_BYTES, validate_in_sandbox};
+use crateward_core::blobs::BlobStore;
 
 /// How a fetch failed. The class decides the automated response.
 #[derive(Debug, thiserror::Error)]
@@ -355,27 +355,4 @@ impl Fetcher {
         self.store.record_crate_file(&file).await?;
         Ok(Some(file))
     }
-}
-
-/// Keeps a lease alive from its own connection while a job is processed.
-pub fn heartbeat(
-    store: Arc<Store>,
-    job: crateward_core::job::JobId,
-    worker: String,
-    lease: Duration,
-    every: Duration,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(every).await;
-            match store.heartbeat(job, &worker, lease).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    tracing::warn!(job = job.0, "lease lost");
-                    return;
-                }
-                Err(error) => tracing::warn!(%error, "heartbeat failed"),
-            }
-        }
-    })
 }

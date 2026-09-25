@@ -29,13 +29,23 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (1, include_str!("../migrations/0001_jobs.sql")),
     (2, include_str!("../migrations/0002_fetch.sql")),
     (3, include_str!("../migrations/0003_crate_stats.sql")),
+    (4, include_str!("../migrations/0004_static.sql")),
 ];
+
+/// The server's message for database errors, which the error's own
+/// `Display` leaves out.
+fn describe(error: &tokio_postgres::Error) -> String {
+    match error.as_db_error() {
+        Some(db) => format!("{}: {} ({})", error, db.message(), db.code().code()),
+        None => error.to_string(),
+    }
+}
 
 /// Why a store operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     /// The database failed.
-    #[error("postgres: {0}")]
+    #[error("postgres: {}", describe(.0))]
     Postgres(#[from] tokio_postgres::Error),
     /// A stored value does not decode.
     #[error("corrupt row {id}: {reason}")]
@@ -660,6 +670,157 @@ impl Store {
             .map(|r| r.get(0)))
     }
 
+    /// The stored static report of a crate file: analyzer version and
+    /// report.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn static_report(
+        &self,
+        sha256: &Sha256Digest,
+    ) -> Result<Option<(i32, Value)>, StoreError> {
+        Ok(self
+            .client
+            .query_opt(
+                "SELECT analyzer_version, report FROM static_reports WHERE sha256 = $1",
+                &[&sha256.as_bytes().as_slice()],
+            )
+            .await?
+            .map(|r| (r.get(0), r.get(1))))
+    }
+
+    /// Stores or replaces the static report of a crate file.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors, including a crate file that is not recorded.
+    pub async fn record_static_report(
+        &self,
+        sha256: &Sha256Digest,
+        analyzer_version: i32,
+        build_time_code: bool,
+        max_severity: Option<&str>,
+        report: &Value,
+    ) -> Result<(), StoreError> {
+        self.client
+            .execute(
+                "INSERT INTO static_reports (sha256, analyzer_version, build_time_code, max_severity, report)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (sha256) DO UPDATE
+                 SET analyzer_version = $2, build_time_code = $3, max_severity = $4,
+                     report = $5, analyzed_at = now()",
+                &[&sha256.as_bytes().as_slice(), &analyzer_version, &build_time_code, &max_severity, report],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// The locked packages the fetch stage recorded for a job, as stored.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn fetch_packages(&self, job: JobId) -> Result<Option<Value>, StoreError> {
+        Ok(self
+            .client
+            .query_opt(
+                "SELECT packages FROM job_fetches WHERE job_id = $1",
+                &[&job.0],
+            )
+            .await?
+            .map(|r| r.get(0)))
+    }
+
+    /// Other versions of a crate that have a fetch record: job, version and
+    /// locked packages.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn other_fetches(
+        &self,
+        name: &CrateName,
+        except: JobId,
+    ) -> Result<Vec<(JobId, String, Sha256Digest, Value)>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT j.id, j.version, j.cksum, f.packages
+                 FROM jobs j JOIN job_fetches f ON f.job_id = j.id
+                 WHERE j.canonical_name = $1 AND j.id <> $2",
+                &[&name.canonical(), &except.0],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| {
+                let id: i64 = r.try_get(0)?;
+                let cksum: Vec<u8> = r.try_get(2)?;
+                let cksum: [u8; 32] = cksum.try_into().map_err(|_| StoreError::Corrupt {
+                    id,
+                    reason: "checksum is not 32 bytes".into(),
+                })?;
+                Ok((
+                    JobId(id),
+                    r.try_get(1)?,
+                    Sha256Digest::from_bytes(cksum),
+                    r.try_get(3)?,
+                ))
+            })
+            .collect()
+    }
+
+    /// The canonical names among `names` of crates with at least
+    /// `min_reverse` reverse dependencies or `min_downloads` downloads.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn popular_among(
+        &self,
+        names: &[String],
+        min_reverse: i64,
+        min_downloads: i64,
+    ) -> Result<Vec<String>, StoreError> {
+        let canonical: Vec<String> = names
+            .iter()
+            .map(|n| n.to_ascii_lowercase().replace('-', "_"))
+            .collect();
+        let rows = self
+            .client
+            .query(
+                "SELECT canonical_name FROM crate_stats
+                 WHERE canonical_name = ANY($1)
+                   AND (reverse_dependencies >= $2 OR downloads >= $3)",
+                &[&canonical, &min_reverse, &min_downloads],
+            )
+            .await?;
+        Ok(rows.iter().map(|r| r.get(0)).collect())
+    }
+
+    /// Records the static analysis decision of a job.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn record_job_static(
+        &self,
+        job: JobId,
+        triage: &Value,
+        reasons: &Value,
+        diff: Option<&Value>,
+    ) -> Result<(), StoreError> {
+        self.client
+            .execute(
+                "INSERT INTO job_static (job_id, triage, reasons, diff) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (job_id) DO UPDATE
+                 SET triage = $2, reasons = $3, diff = $4, analyzed_at = now()",
+                &[&job.0, triage, reasons, &diff],
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Number of jobs per state.
     ///
     /// # Errors
@@ -674,4 +835,27 @@ impl Store {
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect()
     }
+}
+
+/// Keeps a lease alive from its own connection while a job is processed.
+pub fn heartbeat(
+    store: std::sync::Arc<Store>,
+    job: JobId,
+    worker: String,
+    lease: Duration,
+    every: Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(every).await;
+            match store.heartbeat(job, &worker, lease).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    tracing::warn!(job = job.0, "lease lost");
+                    return;
+                }
+                Err(error) => tracing::warn!(%error, "heartbeat failed"),
+            }
+        }
+    })
 }

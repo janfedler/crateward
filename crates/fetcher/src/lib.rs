@@ -24,7 +24,6 @@
 #![forbid(unsafe_code)]
 
 pub mod archive;
-pub mod blobs;
 pub mod proxy;
 pub mod resolve;
 pub mod sandboxed;
@@ -41,8 +40,8 @@ use crateward_core::http::{ClientConfig, Fetched, PoliteClient};
 use crateward_core::store::{Policies, Store};
 use secrecy::ExposeSecret;
 
-use crate::blobs::BlobStore;
 use crate::worker::{Fetcher, FetcherSetup};
+use crateward_core::blobs::BlobStore;
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Fetcher;

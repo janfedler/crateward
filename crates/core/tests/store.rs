@@ -17,7 +17,7 @@ use crateward_core::failure::FailureClass;
 use crateward_core::job::{JobEvent, JobState, Limits, Stage, StageLimits, Triage};
 use crateward_core::name::CrateName;
 use crateward_core::retry::RetryPolicy;
-use crateward_core::store::{NewJob, Policies, Store, StoreError};
+use crateward_core::store::{CrateFile, NewJob, Policies, Store, StoreError};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -110,7 +110,7 @@ async fn migrations_are_idempotent() {
         return;
     };
     let mut store = db.store().await;
-    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3]);
+    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3, 4]);
     assert!(store.migrate().await.unwrap().is_empty());
     db.drop().await;
 }
@@ -389,5 +389,95 @@ async fn sandbox_start_keeps_the_lease_for_the_run() {
     );
     let counts = store.count_by_state().await.unwrap();
     assert_eq!(counts.get("Running"), Some(&1));
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn static_reports_fetches_and_popularity_round_trip() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let old = store
+        .enqueue(&new_job("lib", "1.0.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let new = store
+        .enqueue(&new_job("lib", "1.1.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let packages = serde_json::json!([{"name": "cc", "version": "1.0.0", "checksum": "00"}]);
+    store
+        .record_fetch(old, Some("lock"), None, &packages)
+        .await
+        .unwrap();
+    store
+        .record_fetch(new, Some("lock"), None, &packages)
+        .await
+        .unwrap();
+    assert_eq!(
+        store.fetch_packages(new).await.unwrap(),
+        Some(packages.clone())
+    );
+    let name = CrateName::parse("lib").unwrap();
+    let others = store.other_fetches(&name, new).await.unwrap();
+    assert_eq!(others.len(), 1);
+    assert_eq!((others[0].0, others[0].1.as_str()), (old, "1.0.0"));
+
+    let sha = "cd".repeat(32).parse().unwrap();
+    assert_eq!(store.static_report(&sha).await.unwrap(), None);
+    store
+        .record_crate_file(&CrateFile {
+            sha256: sha,
+            name: "lib".into(),
+            version: "1.1.0".into(),
+            blake3: Some("ef".repeat(32)),
+            compressed_bytes: 1,
+            unpacked_bytes: 2,
+            stored_bytes: Some(1),
+            report: serde_json::json!({}),
+        })
+        .await
+        .unwrap();
+    let report = serde_json::json!({"findings": []});
+    store
+        .record_static_report(&sha, 7, true, Some("high"), &report)
+        .await
+        .unwrap();
+    assert_eq!(store.static_report(&sha).await.unwrap(), Some((7, report)));
+
+    store
+        .upsert_crate_stats(&[
+            ("Many-Deps".into(), 10, 500),
+            ("many_downloads".into(), 5_000, 1),
+        ])
+        .await
+        .unwrap();
+    let mut popular = store
+        .popular_among(
+            &[
+                "many-deps".into(),
+                "many_downloads".into(),
+                "unknown".into(),
+            ],
+            100,
+            1_000,
+        )
+        .await
+        .unwrap();
+    popular.sort();
+    assert_eq!(
+        popular,
+        vec!["many_deps".to_owned(), "many_downloads".to_owned()]
+    );
+
+    let triage = serde_json::json!({"kind": "dynamic"});
+    store
+        .record_job_static(new, &triage, &serde_json::json!(["build script"]), None)
+        .await
+        .unwrap();
     db.drop().await;
 }

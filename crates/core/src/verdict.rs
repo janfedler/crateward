@@ -34,6 +34,9 @@ pub enum StaticOnlyReason {
     /// The version qualified for dynamic analysis but waited longer than the
     /// configured deadline for a free VM slot.
     CapacityDeadline,
+    /// The archive failed validation and was never unpacked, so there is
+    /// nothing to parse or build; the archive findings are the evidence.
+    ArchiveRejected,
 }
 
 impl Coverage {
