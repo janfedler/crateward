@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'">
+<title>Crateward</title>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<main>
+<h1>Crateward</h1>
+<p>Crateward watches new crate versions on crates.io. It analyzes every one
+statically and builds those whose build runs their own code inside an
+isolated microVM, where it records what the build does. This page shows
+aggregate numbers only. Findings are published here after they were
+reported and the embargo passed.</p>
+
+<h2>So far</h2>
+<table>
+<tr><th>Versions seen</th><td>{{ versions }}</td></tr>
+<tr><th>Versions with a verdict</th><td>{{ finished }}</td></tr>
+{% for (label, n, share) in coverage %}
+<tr><th>{{ label }}</th><td>{{ n }} ({{ share }})</td></tr>
+{% endfor %}
+</table>
+
+<h2>Verdicts by risk level</h2>
+<table>
+{% for (level, n) in levels %}<tr><th>{{ level }}</th><td>{{ n }}</td></tr>{% endfor %}
+</table>
+<p class="muted">A low level is not a claim that a version is safe: every
+verdict states what the analysis covered, and static only means the version
+was not built.</p>
+
+<h2>Versions finished per day</h2>
+<table>
+{% for (day, n) in daily %}<tr><th>{{ day }}</th><td>{{ n }}</td></tr>{% endfor %}
+</table>
+
+<h2>Self checks</h2>
+<p>{{ canaries }}</p>
+
+<h2>Published findings</h2>
+<p>None yet.</p>
+
+<p class="muted">Updated {{ generated }}. Machine readable: <a href="stats.json">stats.json</a>.
+Contact: security@crateward.com.</p>
+</main>
+</body>
+</html>

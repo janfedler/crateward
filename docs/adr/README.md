@@ -28,3 +28,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0019](0019-scratch-disk-scan.md) | Reading the scratch disk after a run | Accepted |
 | [0020](0020-autonomy-breakers-quarantine-canaries-alerts.md) | Autonomy: breakers, quarantine, canaries and alerts | Accepted |
 | [0021](0021-explainable-scoring.md) | Explainable scoring, behavior profiles and the review inbox | Accepted |
+| [0022](0022-dashboard-and-public-export.md) | The dashboard and the public export | Accepted, authentication open |

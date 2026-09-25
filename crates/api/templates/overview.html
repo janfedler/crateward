@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Crateward: overview{% endblock %}
+{% block content %}
+<h1>Overview</h1>
+<div hx-ext="sse" sse-connect="/events" sse-swap="overview">
+{% include "overview_body.html" %}
+</div>
+{% endblock %}

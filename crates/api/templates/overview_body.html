@@ -1,0 +1,35 @@
+<div class="cards">
+  <div class="card"><div class="muted">Needs you</div>
+    <div class="n {% if o.pending_reviews > 0 %}bad{% else %}ok{% endif %}"><a href="/inbox">{{ o.pending_reviews }}</a></div></div>
+  <div class="card"><div class="muted">Finished, 24 h</div><div class="n">{{ o.done_24h }}</div>
+    <div class="muted">{{ o.dynamic_share }} with a VM run</div></div>
+  <div class="card"><div class="muted">Alerts waiting</div><div class="n">{{ o.alerts_waiting }}</div></div>
+  <div class="card"><div class="muted">Pipeline</div>
+    {% if o.pauses.is_empty() %}<div class="n ok">running</div>
+    {% else %}{% for p in o.pauses %}<div class="bad">paused: {{ p }}</div>{% endfor %}{% endif %}</div>
+</div>
+<h2>Stages</h2>
+<table>
+<tr><th>Stage</th><th>Breaker</th></tr>
+{% for (stage, state) in o.breakers %}
+<tr><td>{{ stage }}</td><td class="{% if state == "closed" %}ok{% else %}bad{% endif %}">{{ state }}</td></tr>
+{% endfor %}
+</table>
+<h2>Canaries</h2>
+<table>
+<tr><th>Canary</th><th>Result</th><th>When</th></tr>
+{% for (name, passed, when) in o.canaries %}
+<tr><td>{{ name }}</td><td class="{% if *passed %}ok{% else %}bad{% endif %}">{% if *passed %}passed{% else %}FAILED{% endif %}</td><td class="muted">{{ when }}</td></tr>
+{% endfor %}
+</table>
+<h2>Jobs by state</h2>
+<table>
+<tr><th>State</th><th>Jobs</th></tr>
+{% for (state, n) in o.states %}<tr><td>{{ state }}</td><td>{{ n }}</td></tr>{% endfor %}
+</table>
+<h2>Verdicts by level</h2>
+<table>
+<tr><th>Level</th><th>Verdicts</th></tr>
+{% for (level, n) in o.levels %}<tr><td class="level-{{ level }}">{{ level }}</td><td><a href="/jobs?level={{ level }}">{{ n }}</a></td></tr>{% endfor %}
+</table>
+<p class="muted">Updated {{ o.updated }}</p>

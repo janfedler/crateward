@@ -1,0 +1,34 @@
+/* Crateward dashboard. No inline styles: the Content Security Policy
+   allows only this file. */
+:root { --fg: #1b1f24; --muted: #57606a; --line: #d0d7de; --bg: #ffffff;
+        --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --panel: #f6f8fa; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --bg: #0d1117;
+          --ok: #3fb950; --warn: #d29922; --bad: #f85149; --panel: #161b22; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+header { display: flex; gap: 1.5rem; align-items: center; padding: .75rem 1rem;
+         border-bottom: 1px solid var(--line); background: var(--panel); }
+header a { color: var(--fg); text-decoration: none; font-weight: 600; }
+header .brand { font-size: 1.1rem; }
+main { padding: 1rem; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 1.3rem; } h2 { font-size: 1.1rem; margin-top: 1.5rem; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line);
+         vertical-align: top; overflow-wrap: anywhere; }
+th { color: var(--muted); font-weight: 600; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .75rem; }
+.card { border: 1px solid var(--line); border-radius: 6px; padding: .75rem; background: var(--panel); }
+.card .n { font-size: 1.6rem; font-weight: 700; }
+.muted { color: var(--muted); }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+.level-critical, .level-high { color: var(--bad); font-weight: 700; }
+.level-medium { color: var(--warn); font-weight: 600; }
+pre { background: var(--panel); border: 1px solid var(--line); padding: .5rem;
+      overflow-x: auto; max-height: 30rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+form.inline { display: inline; }
+button { font: inherit; padding: .25rem .6rem; border: 1px solid var(--line);
+         border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
+input, select { font: inherit; padding: .2rem .4rem; }
+.filters { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }

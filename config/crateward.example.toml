@@ -205,6 +205,15 @@ topic = "example_topic_replace_with_48_random_hex_chars"
 ping_url = "https://hc-ping.com/00000000-0000-0000-0000-000000000000"
 interval_secs = 60
 
+# The public site (ADR 0009), a static export of aggregate statistics
+# pushed to GitHub Pages. Leave this table out to only write it locally.
+[export]
+repository = "git@github.com:janfedler/crateward-site.git"
+branch = "main"
+# A deploy key with write access to the site repository only.
+deploy_key = "/etc/crateward/site-deploy-key"
+interval_hours = 24
+
 [web]
 # The WireGuard address of the server. Never 0.0.0.0.
 listen = "10.77.0.1:8080"

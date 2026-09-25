@@ -61,6 +61,26 @@ pub struct Config {
     pub heartbeat: HeartbeatConfig,
     /// The admin dashboard.
     pub web: WebConfig,
+    /// Where the public site is pushed (ADR 0009). Without this table the
+    /// site is only written below `instance.run_dir`.
+    #[serde(default)]
+    pub export: Option<ExportConfig>,
+}
+
+/// The public site's repository.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportConfig {
+    /// SSH URL of the site repository, for example
+    /// `git@github.com:janfedler/crateward-site.git`.
+    pub repository: String,
+    /// Branch GitHub Pages serves.
+    pub branch: String,
+    /// Private key of a deploy key with write access to that repository
+    /// only. Readable by the dashboard's user only.
+    pub deploy_key: PathBuf,
+    /// Hours between two exports.
+    pub interval_hours: u64,
 }
 
 /// Identity and directories of this installation.
@@ -753,6 +773,29 @@ impl Config {
     }
 
     fn validate_operations(&self, v: &mut Issues) {
+        if let Some(export) = &self.export {
+            v.check(
+                export.repository.starts_with("git@github.com:")
+                    && export.repository.ends_with(".git"),
+                "export.repository",
+                "must be an SSH URL of a GitHub repository (git@github.com:owner/name.git)",
+            );
+            v.check(
+                !export.branch.is_empty()
+                    && export
+                        .branch
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+                "export.branch",
+                "must be a plain branch name",
+            );
+            v.absolute(&export.deploy_key, "export.deploy_key");
+            v.check(
+                (1..=168).contains(&export.interval_hours),
+                "export.interval_hours",
+                "must be between 1 and 168",
+            );
+        }
         v.check(
             (50..=95).contains(&self.storage.disk_alert_percent),
             "storage.disk_alert_percent",

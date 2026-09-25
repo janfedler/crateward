@@ -140,11 +140,12 @@ test. Nothing is marked Built before the code exists.
 |------------|--------|-----------|
 | No inbound service except WireGuard on one UDP port | Planned | M1 |
 | Admin dashboard binds to the WireGuard address; configuration rejects all interfaces | Tested | M0 |
-| Passkey authentication for the admin view | Planned | M6 |
+| Passkey authentication for the admin view; needs a domain with a trusted certificate or a localhost binding behind an SSH tunnel ([ADR 0022](adr/0022-dashboard-and-public-export.md)) | Planned | M8 |
+| Dashboard: Host check against DNS rebinding, same origin checks for writes, strict Content Security Policy, compile time escaping, read only page queries | Tested | M6 |
 | Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Tested | M5 |
 | ntfy topic of at least 32 random characters; configuration rejects shorter topics | Tested | M0 |
 | Secrets redacted from `Debug` output and logs | Tested | M0 |
-| Public site is a static export of aggregate statistics and disclosed findings only, pushed with a deploy key limited to one repository | Planned | M6 |
+| Public site is a static export of aggregate statistics and disclosed findings only, pushed with a deploy key limited to one repository | Built (push waits for the repository) | M6 |
 
 A compromised external service can deface the public site, suppress alerts or
 forge them. It cannot reach the server or read undisclosed findings.

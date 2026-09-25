@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Crateward: needs you{% endblock %}
+{% block content %}
+<h1>Needs you</h1>
+<p class="muted">High and critical verdicts wait here until marked confirmed or a false positive. Nothing is published before that (DISCLOSURE.md).</p>
+{% if rows.is_empty() %}<p class="ok">Nothing waits for review.</p>{% else %}{% include "rows.html" %}{% endif %}
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Crateward: {{ name }} {{ version }}{% endblock %}
+{% block content %}
+<h1>{{ name }} {{ version }} <span class="muted">job {{ id }}</span></h1>
+<p>State <b>{{ state }}</b>{% if coverage != "" %}, coverage <b>{{ coverage }}</b>{% endif %}.
+{% if score != "" %} Score <span class="level-{{ level }}">{{ score }} ({{ level }})</span>, review <b>{{ review }}</b>.{% endif %}</p>
+
+{% if score != "" %}
+<form class="inline" method="post" action="/jobs/{{ id }}/review">
+  <input type="hidden" name="decision" value="confirmed"><button type="submit">Confirm</button>
+</form>
+<form class="inline" method="post" action="/jobs/{{ id }}/review">
+  <input type="hidden" name="decision" value="false_positive"><button type="submit">False positive</button>
+</form>
+{% endif %}
+
+<h2>Evidence</h2>
+{% if evidence.is_empty() %}<p class="muted">No evidence.</p>{% else %}
+<table>
+<tr><th>Points</th><th>Signal</th><th>Source</th><th>Package</th><th>Where</th><th>What</th></tr>
+{% for e in evidence %}
+<tr><td>{{ e.points }}</td><td>{{ e.signal }}</td><td>{{ e.source }}</td><td>{{ e.package }}</td><td>{{ e.location }}</td><td>{{ e.summary }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+
+{% if !new_behavior.is_empty() %}
+<h2>New since the previous version</h2>
+<ul>{% for b in new_behavior %}<li>{{ b }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>Behavior profile</h2>
+{% if profile.is_empty() %}<p class="muted">Empty.</p>{% else %}<ul>{% for b in profile %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+
+<h2>Static findings</h2>
+{% if findings.is_empty() %}<p class="muted">None.</p>{% else %}
+<table>
+<tr><th>Severity</th><th>Kind</th><th>Context</th><th>Where</th><th>Evidence</th></tr>
+{% for f in findings %}
+<tr><td>{{ f.severity }}</td><td>{{ f.kind }}</td><td>{{ f.context }}</td><td>{{ f.location }}</td><td>{{ f.evidence }}</td></tr>
+{% endfor %}
+</table>
+{% endif %}
+
+<h2>Timeline</h2>
+<table>
+<tr><th>When</th><th>From</th><th>To</th><th>Event</th><th>Worker</th></tr>
+{% for t in timeline %}
+<tr><td class="muted">{{ t.0 }}</td><td>{{ t.1 }}</td><td>{{ t.2 }}</td><td>{{ t.3 }}</td><td class="muted">{{ t.4 }}</td></tr>
+{% endfor %}
+</table>
+
+{% for (kind, report) in runs %}
+<h2>Run: {{ kind }}</h2>
+<pre>{{ report }}</pre>
+{% endfor %}
+{% endblock %}

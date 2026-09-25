@@ -125,8 +125,12 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    checks where the crate has platform specific code.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
-8. **supervisor** and **api** publish the verdict, raise alerts from the
-   closed escalation list, and export aggregate data to the public site.
+8. **analyzer** finalizes: high and critical verdicts wait in the "needs
+   you" inbox of the dashboard (**api**), the **supervisor** raises alerts
+   from the closed escalation list, and the api exports aggregate numbers
+   to the public site
+   ([ADR 0021](adr/0021-explainable-scoring.md),
+   [ADR 0022](adr/0022-dashboard-and-public-export.md)).
 
 ## Job state machine
 

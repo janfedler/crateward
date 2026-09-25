@@ -12,8 +12,10 @@
 //! Enabled with the `store` feature; the guest agent never links it.
 
 mod autonomy;
+mod dashboard;
 mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
+pub use dashboard::{JobFilter, JobRow, Overview, PublicStats};
 pub use verdicts::Review;
 
 use std::collections::BTreeMap;

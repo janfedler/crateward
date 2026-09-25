@@ -9,7 +9,18 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-crateward_core = { workspace = true, features = ["app"] }
+askama.workspace = true
+axum.workspace = true
+crateward_core = { workspace = true, features = ["app", "store"] }
+futures-util.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
 
 [lints]
 workspace = true

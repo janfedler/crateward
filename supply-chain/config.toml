@@ -66,6 +66,22 @@ criteria = "safe-to-deploy"
 version = "0.1.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.askama]]
+version = "0.16.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.askama_derive]]
+version = "0.16.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.askama_macros]]
+version = "0.16.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.askama_parser]]
+version = "0.16.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.asn1-rs]]
 version = "0.7.2"
 criteria = "safe-to-deploy"
@@ -96,6 +112,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-sys]]
 version = "0.45.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.axum]]
+version = "0.8.9"
+criteria = "safe-to-deploy"
+
+[[exemptions.axum-core]]
+version = "0.5.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.aya]]
@@ -370,6 +394,10 @@ criteria = "safe-to-deploy"
 version = "0.33.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.glob]]
+version = "0.3.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.globset]]
 version = "0.4.20"
 criteria = "safe-to-deploy"
@@ -570,6 +598,10 @@ criteria = "safe-to-deploy"
 version = "0.4.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.matchit]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.md-5]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
@@ -588,6 +620,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.memoffset]]
 version = "0.9.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.mime]]
+version = "0.3.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.minimal-lexical]]
@@ -860,6 +896,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.serde_json]]
 version = "1.0.151"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_path_to_error]]
+version = "0.1.20"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_urlencoded]]
+version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.sha2]]

@@ -1,0 +1,10 @@
+body { margin: 0; font: 16px/1.6 system-ui, sans-serif; color: #1b1f24; background: #fff; }
+main { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+h1 { font-size: 1.8rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
+table { border-collapse: collapse; } th, td { text-align: left; padding: .3rem 1rem .3rem 0; }
+th { font-weight: 500; color: #57606a; }
+.muted { color: #57606a; font-size: .9rem; }
+@media (prefers-color-scheme: dark) {
+  body { color: #e6edf3; background: #0d1117; } th, .muted { color: #8d96a0; }
+  a { color: #58a6ff; }
+}
