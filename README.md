@@ -7,10 +7,11 @@ metal Linux server, scores the risk with reasons that link to evidence, and
 shows everything on a web dashboard. It asks its maintainer for help only
 when something genuinely needs a human.
 
-> **Status: milestones M0 to M3 are done.** Jailed microVMs boot, snapshot,
-> restore and clean up without leaks; new crates.io versions become jobs,
-> are fetched, validated and resolved, and get a static report with
-> evidence and a triage decision. Dynamic analysis follows with M4. See
+> **Status: milestones M0 to M3 are done, M4 is in progress.** New
+> crates.io versions become jobs, are fetched, validated and resolved, and
+> get a static report with evidence and a triage decision. Versions with
+> build time code run `cargo check` in jailed microVMs with honeytokens
+> planted and a fake internet that records every network attempt. See
 > [the milestones](#milestones).
 
 *A dashboard screenshot will appear here with milestone M6.*
@@ -127,7 +128,7 @@ cargo run -p crateward_cli -- state-machine diagram
 | M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | after M4 (its measurement needs `cargo check` in VMs) |
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
-| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | next |
+| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | in progress: runs, fake internet and honeytokens work; eBPF, TLS and disk diff open |
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | planned |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | planned |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | planned |

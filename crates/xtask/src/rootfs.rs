@@ -8,13 +8,15 @@
 //!    archive comes from snapshot.debian.org at the time pinned in
 //!    `guest/rootfs/rootfs.toml`, so the package set is fixed. The tarball is
 //!    cached under a name derived from the BLAKE3 digest of its inputs.
-//! 2. The guest agent, appended to a copy of the base tarball with root
+//! 2. The Rust toolchain pinned in `guest/rootfs/rust.toml` under
+//!    `/usr/local`, downloaded once and verified by SHA-256.
+//! 3. The guest agent, appended to a copy of the base tarball with root
 //!    ownership.
 //!
 //! The result is packed with `mkfs.erofs` into a compressed, read only
 //! image with a fixed timestamp on every file.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -44,6 +46,21 @@ struct Debian {
 struct Image {
     source_date_epoch: u64,
     compression: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Toolchain {
+    version: String,
+    component: Vec<Component>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Component {
+    dir: String,
+    url: String,
+    sha256: String,
 }
 
 fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
@@ -81,9 +98,20 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         eprintln!("xtask: reusing {}", base.display());
     } else {
         build_base(&manifest.debian, &hook_text, &base, &epoch)?;
+        // Bases for older inputs are never used again and are large.
+        for entry in std::fs::read_dir(&work).map_err(io(&work))?.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path != base && name.starts_with("base-") && name.ends_with(".tar") {
+                std::fs::remove_file(&path).map_err(io(&path))?;
+            }
+        }
     }
 
-    // Layer 2: the guest agent.
+    // Layer 2: the Rust toolchain.
+    let toolchain = stage_toolchain(root, &inputs.join("rust.toml"), &work)?;
+
+    // Layer 3: the guest agent.
     crate::guest_agent()?;
     let agent = root
         .join("target")
@@ -100,6 +128,24 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     std::fs::copy(&base, &tarball).map_err(io(&base))?;
     let tar = tarball.to_string_lossy().into_owned();
     let staging_dir = staging.to_string_lossy().into_owned();
+    // The toolchain keeps its own file modes.
+    run_in(
+        root,
+        "tar",
+        &[
+            "--append",
+            "--file",
+            &tar,
+            "--owner=0",
+            "--group=0",
+            "--numeric-owner",
+            &format!("--mtime=@{epoch}"),
+            "-C",
+            &toolchain.to_string_lossy(),
+            "usr",
+        ],
+        &[],
+    )?;
     run_in(
         root,
         "tar",
@@ -184,4 +230,71 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
     run_in(dir, "mmdebstrap", &args, &[("SOURCE_DATE_EPOCH", epoch)])?;
     std::fs::rename(&partial, base).map_err(io(&partial))?;
     Ok(())
+}
+
+/// Downloads and verifies the pinned toolchain components and unpacks them
+/// into `<work>/toolchain/usr/local`. Returns the staging root.
+fn stage_toolchain(root: &Path, pin_path: &Path, work: &Path) -> Result<PathBuf, TaskError> {
+    let text = std::fs::read_to_string(pin_path).map_err(io(pin_path))?;
+    let pin: Toolchain = toml::from_str(&text)
+        .map_err(|e| TaskError::Check(format!("guest/rootfs/rust.toml: {e}")))?;
+    let downloads = root.join("target").join("guest").join("downloads");
+    std::fs::create_dir_all(&downloads).map_err(io(&downloads))?;
+    let staging = work.join("toolchain");
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).map_err(io(&staging))?;
+    }
+    let prefix = staging.join("usr").join("local");
+    std::fs::create_dir_all(&prefix).map_err(io(&prefix))?;
+    for component in &pin.component {
+        let name = component
+            .url
+            .rsplit('/')
+            .next()
+            .filter(|n| n.ends_with(".tar.xz"))
+            .ok_or_else(|| TaskError::Check(format!("unexpected URL {}", component.url)))?;
+        let archive = downloads.join(name);
+        let archive_str = archive.to_string_lossy().into_owned();
+        if !archive.exists() {
+            run_in(
+                &downloads,
+                "curl",
+                &[
+                    "-sSfL",
+                    "--proto",
+                    "=https",
+                    "-o",
+                    &archive_str,
+                    &component.url,
+                ],
+                &[],
+            )?;
+        }
+        let digest = crate::images::sha256_file(&archive)?;
+        if digest != component.sha256 {
+            std::fs::remove_file(&archive).map_err(io(&archive))?;
+            return Err(TaskError::Check(format!(
+                "{name} has SHA-256 {digest}, pinned {}; deleted it",
+                component.sha256
+            )));
+        }
+        // <name>-<version>-<target>/<dir>/{bin,lib,...} lands in /usr/local.
+        let top = name.trim_end_matches(".tar.xz");
+        run_in(
+            root,
+            "tar",
+            &[
+                "-xJf",
+                &archive_str,
+                "-C",
+                &prefix.to_string_lossy(),
+                "--strip-components=2",
+                "--exclude=manifest.in",
+                &format!("{top}/{}", component.dir),
+            ],
+            &[],
+        )?;
+    }
+    eprintln!("xtask: staged Rust {} for the guest", pin.version);
+    Ok(staging)
 }

@@ -85,6 +85,27 @@ pub struct Drive {
     pub is_read_only: bool,
 }
 
+/// `PATCH /drives/{drive_id}`: points a drive at another backing file and
+/// tells the guest about the new size.
+#[derive(Debug, Clone, Serialize)]
+pub struct DriveUpdate {
+    /// Drive identifier.
+    pub drive_id: String,
+    /// New backing file.
+    pub path_on_host: PathBuf,
+}
+
+/// `PUT /network-interfaces/{iface_id}`
+#[derive(Debug, Clone, Serialize)]
+pub struct NetworkInterface {
+    /// Interface identifier.
+    pub iface_id: String,
+    /// Tap device on the host (in the jail's network namespace).
+    pub host_dev_name: String,
+    /// MAC address the guest sees.
+    pub guest_mac: String,
+}
+
 /// `PUT /vsock`
 #[derive(Debug, Clone, Serialize)]
 pub struct Vsock {

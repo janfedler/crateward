@@ -43,7 +43,7 @@ test. Nothing is marked Built before the code exists.
 | B1 | Guest to Firecracker | virtio block, net, vsock and rng devices; the serial console |
 | B2 | Firecracker to host kernel | system calls, filtered by Firecracker's seccomp filters; the rootless jail's namespaces, `pivot_root`, cgroup and distinct UID |
 | B3 | Guest agent to orchestrator | one length limited vsock stream |
-| B4 | Guest network to fake internet | tap device, veth, nftables redirect |
+| B4 | Guest network to fake internet | tap device and nftables redirect in the slot's network namespace |
 | B5 | Crate archive to extraction and static analysis | untrusted bytes into sandboxed subprocesses |
 | B6 | Warmer output to job VMs | read only images, sealed with a signed BLAKE3 manifest |
 | B7 | Server to internet | allowlisted egress per service user; WireGuard inbound |
@@ -62,7 +62,8 @@ test. Nothing is marked Built before the code exists.
 | No process runs as root for the sandbox; the orchestrator and the launcher are unprivileged | Built | M1 |
 | Serial console output rate limited, since it carries guest controlled text into the host log | Built | M1 |
 | Per slot cgroup: `cpu.max`, `memory.max`, `memory.swap.max` 0, `pids.max`; host side wall clock that ends a slot with `cgroup.kill` | Tested | M1 |
-| Drive and network rate limiters, fixed size scratch disk | Planned | M4 |
+| Fixed size scratch disk per job: a sparse ext4 image on tmpfs, writable only by the slot's UID, deleted after the run ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)) | Built | M4 |
+| Drive and network rate limiters | Planned | M4 |
 | SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Built (verified on the host) | M1 |
 | KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand; Ansible in M8) | M1 |
 | Guest kernel without module support, so guest root cannot load a rootkit module | Planned | M1 |
@@ -75,19 +76,24 @@ test. Nothing is marked Built before the code exists.
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| Host initiated vsock connection only; no host listener for guest initiated connections | Planned | M4 |
-| Frames with a u32 length prefix, a 64 KiB frame cap and per job byte and frame budgets | Planned | M4 |
-| Schema validated decoding with a version field; the decoder is a fuzz target | Planned | M4 |
+| Host initiated vsock connection only; no host listener for guest initiated connections | Built | M1 |
+| Frames with a u32 length prefix, a 64 KiB frame cap and per job byte and frame budgets | Tested | M1 |
+| Schema validated decoding with a version field | Tested | M1 |
+| The decoder as a fuzz target | Planned | M7 |
+| Workspace paths checked by the agent: absolute, no `..`, only the job's drives, the payload mounted `noexec` | Tested | M4 |
 | No host secret ever enters the guest; the guest agent does not link the host configuration harness | Built | M0 |
 
 ### Network (T1; B4)
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| Per slot namespace whose only route leads to the fake internet namespace, which has no uplink | Planned | M4 |
-| Host address, private ranges and metadata addresses dropped explicitly; IPv6 dropped and logged | Planned | M4 |
-| Fake internet runs unprivileged; its DNS and HTTP parsers are fuzz targets | Planned | M4 |
-| Tap capture on the host as ground truth, independent of the guest | Planned | M4 |
+| Per slot network namespace with only the tap device and the fake internet; no uplink and no route out ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)) | Built | M4 |
+| Every guest DNS query, TCP connection and UDP datagram redirected to the fake internet by nftables in the slot namespace; nothing else is reachable | Built | M4 |
+| IPv6 attempts logged | Planned | M4 |
+| Fake internet runs as the slot's user with Landlock (no filesystem) and rlimits; its DNS, HTTP and TLS parsers are property tested | Tested | M4 |
+| The fake internet's parsers as fuzz targets | Planned | M7 |
+| The fake internet's log (every DNS query, connection and datagram with its first 64 KiB) is owned by the orchestrator and read after the run as ground truth; the job's honeytokens are searched in it | Tested (canary) | M4 |
+| TLS terminated with a CA baked into the guest image, so HTTPS content is visible | Planned | M4 |
 
 ### Hostile content on the host (T2; B5)
 
@@ -102,6 +108,7 @@ test. Nothing is marked Built before the code exists.
 | Resolution child: own user and network namespaces, only a loopback relay to the fetcher's index proxy, Landlock, rlimits | Built | M2 |
 | Static analysis in a sandboxed child: own user and network namespaces, rlimits, no filesystem access (Landlock) ([ADR 0015](adr/0015-static-analysis-and-triage.md)) | Tested | M3 |
 | Evidence escapes control, bidi and invisible characters, so stored and displayed findings cannot hide code (Trojan Source) | Tested | M3 |
+| Payload images written from the blob store with Crateward's own tar headers and built by `mkfs.erofs` in a sandboxed child; no crate archive is extracted on the host | Built | M4 |
 | Guest disk images parsed on the host only in a sandboxed subprocess | Planned | M4 |
 | No README or other crate text rendered as raw HTML; autoescaping templates; strict CSP | Planned | M6 |
 

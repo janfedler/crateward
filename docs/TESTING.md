@@ -64,6 +64,13 @@ inert fixture tars; nothing in a fixture is ever executed. A kernel or CI
 runner without unprivileged user namespaces skips it, unless
 `CRATEWARD_REQUIRE_SANDBOX` is set, which the server's own runs do.
 
+`cargo xtask canary` runs the end to end canary on the server: a fixture
+crate whose build script reads the job's cargo token and posts it to a
+made up host. Its source exists only as strings in
+`crates/orchestrator/tests/canary.rs`; it is compiled and run only inside
+a microVM. The test passes when the fake internet recorded the lookup and
+the orchestrator found the token in what left the VM.
+
 Detectors are tested on fixtures too, including the false positives found
 on live crates (URLs in doc comments and error messages, bidi characters
 in images, `toast.txt` as an exfiltration host), so they stay fixed.

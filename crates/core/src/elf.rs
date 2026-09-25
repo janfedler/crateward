@@ -1,8 +1,9 @@
-//! Minimal ELF inspection to prove the guest agent is statically linked.
+//! Minimal ELF inspection to prove a binary is statically linked.
 //!
 //! A binary that names a program interpreter (`PT_INTERP`) needs a dynamic
-//! loader from the guest filesystem, which a crate under analysis could
-//! replace. The agent must therefore have no `PT_INTERP` header. Reading two
+//! loader. The guest agent must not have one, because a crate under
+//! analysis could replace the guest's loader; binaries started inside a
+//! jail must not either, because a jail has no loader at all. Reading two
 //! header fields is simpler and more precise than parsing `file` output.
 
 /// Program header type of an interpreter request.

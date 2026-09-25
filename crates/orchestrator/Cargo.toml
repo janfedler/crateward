@@ -18,15 +18,21 @@ path = "src/bin/vmjail.rs"
 
 [dependencies]
 bytes.workspace = true
-crateward_core = { workspace = true, features = ["app", "sandbox"] }
+crateward_fake_internet.workspace = true
+crateward_core = { workspace = true, features = ["app", "blobs", "cratesio", "sandbox", "store"] }
 http-body-util.workspace = true
+rand.workspace = true
+semver.workspace = true
+tar.workspace = true
 rustix = { workspace = true, features = ["fs", "mount", "process", "system", "thread", "stdio"] }
 hyper.workspace = true
 hyper-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+secrecy.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+tracing.workspace = true
 
 [lints]
 workspace = true

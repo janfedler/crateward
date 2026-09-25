@@ -18,12 +18,18 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crateward_core::protocol::JobSpec;
+use crateward_core::protocol::{JobSpec, Workspace};
 use tokio::time::Instant;
 
 use crate::cgroup::{CgroupError, CgroupTree, SLOT_PREFIX, SlotLimits};
 use crate::firecracker::agent::RunOutcome;
-use crate::firecracker::vm::{Isolation, JailConfig, Launch, Snapshot, Vm, VmError};
+use crate::firecracker::vm::{
+    BootSpec, Isolation, JailConfig, JobDrives, Launch, Snapshot, TAP, Vm, VmError,
+};
+use crate::jail::Sinks;
+
+/// How long a freshly booted VM may take until its agent answers.
+const BASE_BOOT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a restored VM may take until its agent answers.
 const AGENT_READY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,6 +47,20 @@ pub enum JobEnd {
     /// limit explaining it. The supervisor treats this as a possible escape
     /// indicator.
     UnexpectedExit(String),
+}
+
+/// Everything one run needs.
+#[derive(Debug, Clone)]
+pub struct JobInput {
+    /// What the agent runs.
+    pub spec: JobSpec,
+    /// What the agent prepares first.
+    pub workspace: Workspace,
+    /// The job's payload and scratch drives, if it has any.
+    pub drives: Option<JobDrives>,
+    /// Where the fake internet writes its events. It runs only if both
+    /// this and [`FirecrackerConfig::fake_internet`] are set.
+    pub network_log: Option<PathBuf>,
 }
 
 /// One run with its timings.
@@ -92,7 +112,7 @@ pub trait VmBackend {
     fn run_job(
         &self,
         slot: u32,
-        spec: JobSpec,
+        job: JobInput,
         wall_clock: Duration,
     ) -> impl Future<Output = Result<JobRun, BackendError>> + Send;
 
@@ -120,6 +140,8 @@ pub struct FirecrackerConfig {
     pub limits: SlotLimits,
     /// `RLIMIT_FSIZE` for Firecracker.
     pub max_file_size: u64,
+    /// The `crateward_fake_internet` binary, started in every job's jail.
+    pub fake_internet: Option<PathBuf>,
 }
 
 /// Runs jobs in jailed Firecracker VMs restored from one snapshot.
@@ -141,9 +163,54 @@ impl FirecrackerBackend {
         }
     }
 
+    /// The subordinate UID slot `slot` runs as.
+    #[must_use]
+    pub fn slot_uid(&self, slot: u32) -> u32 {
+        self.config.uid_base + slot
+    }
+
+    /// Boots a clean VM in a jail, waits for its agent and writes a full
+    /// snapshot to `out`: the base every job restores (ADR 0008, from a
+    /// fresh boot, never from a VM that ran crate code). With
+    /// `boot.drives`, the snapshot has placeholder drives that jobs replace.
+    /// The spare slot number `config.slots` is used, so no job slot is
+    /// disturbed.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the VM does not boot, its agent does not answer, or the
+    /// snapshot cannot be written.
+    pub async fn create_base_snapshot(
+        config: &FirecrackerConfig,
+        boot: &BootSpec,
+        out: &std::path::Path,
+    ) -> Result<Snapshot, BackendError> {
+        let launch = Self::launch(config, config.slots, None, None);
+        let vm = Vm::boot(&launch, boot).await?;
+        let snapshot = async {
+            let mut agent = vm.agent(Instant::now() + BASE_BOOT_TIMEOUT).await?;
+            agent.ping().await.map_err(VmError::from)?;
+            drop(agent);
+            vm.snapshot(&launch, &boot.rootfs, out).await
+        }
+        .await;
+        vm.destroy().await?;
+        Ok(snapshot?)
+    }
+
     /// The launch description of a slot, in its own cgroup.
     #[must_use]
-    pub fn launch(config: &FirecrackerConfig, slot: u32, cgroup: Option<PathBuf>) -> Launch {
+    pub fn launch(
+        config: &FirecrackerConfig,
+        slot: u32,
+        cgroup: Option<PathBuf>,
+        network_log: Option<PathBuf>,
+    ) -> Launch {
+        let sinks = config
+            .fake_internet
+            .clone()
+            .zip(network_log)
+            .map(|(binary, events)| Sinks { binary, events });
         Launch {
             firecracker: config.firecracker.clone(),
             dir: config.slots_dir.join(format!("{SLOT_PREFIX}{slot}")),
@@ -152,7 +219,8 @@ impl FirecrackerBackend {
                 launcher: config.launcher.clone(),
                 vm_uid: config.uid_base + slot,
                 vm_gid: config.gid_base + slot,
-                tap: Some("tap0".into()),
+                tap: Some(TAP.into()),
+                sinks,
                 cgroup,
                 max_file_size: config.max_file_size,
             }),
@@ -162,15 +230,25 @@ impl FirecrackerBackend {
     async fn run_in_slot(
         &self,
         slot: u32,
-        spec: JobSpec,
+        job: JobInput,
         wall_clock: Duration,
         cgroup: &crate::cgroup::SlotCgroup,
     ) -> Result<JobRun, BackendError> {
-        let launch = Self::launch(&self.config, slot, Some(cgroup.path().to_path_buf()));
+        let launch = Self::launch(
+            &self.config,
+            slot,
+            Some(cgroup.path().to_path_buf()),
+            job.network_log.clone(),
+        );
         let started = Instant::now();
-        let vm = Vm::restore(&launch, &self.snapshot).await?;
-        let agent = vm.agent(Instant::now() + AGENT_READY_TIMEOUT).await;
-        let mut agent = match agent {
+        let vm = Vm::restore(&launch, &self.snapshot, job.drives.as_ref()).await?;
+        // No crate code has run yet, so a failure up to here is ours.
+        let ready = async {
+            let mut agent = vm.agent(Instant::now() + AGENT_READY_TIMEOUT).await?;
+            agent.prepare(job.workspace).await.map_err(VmError::from)?;
+            Ok::<_, VmError>(agent)
+        };
+        let mut agent = match ready.await {
             Ok(agent) => agent,
             Err(error) => {
                 let _ = vm.destroy().await;
@@ -179,7 +257,7 @@ impl FirecrackerBackend {
         };
         let restore = started.elapsed();
         let run_started = Instant::now();
-        let result = tokio::time::timeout(wall_clock, agent.run(spec)).await;
+        let result = tokio::time::timeout(wall_clock, agent.run(job.spec)).await;
         let run = run_started.elapsed();
         let end = match result {
             Ok(Ok(outcome)) => JobEnd::Finished(outcome),
@@ -207,7 +285,7 @@ impl VmBackend for FirecrackerBackend {
     async fn run_job(
         &self,
         slot: u32,
-        spec: JobSpec,
+        job: JobInput,
         wall_clock: Duration,
     ) -> Result<JobRun, BackendError> {
         if slot >= self.config.slots {
@@ -216,7 +294,7 @@ impl VmBackend for FirecrackerBackend {
         let cgroup = self
             .cgroups
             .create_slot(&slot.to_string(), self.config.limits)?;
-        let result = self.run_in_slot(slot, spec, wall_clock, &cgroup).await;
+        let result = self.run_in_slot(slot, job, wall_clock, &cgroup).await;
         // The cgroup goes away whatever happened, and with it any process.
         let removed = cgroup.remove();
         let dir = self.config.slots_dir.join(format!("{SLOT_PREFIX}{slot}"));
@@ -282,11 +360,11 @@ impl VmBackend for FakeBackend {
     async fn run_job(
         &self,
         slot: u32,
-        spec: JobSpec,
+        job: JobInput,
         _wall_clock: Duration,
     ) -> Result<JobRun, BackendError> {
         if let Ok(mut received) = self.received.lock() {
-            received.push((slot, spec));
+            received.push((slot, job.spec));
         }
         let end = self
             .script
@@ -312,15 +390,20 @@ mod tests {
 
     use super::*;
 
-    fn spec() -> JobSpec {
-        JobSpec {
-            job_id: 1,
-            wall_clock: WallClock { secs: 0, nanos: 0 },
-            argv: vec!["cargo".into(), "check".into()],
-            env: vec![],
-            cwd: "/work".into(),
-            timeout_secs: 60,
-            output_limit: 1024,
+    fn spec() -> JobInput {
+        JobInput {
+            spec: JobSpec {
+                job_id: 1,
+                wall_clock: WallClock { secs: 0, nanos: 0 },
+                argv: vec!["cargo".into(), "check".into()],
+                env: vec![],
+                cwd: "/work".into(),
+                timeout_secs: 60,
+                output_limit: 1024,
+            },
+            workspace: Workspace::default(),
+            drives: None,
+            network_log: None,
         }
     }
 

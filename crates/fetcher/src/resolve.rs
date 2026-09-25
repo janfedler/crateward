@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::process::Stdio;
 
+use crateward_core::cratesio::probe_manifest;
 use crateward_core::http::PoliteClient;
 use crateward_core::name::CrateName;
 use serde::{Deserialize, Serialize};
@@ -102,17 +103,6 @@ pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, String> {
         });
     }
     Ok(packages)
-}
-
-/// The probe's manifest. The dependency is renamed to a fixed key so that
-/// no crate name is ever interpreted as manifest syntax beyond a quoted
-/// string.
-fn probe_manifest(name: &CrateName, version: &semver::Version) -> String {
-    format!(
-        "[package]\nname = \"crateward-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n\
-         [lib]\npath = \"lib.rs\"\n\n\
-         [dependencies]\ntarget = {{ package = \"{name}\", version = \"={version}\" }}\n"
-    )
 }
 
 /// Resolves one version in a sandboxed child. `work` must be empty or

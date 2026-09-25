@@ -20,11 +20,12 @@ use tokio::time::Instant;
 
 use super::agent::{AgentConnection, AgentError};
 use super::api::{
-    Api, ApiError, BootSource, Drive, InstanceAction, MachineConfig, MemoryBackend, Serial,
-    SnapshotCreate, SnapshotLoad, TokenBucket, VmState, Vsock, VsockOverride,
+    Api, ApiError, BootSource, Drive, DriveUpdate, InstanceAction, MachineConfig, MemoryBackend,
+    NetworkInterface, Serial, SnapshotCreate, SnapshotLoad, TokenBucket, VmState, Vsock,
+    VsockOverride,
 };
 use crate::jail::host::{IdMap, JailError};
-use crate::jail::{BindMount, JailSpec};
+use crate::jail::{BindMount, JailSpec, Sinks};
 
 /// Guest context ID. Every VM uses the same one: Firecracker's vsock is
 /// private to each VM process, so there is no global CID namespace.
@@ -41,6 +42,21 @@ const MEMORY: &str = "vm.mem";
 const NEW_STATE: &str = "snapshot.state";
 const NEW_MEMORY: &str = "snapshot.mem";
 const VSOCK: &str = "vsock.sock";
+const PAYLOAD: &str = "payload.img";
+const SCRATCH: &str = "scratch.img";
+
+/// Tap device of every slot. Each jail has its own network namespace, so
+/// the name is the same everywhere, as the snapshot requires.
+pub const TAP: &str = "tap0";
+
+/// Guest side addresses. Every slot uses the same ones in its own network
+/// namespace; the fake internet answers at [`HOST_ADDRESS`].
+pub const GUEST_ADDRESS: &str = "10.0.2.2";
+/// Host side address of the tap device, the guest's gateway and resolver.
+pub const HOST_ADDRESS: &str = "10.0.2.1";
+/// Prefix length of the link between guest and host.
+pub const PREFIX_LEN: u8 = 30;
+const GUEST_MAC: &str = "06:00:0a:00:02:02";
 const API: &str = "api.sock";
 
 /// Why a VM operation failed.
@@ -84,6 +100,8 @@ pub struct JailConfig {
     pub vm_gid: u32,
     /// Tap device to create in the jail's network namespace.
     pub tap: Option<String>,
+    /// The fake internet behind the tap device.
+    pub sinks: Option<Sinks>,
     /// cgroup the jail joins.
     pub cgroup: Option<PathBuf>,
     /// `RLIMIT_FSIZE` for Firecracker. Must fit the guest memory when the
@@ -113,6 +131,16 @@ pub struct Launch {
     pub isolation: Isolation,
 }
 
+/// The per job drives: the read only payload (`/dev/vdb` in the guest) and
+/// the writable scratch disk (`/dev/vdc`).
+#[derive(Debug, Clone)]
+pub struct JobDrives {
+    /// EROFS image with the job's sources.
+    pub payload: PathBuf,
+    /// ext4 image the job may write.
+    pub scratch: PathBuf,
+}
+
 /// Resources of a VM that is booted from scratch.
 #[derive(Debug, Clone)]
 pub struct BootSpec {
@@ -126,6 +154,11 @@ pub struct BootSpec {
     pub vcpus: u8,
     /// Guest memory in MiB.
     pub memory_mib: u32,
+    /// Placeholder drives, so that a snapshot of this VM can take job
+    /// drives after restore.
+    pub drives: Option<JobDrives>,
+    /// Attach a network interface on [`TAP`].
+    pub network: bool,
 }
 
 impl BootSpec {
@@ -139,6 +172,12 @@ impl BootSpec {
         format!(
             "console=ttyS0 reboot=k panic=1 pci=off quiet root=/dev/vda rootfstype=erofs ro init={agent_path}"
         )
+    }
+
+    /// Kernel IP autoconfiguration for the guest side of the tap link.
+    #[must_use]
+    pub fn network_boot_args() -> String {
+        format!("ip={GUEST_ADDRESS}::{HOST_ADDRESS}:255.255.255.252::eth0:off")
     }
 }
 
@@ -169,6 +208,28 @@ pub struct Vm {
 struct Exposed {
     host: PathBuf,
     name: &'static str,
+    writable: bool,
+}
+
+impl Exposed {
+    fn read_only(host: &Path, name: &'static str) -> Self {
+        Self {
+            host: host.to_path_buf(),
+            name,
+            writable: false,
+        }
+    }
+
+    fn drives(drives: &JobDrives) -> [Self; 2] {
+        [
+            Self::read_only(&drives.payload, PAYLOAD),
+            Self {
+                host: drives.scratch.clone(),
+                name: SCRATCH,
+                writable: true,
+            },
+        ]
+    }
 }
 
 impl Launch {
@@ -245,11 +306,12 @@ impl Vm {
                         .map(|file| BindMount {
                             source: file.host.clone(),
                             target: file.name.to_owned(),
-                            writable: false,
+                            writable: file.writable,
                         })
                         .collect(),
                     devices,
                     tap: jail.tap.clone(),
+                    sinks: jail.sinks.clone(),
                     cgroup: jail.cgroup.clone(),
                     log: log_path,
                     max_open_files: 2048,
@@ -291,16 +353,13 @@ impl Vm {
     ///
     /// Fails if Firecracker does not start or rejects the configuration.
     pub async fn boot(launch: &Launch, spec: &BootSpec) -> Result<Self, VmError> {
-        let files = [
-            Exposed {
-                host: spec.kernel.clone(),
-                name: KERNEL,
-            },
-            Exposed {
-                host: spec.rootfs.clone(),
-                name: ROOTFS,
-            },
+        let mut files = vec![
+            Exposed::read_only(&spec.kernel, KERNEL),
+            Exposed::read_only(&spec.rootfs, ROOTFS),
         ];
+        if let Some(drives) = &spec.drives {
+            files.extend(Exposed::drives(drives));
+        }
         let vm = Self::spawn(launch, &files).await?;
         // The serial console carries guest controlled text into our log.
         // Excess output is dropped: 64 KiB burst, then 4 KiB per second.
@@ -345,6 +404,36 @@ impl Vm {
                 },
             )
             .await?;
+        if let Some(drives) = &spec.drives {
+            for (id, host, name, read_only) in [
+                ("payload", &drives.payload, PAYLOAD, true),
+                ("scratch", &drives.scratch, SCRATCH, false),
+            ] {
+                vm.api
+                    .put(
+                        &format!("/drives/{id}"),
+                        &Drive {
+                            drive_id: id.into(),
+                            path_on_host: launch.fc_path(host, name),
+                            is_root_device: false,
+                            is_read_only: read_only,
+                        },
+                    )
+                    .await?;
+            }
+        }
+        if spec.network {
+            vm.api
+                .put(
+                    "/network-interfaces/eth0",
+                    &NetworkInterface {
+                        iface_id: "eth0".into(),
+                        host_dev_name: TAP.into(),
+                        guest_mac: GUEST_MAC.into(),
+                    },
+                )
+                .await?;
+        }
         vm.api
             .put(
                 "/vsock",
@@ -366,26 +455,27 @@ impl Vm {
     }
 
     /// Restores a VM from a full snapshot and resumes it. The VM gets its
-    /// own vsock socket through `vsock_override`.
+    /// own vsock socket through `vsock_override`. With `drives`, the
+    /// snapshot's placeholder drives are pointed at the job's files and the
+    /// guest is told their sizes (`PATCH /drives`), before the agent is
+    /// asked to mount them.
     ///
     /// # Errors
     ///
     /// Fails if Firecracker does not start or rejects the snapshot.
-    pub async fn restore(launch: &Launch, snapshot: &Snapshot) -> Result<Self, VmError> {
-        let files = [
-            Exposed {
-                host: snapshot.rootfs.clone(),
-                name: ROOTFS,
-            },
-            Exposed {
-                host: snapshot.state.clone(),
-                name: STATE,
-            },
-            Exposed {
-                host: snapshot.memory.clone(),
-                name: MEMORY,
-            },
+    pub async fn restore(
+        launch: &Launch,
+        snapshot: &Snapshot,
+        drives: Option<&JobDrives>,
+    ) -> Result<Self, VmError> {
+        let mut files = vec![
+            Exposed::read_only(&snapshot.rootfs, ROOTFS),
+            Exposed::read_only(&snapshot.state, STATE),
+            Exposed::read_only(&snapshot.memory, MEMORY),
         ];
+        if let Some(drives) = drives {
+            files.extend(Exposed::drives(drives));
+        }
         let vm = Self::spawn(launch, &files).await?;
         vm.api
             .put(
@@ -403,6 +493,22 @@ impl Vm {
                 },
             )
             .await?;
+        if let Some(drives) = drives {
+            for (id, host, name) in [
+                ("payload", &drives.payload, PAYLOAD),
+                ("scratch", &drives.scratch, SCRATCH),
+            ] {
+                vm.api
+                    .patch(
+                        &format!("/drives/{id}"),
+                        &DriveUpdate {
+                            drive_id: id.into(),
+                            path_on_host: launch.fc_path(host, name),
+                        },
+                    )
+                    .await?;
+            }
+        }
         Ok(vm)
     }
 

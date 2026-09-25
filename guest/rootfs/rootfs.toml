@@ -9,8 +9,31 @@ suite = "trixie"
 # snapshot.debian.org serves the archive as it was at this time.
 snapshot = "20260924T000000Z"
 variant = "minbase"
-# Extra packages. Build tools and the Rust toolchain arrive with M1.5 and M4.
-packages = []
+# Extra packages: what build scripts commonly expect on a developer machine.
+# The download tools are there on purpose: a build script that fetches a
+# payload should try, so the fake internet records the attempt. The Rust
+# toolchain comes from guest/rootfs/rust.toml.
+packages = [
+    "ca-certificates",
+    "cmake",
+    "curl",
+    "g++",
+    "gcc",
+    "libc6-dev",
+    "libclang-dev",
+    "libdbus-1-dev",
+    "libsqlite3-dev",
+    "libssl-dev",
+    "libudev-dev",
+    "make",
+    "perl",
+    "pkg-config",
+    "protobuf-compiler",
+    "python3",
+    "wget",
+    "xz-utils",
+    "zlib1g-dev",
+]
 
 [image]
 # Fixed timestamp for every file in the image, for reproducible builds.

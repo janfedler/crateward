@@ -9,7 +9,6 @@
 
 mod diagram;
 mod docs_lint;
-mod elf;
 mod firecracker;
 mod guest_kernel;
 mod images;
@@ -58,6 +57,9 @@ enum Task {
         #[arg(long, default_value_t = 50)]
         jobs: u32,
     },
+    /// Run the canary: a fixture crate that steals a honeytoken inside a
+    /// microVM must be caught.
+    Canary,
 }
 
 /// Why a task failed.
@@ -91,6 +93,7 @@ fn main() -> ExitCode {
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
         Task::Rootfs => rootfs::run(&workspace_root()),
         Task::Soak { jobs } => soak(jobs),
+        Task::Canary => canary(),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -215,7 +218,7 @@ fn guest_agent() -> Result<(), TaskError> {
         .join("release")
         .join("crateward_guest_agent");
     let bytes = std::fs::read(&binary).map_err(|error| TaskError::Io(binary.clone(), error))?;
-    match elf::is_static(&bytes) {
+    match crateward_core::elf::is_static(&bytes) {
         Ok(true) => {
             eprintln!("xtask: {} is statically linked", binary.display());
             Ok(())
@@ -254,6 +257,47 @@ fn soak(jobs: u32) -> Result<(), TaskError> {
             "--nocapture",
         ],
         &[("CRATEWARD_SOAK_JOBS", jobs.as_str())],
+    )
+}
+
+/// Runs the canary test: a fixture crate that steals a honeytoken inside a
+/// microVM must be caught. Builds the static fake internet first. Needs the
+/// same environment as the soak test.
+fn canary() -> Result<(), TaskError> {
+    run(
+        "cargo",
+        &[
+            "build",
+            "--release",
+            "--locked",
+            "--target",
+            GUEST_TARGET,
+            "--package",
+            "crateward_fake_internet",
+        ],
+        &[],
+    )?;
+    run(
+        "systemd-run",
+        &[
+            "--user",
+            "--scope",
+            "--quiet",
+            "-p",
+            "Delegate=yes",
+            "cargo",
+            "test",
+            "--release",
+            "--locked",
+            "--package",
+            "crateward_orchestrator",
+            "--test",
+            "canary",
+            "--",
+            "--ignored",
+            "--nocapture",
+        ],
+        &[],
     )
 }
 

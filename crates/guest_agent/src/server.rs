@@ -70,6 +70,18 @@ pub fn converse<S: Read + Write>(stream: &mut S, options: RunOptions) -> Result<
         match read_message::<_, HostMessage>(stream, MAX_FRAME_LEN)? {
             None => return Ok(Next::Accept),
             Some(HostMessage::Ping) => write_message(stream, &GuestMessage::Pong)?,
+            Some(HostMessage::Prepare(workspace)) => {
+                // Tests on the host must not mount anything.
+                let result = if options.identity.is_some() {
+                    crate::workspace::prepare(&workspace)
+                } else {
+                    crate::workspace::validate(&workspace)
+                };
+                match result {
+                    Ok(()) => write_message(stream, &GuestMessage::Prepared)?,
+                    Err(error) => write_message(stream, &GuestMessage::Error(error))?,
+                }
+            }
             Some(HostMessage::Run(spec)) => {
                 if options.identity.is_some() {
                     set_clock(&spec);

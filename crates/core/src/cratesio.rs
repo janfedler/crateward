@@ -446,6 +446,21 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
     Ok(feed)
 }
 
+/// The manifest of the consumer probe: a package that depends on exactly
+/// one version, the way a victim would pull it in (ADR 0014). The fetcher
+/// resolves it and the microVM builds it, so both see the same dependency
+/// graph. The dependency is renamed to a fixed key so that no crate name is
+/// ever interpreted as manifest syntax beyond a quoted string, and the
+/// library lives in `lib.rs` next to the manifest.
+#[must_use]
+pub fn probe_manifest(name: &CrateName, version: &semver::Version) -> String {
+    format!(
+        "[package]\nname = \"crateward-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n\
+         [lib]\npath = \"lib.rs\"\n\n\
+         [dependencies]\ntarget = {{ package = \"{name}\", version = \"={version}\" }}\n"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;

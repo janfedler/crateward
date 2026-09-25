@@ -109,12 +109,16 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    only, or not applicable on Linux
    ([ADR 0015](adr/0015-static-analysis-and-triage.md)).
 4. The job becomes ready for the sandbox, or goes straight to scoring.
-5. **orchestrator** claims the job when a VM slot is free, restores the warm
-   snapshot, attaches the job's read only payload image, and starts the run.
-6. **guest agent** runs `cargo check` (and cross target checks where the
-   crate has platform specific code), traces behavior with eBPF, and streams
-   length prefixed events over the single vsock connection. The host
-   captures the tap traffic and diffs the scratch disk as ground truth.
+5. **orchestrator** claims the job when a VM slot is free, builds the job's
+   read only payload image and scratch disk, restores the base snapshot,
+   points its placeholder drives at them, and has the agent mount them and
+   plant fresh honeytokens
+   ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)).
+6. **guest agent** runs `cargo check` as an unprivileged user and streams
+   its output over the single vsock connection. The fake internet records
+   every network attempt as host side ground truth. Planned: cross target
+   checks where the crate has platform specific code, eBPF tracing, and a
+   scratch disk diff.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
 8. **supervisor** and **api** publish the verdict, raise alerts from the
@@ -239,15 +243,19 @@ starts it in a rootless jail ([ADR 0012](adr/0012-rootless-jail.md)).
 
 ## Network
 
-Each slot has its own network namespace. All clones share the guest IP and
-MAC address baked into the snapshot, which works because the namespaces are
-isolated. The tap device sits in the slot namespace, and a veth pair leads to
-the fake internet namespace. That namespace has no uplink, so there is no
-route from a guest to the real internet at all. nftables redirects every flow
-to the DNS, HTTP and HTTPS sinks, which recover the intended destination with
-`SO_ORIGINAL_DST`; the veth source address identifies the slot. IPv6 is
-dropped and logged. Explicit drop rules for the host address, private ranges
-and metadata addresses exist as defense in depth.
+Each slot has its own network namespace, created by the rootless jail. All
+clones share the guest IP (`10.0.2.2`) and MAC address baked into the
+snapshot, which works because the namespaces are isolated. The namespace
+holds only the tap device (`10.0.2.1` on the host side) and one fake
+internet process, which runs as the slot's user without filesystem access.
+There is no uplink and no route out, so a guest cannot reach the real
+internet at all. nftables in the namespace redirects every DNS query, TCP
+connection and UDP datagram to the fake internet, which recovers the
+intended TCP destination with `SO_ORIGINAL_DST` and logs each attempt with
+its first 64 KiB. That log is read after the run as ground truth and
+searched for the job's honeytokens
+([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)).
+IPv6 logging and TLS termination are still open.
 
 ## Build cache
 

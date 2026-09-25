@@ -19,11 +19,55 @@ use rustix::fs::{Gid, Uid};
 use rustix::mount::{MountFlags, MountPropagationFlags, UnmountFlags};
 use rustix::process::{Resource, Rlimit};
 
-use super::{FIRECRACKER_IN_JAIL, INSIDE_VM_ID, JailSpec, MAX_SPEC_BYTES};
+use super::{FAKE_INTERNET_IN_JAIL, FIRECRACKER_IN_JAIL, INSIDE_VM_ID, JailSpec, MAX_SPEC_BYTES};
+use crate::firecracker::vm::{HOST_ADDRESS, PREFIX_LEN};
 use crateward_core::sandbox::{Namespaces, unshare};
 
 /// `ip` on the host, used to create the tap device before `pivot_root`.
 const IP: &str = "/usr/sbin/ip";
+
+/// `nft` on the host, used to redirect guest traffic to the fake internet.
+const NFT: &str = "/usr/sbin/nft";
+
+/// Redirects everything the guest sends to the fake internet's ports
+/// (`crateward_fake_internet::server::SlotConfig::default`). The namespace
+/// has no other interface and no route, so nothing leaves it anyway; the
+/// redirect makes every attempt visible.
+fn ruleset(tap: &str) -> String {
+    format!(
+        "table ip crateward {{\n\
+         \tchain prerouting {{\n\
+         \t\ttype nat hook prerouting priority dstnat; policy accept;\n\
+         \t\tiifname \"{tap}\" udp dport 53 redirect to :5353\n\
+         \t\tiifname \"{tap}\" tcp dport 0-65535 redirect to :8080\n\
+         \t\tiifname \"{tap}\" udp dport 0-65535 redirect to :5354\n\
+         \t}}\n\
+         }}\n"
+    )
+}
+
+fn run_nft(rules: &str) -> Result<(), LaunchError> {
+    let mut child = Command::new(NFT)
+        .args(["-f", "-"])
+        .env_clear()
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .map_err(step("running nft"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(rules.as_bytes())
+            .map_err(step("writing the nft rules"))?;
+    }
+    let status = child.wait().map_err(step("running nft"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(LaunchError {
+            step: "running nft",
+            detail: format!("nft failed with {status}"),
+        })
+    }
+}
 
 /// A failed step, with enough context to act on.
 #[derive(Debug, thiserror::Error)]
@@ -114,6 +158,18 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
         .open(&spec.log)
         .map_err(step("opening the log"))?;
     let null = File::open("/dev/null").map_err(step("opening /dev/null"))?;
+    let events = spec
+        .sinks
+        .as_ref()
+        .map(|sinks| {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .open(&sinks.events)
+                .map_err(step("opening the network event log"))
+        })
+        .transpose()?;
 
     unshare(Namespaces::Isolation).map_err(step("unsharing mount, network, IPC and UTS"))?;
     // Nothing done below may propagate back to the host's mount namespace.
@@ -149,6 +205,13 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
         }
         bind(device, &target, MountFlags::NOSUID | MountFlags::NOEXEC)?;
     }
+    if let Some(sinks) = &spec.sinks {
+        bind(
+            &sinks.binary,
+            &root.join(FAKE_INTERNET_IN_JAIL.trim_start_matches('/')),
+            MountFlags::RDONLY | hardened,
+        )?;
+    }
 
     run_ip(&["link", "set", "lo", "up"])?;
     if let Some(tap) = &spec.tap {
@@ -157,6 +220,16 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
             "tuntap", "add", "dev", tap, "mode", "tap", "user", &owner, "group", &owner,
         ])?;
         run_ip(&["link", "set", tap, "up"])?;
+        if spec.sinks.is_some() {
+            run_ip(&[
+                "addr",
+                "add",
+                &format!("{HOST_ADDRESS}/{PREFIX_LEN}"),
+                "dev",
+                tap,
+            ])?;
+            run_nft(&ruleset(tap))?;
+        }
     }
 
     // Swap the root: the old one is stacked under the new one and then
@@ -178,7 +251,32 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
     };
     limit(Resource::Nofile, spec.max_open_files)?;
     limit(Resource::Fsize, spec.max_file_size)?;
+    if let Some(events) = events {
+        start_sinks(events, &log, &null)?;
+    }
     Ok((log, null))
+}
+
+/// Starts the fake internet as the slot's user in the jail. It ends with
+/// the slot: the orchestrator kills the slot's cgroup after every run.
+fn start_sinks(events: File, log: &File, null: &File) -> Result<(), LaunchError> {
+    // Also covers the launcher itself from here on; nothing it still
+    // executes needs new privileges.
+    rustix::thread::set_no_new_privs(true).map_err(step("setting no_new_privs"))?;
+    let errors = log.try_clone().map_err(step("duplicating the log"))?;
+    // The jail has no /dev/null to open; reuse the one opened before.
+    let stdin = null.try_clone().map_err(step("duplicating /dev/null"))?;
+    Command::new(FAKE_INTERNET_IN_JAIL)
+        .arg("slot")
+        .env_clear()
+        .uid(INSIDE_VM_ID)
+        .gid(INSIDE_VM_ID)
+        .stdin(stdin)
+        .stdout(events)
+        .stderr(errors)
+        .spawn()
+        .map(drop)
+        .map_err(step("starting the fake internet"))
 }
 
 /// Switches to the slot's UID. Moving every UID from 0 to a non zero value

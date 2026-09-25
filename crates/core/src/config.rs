@@ -274,6 +274,12 @@ pub struct SandboxConfig {
     pub firecracker_bin: PathBuf,
     /// The `crateward-vmjail` launcher (ADR 0012).
     pub vmjail_bin: PathBuf,
+    /// The `crateward_fake_internet` binary, started in every slot.
+    pub fake_internet_bin: PathBuf,
+    /// The guest kernel (bzImage).
+    pub kernel_image: PathBuf,
+    /// The guest root filesystem (EROFS).
+    pub rootfs_image: PathBuf,
     /// Directory holding one subdirectory per slot. Must be private to the
     /// orchestrator user.
     pub slots_dir: PathBuf,
@@ -646,6 +652,9 @@ impl Config {
         );
         v.absolute(&s.firecracker_bin, "sandbox.firecracker_bin");
         v.absolute(&s.vmjail_bin, "sandbox.vmjail_bin");
+        v.absolute(&s.fake_internet_bin, "sandbox.fake_internet_bin");
+        v.absolute(&s.kernel_image, "sandbox.kernel_image");
+        v.absolute(&s.rootfs_image, "sandbox.rootfs_image");
         v.absolute(&s.slots_dir, "sandbox.slots_dir");
         // Subordinate IDs are never below 65536 in practice; a low value is
         // almost certainly a real user or group on the host.

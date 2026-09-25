@@ -132,6 +132,11 @@ full_timeout_secs = 2700
 firecracker_bin = "/usr/local/lib/crateward/firecracker"
 # The rootless jail launcher (ADR 0012).
 vmjail_bin = "/usr/local/lib/crateward/crateward-vmjail"
+# The fake internet, started in every slot's network namespace.
+fake_internet_bin = "/usr/local/lib/crateward/crateward_fake_internet"
+# Guest images, from `cargo xtask guest-kernel` and `cargo xtask rootfs`.
+kernel_image = "/usr/local/lib/crateward/guest/kernel.bzImage"
+rootfs_image = "/usr/local/lib/crateward/guest/rootfs.erofs"
 # One subdirectory per slot, private to the orchestrator user.
 slots_dir = "/run/crateward/slots"
 # Slot n runs Firecracker as slot_uid_base + n. The range must lie in the

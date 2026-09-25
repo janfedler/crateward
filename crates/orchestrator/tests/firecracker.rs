@@ -48,6 +48,8 @@ fn boot_spec() -> BootSpec {
         boot_args: BootSpec::default_boot_args("/usr/sbin/crateward-agent"),
         vcpus: 1,
         memory_mib: 512,
+        drives: None,
+        network: false,
     }
 }
 
@@ -67,6 +69,7 @@ fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
             vm_uid: TEST_SUBID_BASE + slot,
             vm_gid: TEST_SUBID_BASE + slot,
             tap: Some("tap0".into()),
+            sinks: None,
             cgroup: None,
             max_file_size: 1 << 30,
         })
@@ -201,7 +204,7 @@ async fn snapshot_and_restore_twice(jailed: bool) {
         // Each restore runs in its own slot, with its own subordinate UID.
         let launch = launch(&format!("restore-{mode}-{round}"), jailed, round + 1);
         let started = Instant::now();
-        let vm = Vm::restore(&launch, &snapshot).await.unwrap();
+        let vm = Vm::restore(&launch, &snapshot, None).await.unwrap();
         let mut agent = vm
             .agent(Instant::now() + Duration::from_secs(10))
             .await

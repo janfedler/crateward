@@ -188,6 +188,16 @@ impl Analyzer {
             self.record(job, &decision, None).await?;
             return Ok(decision);
         }
+        if self.store.fetch_lockfile(job.id).await?.is_none() {
+            let decision = Decision {
+                triage: Triage::StaticOnly(StaticOnlyReason::UnresolvedDependencies),
+                reasons: vec!["cargo could not resolve the dependencies".to_owned()],
+            };
+            // The crate's own report is still useful evidence.
+            let _ = self.ensure_reports(&[job.cksum]).await?;
+            self.record(job, &decision, None).await?;
+            return Ok(decision);
+        }
         let packages = self
             .store
             .fetch_packages(job.id)

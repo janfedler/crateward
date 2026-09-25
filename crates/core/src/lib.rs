@@ -27,6 +27,7 @@ pub mod config;
 #[cfg(feature = "cratesio")]
 pub mod cratesio;
 pub mod digest;
+pub mod elf;
 pub mod escalation;
 pub mod failure;
 #[cfg(feature = "http")]

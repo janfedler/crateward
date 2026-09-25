@@ -9,7 +9,13 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-crateward_core = { workspace = true, features = ["app"] }
+crateward_core = { workspace = true, features = ["app", "sandbox"] }
+rustix = { workspace = true, features = ["net"] }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true

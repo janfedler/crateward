@@ -45,6 +45,9 @@ pub const INSIDE_VM_ID: u32 = 1;
 /// Firecracker's path inside the jail.
 pub const FIRECRACKER_IN_JAIL: &str = "/firecracker";
 
+/// The fake internet's path inside the jail.
+pub const FAKE_INTERNET_IN_JAIL: &str = "/fake-internet";
+
 /// Largest specification the launcher reads.
 pub const MAX_SPEC_BYTES: usize = 64 * 1024;
 
@@ -57,6 +60,15 @@ pub struct BindMount {
     pub target: String,
     /// Whether Firecracker may write it.
     pub writable: bool,
+}
+
+/// The fake internet of a jail (see `crateward_fake_internet`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sinks {
+    /// The `crateward_fake_internet` binary on the host.
+    pub binary: PathBuf,
+    /// Its event log on the host, opened before the jail closes.
+    pub events: PathBuf,
 }
 
 /// Everything the launcher needs to build one jail.
@@ -75,6 +87,8 @@ pub struct JailSpec {
     pub devices: Vec<PathBuf>,
     /// Name of a tap device to create in the jail's network namespace.
     pub tap: Option<String>,
+    /// The fake internet to start behind the tap device.
+    pub sinks: Option<Sinks>,
     /// cgroup directory to join before anything else.
     pub cgroup: Option<PathBuf>,
     /// Firecracker's log on the host (stdout and stderr).
@@ -118,6 +132,16 @@ impl JailSpec {
                 return fail(format!("{} is not absolute", path.display()));
             }
         }
+        if let Some(sinks) = &self.sinks {
+            if self.tap.is_none() {
+                return fail("the fake internet needs a tap device".into());
+            }
+            for path in [&sinks.binary, &sinks.events] {
+                if !path.is_absolute() {
+                    return fail(format!("{} is not absolute", path.display()));
+                }
+            }
+        }
         for mount in &self.mounts {
             if !mount.source.is_absolute() {
                 return fail(format!("{} is not absolute", mount.source.display()));
@@ -126,6 +150,9 @@ impl JailSpec {
                 || matches!(mount.target.as_str(), "dev" | "firecracker")
             {
                 return fail(format!("mount target {:?} is not allowed", mount.target));
+            }
+            if mount.target == FAKE_INTERNET_IN_JAIL.trim_start_matches('/') {
+                return fail(format!("mount target {:?} is reserved", mount.target));
             }
         }
         for device in &self.devices {
@@ -163,6 +190,7 @@ mod tests {
             }],
             devices: vec!["/dev/kvm".into(), "/dev/net/tun".into()],
             tap: Some("tap0".into()),
+            sinks: None,
             cgroup: None,
             log: "/run/cw/slots/0/firecracker.log".into(),
             max_open_files: 2048,

@@ -26,7 +26,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Version of this protocol. Bumped on any incompatible change.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// The vsock port the guest agent listens on.
 pub const AGENT_PORT: u32 = 1024;
@@ -47,6 +47,10 @@ pub enum HostMessage {
     },
     /// Asks the agent to confirm it is ready. Used before taking a snapshot.
     Ping,
+    /// Prepares the workspace of a job: mounts its drives, creates
+    /// directories and writes files such as honeytokens. Sent after every
+    /// restore and before `Run`.
+    Prepare(Workspace),
     /// Runs a job.
     Run(JobSpec),
     /// Asks the agent to shut the VM down.
@@ -72,6 +76,51 @@ pub struct JobSpec {
     pub timeout_secs: u32,
     /// Total output bytes the agent forwards before truncating.
     pub output_limit: u32,
+}
+
+/// What a job's workspace consists of. All paths are absolute guest paths
+/// without `..`; the agent refuses anything else.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Workspace {
+    /// Block devices to mount, in order.
+    pub mounts: Vec<MountSpec>,
+    /// Directories to create, parents first.
+    pub directories: Vec<PathSpec>,
+    /// Files to write.
+    pub files: Vec<FileSpec>,
+}
+
+/// One mount of a block device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MountSpec {
+    /// Device, `/dev/vd` followed by one letter from `b` on.
+    pub device: String,
+    /// Mount point; must exist.
+    pub target: String,
+    /// `erofs` or `ext4`.
+    pub fstype: String,
+    /// Mount read only.
+    pub read_only: bool,
+}
+
+/// A directory with its owner and mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathSpec {
+    /// Path.
+    pub path: String,
+    /// Owner user and group ID.
+    pub owner: u32,
+    /// Permission bits.
+    pub mode: u32,
+}
+
+/// A file with its contents, owner and mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileSpec {
+    /// Where and how.
+    pub path: PathSpec,
+    /// Contents.
+    pub contents: Vec<u8>,
 }
 
 /// A point in time, as seconds and nanoseconds since the Unix epoch.
@@ -115,6 +164,8 @@ pub enum GuestMessage {
     },
     /// Answers `Ping`.
     Pong,
+    /// The workspace is ready.
+    Prepared,
     /// The job's process started.
     Started {
         /// Process ID inside the guest.

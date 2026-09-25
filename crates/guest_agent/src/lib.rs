@@ -14,9 +14,9 @@
 //!   the VM starts or is restored, so a listening socket, which survives
 //!   snapshot restore, is all the guest needs. The host never listens for
 //!   guest initiated vsock connections.
-//! * Everything specific to a job arrives after restore: the job
-//!   specification, the wall clock, and (from M4) the honeytokens. Nothing
-//!   unique lives in the snapshot.
+//! * Everything specific to a job arrives after restore: the workspace
+//!   (drives, directories, honeytokens), the job specification and the wall
+//!   clock. Nothing unique lives in the snapshot.
 //! * Jobs run as an unprivileged user in their own process group, with a
 //!   cleared environment, bounded output and a guest side timeout. The host
 //!   enforces its own limits independently.
@@ -28,6 +28,7 @@
 pub mod init;
 pub mod runner;
 pub mod server;
+pub mod workspace;
 
 use crateward_core::component::Component;
 

@@ -25,8 +25,10 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crateward_core::protocol::{ExitStatus, JobSpec, WallClock};
-use crateward_orchestrator::backend::{FirecrackerBackend, FirecrackerConfig, JobEnd, VmBackend};
+use crateward_core::protocol::{ExitStatus, JobSpec, WallClock, Workspace};
+use crateward_orchestrator::backend::{
+    FirecrackerBackend, FirecrackerConfig, JobEnd, JobInput, VmBackend,
+};
 use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
 use crateward_orchestrator::firecracker::vm::{BootSpec, Vm};
 use tokio::time::Instant;
@@ -49,15 +51,20 @@ fn now() -> WallClock {
     }
 }
 
-fn job(script: &str) -> JobSpec {
-    JobSpec {
-        job_id: 1,
-        wall_clock: now(),
-        argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
-        env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-        cwd: "/tmp".into(),
-        timeout_secs: 60,
-        output_limit: 64 * 1024,
+fn job(script: &str) -> JobInput {
+    JobInput {
+        spec: JobSpec {
+            job_id: 1,
+            wall_clock: now(),
+            argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            cwd: "/tmp".into(),
+            timeout_secs: 60,
+            output_limit: 64 * 1024,
+        },
+        workspace: Workspace::default(),
+        drives: None,
+        network_log: None,
     }
 }
 
@@ -141,6 +148,8 @@ async fn sequential_jobs_leave_nothing_behind() {
         boot_args: BootSpec::default_boot_args("/usr/sbin/crateward-agent"),
         vcpus: 1,
         memory_mib: 512,
+        drives: None,
+        network: false,
     };
     let config = FirecrackerConfig {
         firecracker: root().join("target/guest/bin/firecracker"),
@@ -155,11 +164,12 @@ async fn sequential_jobs_leave_nothing_behind() {
             pids: 64,
         },
         max_file_size: 1 << 30,
+        fake_internet: None,
     };
     let cgroups = CgroupTree::own().expect("run through `cargo xtask soak` for a delegated cgroup");
 
     // The base snapshot: boot once in a jail, wait for the agent, snapshot.
-    let base = FirecrackerBackend::launch(&config, SLOTS, None);
+    let base = FirecrackerBackend::launch(&config, SLOTS, None, None);
     let vm = Vm::boot(&base, &spec).await.unwrap();
     let mut agent = vm
         .agent(Instant::now() + Duration::from_secs(20))
@@ -232,8 +242,9 @@ async fn sequential_jobs_leave_nothing_behind() {
     // Reconciliation removes a slot a crash left behind: a restored VM whose
     // owner is gone, with its directory and cgroup.
     let crashed_cgroup = cgroups.create_slot("2", config.limits).unwrap();
-    let crashed = FirecrackerBackend::launch(&config, 2, Some(crashed_cgroup.path().to_path_buf()));
-    let orphan = Vm::restore(&crashed, &backend_snapshot(&work))
+    let crashed =
+        FirecrackerBackend::launch(&config, 2, Some(crashed_cgroup.path().to_path_buf()), None);
+    let orphan = Vm::restore(&crashed, &backend_snapshot(&work), None)
         .await
         .unwrap();
     std::mem::forget(orphan);

@@ -668,6 +668,10 @@ name = "crateward_fake_internet"
 version = "0.1.0"
 dependencies = [
  "crateward_core",
+ "proptest",
+ "rustix",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -730,14 +734,20 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "crateward_core",
+ "crateward_fake_internet",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "rand 0.10.3",
  "rustix",
+ "secrecy",
+ "semver",
  "serde",
  "serde_json",
+ "tar",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

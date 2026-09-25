@@ -37,6 +37,9 @@ pub enum StaticOnlyReason {
     /// The archive failed validation and was never unpacked, so there is
     /// nothing to parse or build; the archive findings are the evidence.
     ArchiveRejected,
+    /// Cargo could not resolve the dependencies, so the version cannot be
+    /// built anywhere and none of its code runs at build time.
+    UnresolvedDependencies,
 }
 
 impl Coverage {

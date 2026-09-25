@@ -52,7 +52,9 @@ fetched (1,572 distinct crate files including dependencies):
    Shared dependencies are analyzed once; a detector change bumps the
    version and reports are recomputed on demand. The job's decision, its
    reasons and the version diff go into `job_static`.
-6. **Triage rules, in order.** A library gated to Windows or Apple with no
+6. **Triage rules, in order.** An archive that failed validation, or a
+   version whose dependencies do not resolve, cannot be built and is static
+   only with that reason. A library gated to Windows or Apple with no
    build time code is not applicable on Linux. The crate's own build script
    or proc macro, a `links` key, or any high severity finding makes the job
    dynamic. So does a locked dependency with build time code that is

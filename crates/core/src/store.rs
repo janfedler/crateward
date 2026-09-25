@@ -30,6 +30,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (2, include_str!("../migrations/0002_fetch.sql")),
     (3, include_str!("../migrations/0003_crate_stats.sql")),
     (4, include_str!("../migrations/0004_static.sql")),
+    (5, include_str!("../migrations/0005_dynamic.sql")),
 ];
 
 /// The server's message for database errors, which the error's own
@@ -816,6 +817,70 @@ impl Store {
                  ON CONFLICT (job_id) DO UPDATE
                  SET triage = $2, reasons = $3, diff = $4, analyzed_at = now()",
                 &[&job.0, triage, reasons, &diff],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// The lockfile the fetch stage recorded for a job.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn fetch_lockfile(&self, job: JobId) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .client
+            .query_opt(
+                "SELECT lockfile FROM job_fetches WHERE job_id = $1",
+                &[&job.0],
+            )
+            .await?
+            .and_then(|r| r.get(0)))
+    }
+
+    /// Records the honeytokens planted for a job, replacing earlier ones.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn record_honeytokens(
+        &self,
+        job: JobId,
+        tokens: &[(String, String)],
+    ) -> Result<(), StoreError> {
+        let kinds: Vec<&str> = tokens.iter().map(|t| t.0.as_str()).collect();
+        let values: Vec<&str> = tokens.iter().map(|t| t.1.as_str()).collect();
+        self.client
+            .execute("DELETE FROM job_honeytokens WHERE job_id = $1", &[&job.0])
+            .await?;
+        self.client
+            .execute(
+                "INSERT INTO job_honeytokens (job_id, kind, value)
+                 SELECT $1, * FROM unnest($2::text[], $3::text[])",
+                &[&job.0, &kinds, &values],
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Records the result of one VM run.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn record_run(
+        &self,
+        job: JobId,
+        run_kind: &str,
+        outcome: &str,
+        report: &Value,
+    ) -> Result<(), StoreError> {
+        self.client
+            .execute(
+                "INSERT INTO job_runs (job_id, run_kind, outcome, report) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (job_id, run_kind) DO UPDATE
+                 SET outcome = $3, report = $4, recorded_at = now()",
+                &[&job.0, &run_kind, &outcome, report],
             )
             .await?;
         Ok(())

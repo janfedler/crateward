@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crateward_core::protocol::{
     Decoder, ExitStatus, GuestMessage, HostMessage, JobSpec, Limits, OutputStream,
-    PROTOCOL_VERSION, ProtocolError, encode,
+    PROTOCOL_VERSION, ProtocolError, Workspace, encode,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -188,6 +188,20 @@ impl AgentConnection {
         self.send(&HostMessage::Ping).await?;
         match self.recv().await? {
             GuestMessage::Pong => Ok(()),
+            other => Err(AgentError::Unexpected(format!("{other:?}"))),
+        }
+    }
+
+    /// Prepares the job's workspace in the guest.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the agent refuses or does not answer `Prepared`.
+    pub async fn prepare(&mut self, workspace: Workspace) -> Result<(), AgentError> {
+        self.send(&HostMessage::Prepare(workspace)).await?;
+        match self.recv().await? {
+            GuestMessage::Prepared => Ok(()),
+            GuestMessage::Error(message) => Err(AgentError::Agent(message)),
             other => Err(AgentError::Unexpected(format!("{other:?}"))),
         }
     }
