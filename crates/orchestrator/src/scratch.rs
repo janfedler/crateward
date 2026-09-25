@@ -31,6 +31,7 @@ const MOUNT_POINT: &str = "/work";
 const MAX_ENTRIES: u64 = 200_000;
 const MAX_DEPTH: usize = 64;
 const MAX_LISTED: usize = 500;
+const MAX_UNITS: usize = 5_000;
 /// Bytes of file contents searched for honeytokens, per file and in total.
 const MAX_FILE_SEARCH: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_SEARCH: u64 = 1024 * 1024 * 1024;
@@ -106,6 +107,12 @@ pub struct ScratchReport {
     pub planted_changed: Vec<String>,
     /// `(token index, path)`: honeytokens found in file contents.
     pub tokens_found: Vec<(usize, String)>,
+    /// File names of compiled units in `target/debug/deps` (for example
+    /// `libserde-0123456789abcdef.rmeta`). The hash in each name identifies
+    /// the unit exactly (version, features, dependencies, profile), which
+    /// measures what a shared build cache could reuse (ADR 0008).
+    #[serde(default)]
+    pub units: Vec<String>,
     /// Entries dropped from the lists above.
     pub omitted: u64,
     /// Why the image could not be read completely, if it could not.
@@ -249,6 +256,16 @@ impl Scanner<'_> {
                 }
                 FileType::Regular => {
                     r.files += 1;
+                    if let Some(name) = relative.strip_prefix("/target/debug/deps/")
+                        && !name.contains('/')
+                        && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e))
+                    {
+                        if r.units.len() < MAX_UNITS {
+                            r.units.push(name.to_owned());
+                        } else {
+                            r.omitted += 1;
+                        }
+                    }
                     r.bytes = r.bytes.saturating_add(item.size);
                     let elf = if planted {
                         false
@@ -454,6 +471,8 @@ mod tests {
                 0o600,
             ),
             ("/target/debug/libx.rlib", b"normal output", 0o644),
+            ("/target/debug/deps/libx-0123abcd.rmeta", b"metadata", 0o644),
+            ("/target/debug/deps/x-0123abcd.d", b"dep info", 0o644),
             ("/target/debug/build-script-build", b"\x7fELF...", 0o755),
             (
                 "/target/debug/out/stolen.txt",
@@ -498,6 +517,7 @@ mod tests {
         );
         assert!(report.planted_changed.is_empty());
         assert!(report.files >= 7);
+        assert_eq!(report.units, ["libx-0123abcd.rmeta"]);
     }
 
     #[test]

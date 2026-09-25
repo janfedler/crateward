@@ -92,6 +92,9 @@ pub struct Process {
     pub started_ms: u32,
     /// Kernel exit code, if its end was traced.
     pub exit: Option<u32>,
+    /// Milliseconds after the job started when it ended, if traced.
+    #[serde(default)]
+    pub ended_ms: Option<u32>,
     /// It ran as root at some point although the job runs as the builder.
     pub became_root: bool,
 }
@@ -264,6 +267,7 @@ impl TraceBuilder {
             role: Role::Unknown,
             started_ms,
             exit: None,
+            ended_ms: None,
             became_root: false,
         });
         self.summary.processes.last_mut()
@@ -311,6 +315,7 @@ impl TraceBuilder {
             TraceKind::Exit { code } => {
                 if let Some(p) = self.process(pid, ms) {
                     p.exit = Some(*code);
+                    p.ended_ms = Some(ms);
                 }
             }
             TraceKind::Open { path, flags } => {
@@ -499,6 +504,7 @@ mod tests {
         assert_eq!(script.started_ms, 2);
         assert!(script.became_root);
         assert_eq!(script.exit, Some(0));
+        assert_eq!(script.ended_ms, Some(7));
         assert_eq!(s.sensitive_opens.len(), 1);
         assert_eq!(s.writes_outside_work.len(), 1);
         assert_eq!(s.writes_outside_work[0].path, "/etc/cron.d/x");
