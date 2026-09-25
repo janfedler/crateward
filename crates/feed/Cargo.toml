@@ -10,7 +10,11 @@ homepage.workspace = true
 
 [dependencies]
 crateward_core = { workspace = true, features = ["app", "cratesio", "http", "store"] }
+bytes.workspace = true
+csv.workspace = true
+flate2.workspace = true
 secrecy.workspace = true
+tar.workspace = true
 semver.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -18,7 +22,6 @@ tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 
 [dev-dependencies]
-bytes.workspace = true
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server"] }
 hyper-util.workspace = true

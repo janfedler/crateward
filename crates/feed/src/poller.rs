@@ -93,14 +93,17 @@ pub struct PollReport {
     pub missing: usize,
 }
 
-/// Priority of a new job. Higher runs first. Signals of code that runs at
-/// build time and of new crates (a common shape of typosquatting) come
-/// first; popularity from the database dump is added later.
+/// Priority of a new job. Higher runs first: new crates (a common shape of
+/// typosquatting), updates to popular crates (a compromise reaches many
+/// users), and signals of code that runs at build time.
 #[must_use]
-pub fn priority(entry: &IndexEntry, new_crate: bool) -> i16 {
+pub fn priority(entry: &IndexEntry, new_crate: bool, popular: bool) -> i16 {
     let mut score = 0;
     if new_crate {
         score += 40;
+    }
+    if popular {
+        score += 30;
     }
     if entry.links.is_some() || entry.has_build_dependencies() {
         score += 20;
@@ -119,6 +122,8 @@ pub struct Feed {
     pending: BTreeMap<(String, String), Pending>,
     /// Delay before looking up a lagging version again.
     pub index_retry: Duration,
+    /// Reverse dependencies from which a crate counts as popular.
+    pub popular_threshold: i64,
 }
 
 impl Feed {
@@ -133,6 +138,7 @@ impl Feed {
             feed_validators: HashMap::new(),
             pending: BTreeMap::new(),
             index_retry: Duration::from_secs(60),
+            popular_threshold: 100,
         }
     }
 
@@ -292,8 +298,13 @@ impl Feed {
             match cratesio::find_version(&text, &pending.version)? {
                 Some((entry, raw)) => {
                     let new_crate = pending.new_crate || versions == 1;
+                    let popular = self
+                        .store
+                        .reverse_dependencies(&entry.name)
+                        .await?
+                        .is_some_and(|n| n >= self.popular_threshold);
                     let job = NewJob {
-                        priority: priority(&entry, new_crate),
+                        priority: priority(&entry, new_crate, popular),
                         name: entry.name.clone(),
                         version: entry.version.clone(),
                         cksum: entry.cksum,

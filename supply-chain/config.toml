@@ -162,6 +162,14 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.csv]]
+version = "1.4.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.csv-core]]
+version = "0.1.13"
+criteria = "safe-to-deploy"
+
 [[exemptions.ctutils]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
@@ -569,6 +577,10 @@ criteria = "safe-to-deploy"
 [[exemptions.rusty-fork]]
 version = "0.3.1"
 criteria = "safe-to-run"
+
+[[exemptions.ryu]]
+version = "1.0.23"
+criteria = "safe-to-deploy"
 
 [[exemptions.same-file]]
 version = "1.0.6"

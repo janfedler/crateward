@@ -21,6 +21,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dump;
 pub mod poller;
 
 use std::time::Duration;
@@ -65,7 +66,46 @@ async fn start(config: &Config) -> Result<Feed, FeedError> {
         rss_new_crates: c.rss_new_crates_url.to_string(),
         index_root,
     };
-    Ok(Feed::new(rss, index, urls, store))
+    let mut feed = Feed::new(rss, index, urls, store);
+    feed.popular_threshold = i64::from(config.triage.popular_min_reverse_dependencies);
+    Ok(feed)
+}
+
+/// Refreshes crate popularity from the dump now and then every
+/// `db_dump_refresh_hours`, on its own connection.
+fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
+    let c = &config.crates_io;
+    let client = PoliteClient::new(&ClientConfig {
+        user_agent: c.user_agent.clone(),
+        requests_per_second: c.static_requests_per_second,
+        timeout: Duration::from_secs(3600),
+        allow_plain_http: false,
+    })
+    .map_err(fatal)?;
+    let url = c.db_dump_url.to_string();
+    let every = Duration::from_secs(c.db_dump_refresh_hours * 3600);
+    let database = config.database.url.expose_secret().to_owned();
+    tokio::spawn(async move {
+        loop {
+            let started = tokio::time::Instant::now();
+            let result = match Store::connect(&database).await {
+                Ok(store) => dump::refresh(&client, &url, &store).await,
+                Err(error) => Err(error.to_string()),
+            };
+            match result {
+                Ok(crates) => tracing::info!(
+                    crates,
+                    seconds = started.elapsed().as_secs(),
+                    "dump statistics refreshed"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "dump refresh failed; retrying at the next interval")
+                }
+            }
+            tokio::time::sleep(every).await;
+        }
+    });
+    Ok(())
 }
 
 /// Runs the feed until SIGTERM or SIGINT.
@@ -82,6 +122,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         .map_err(fatal)?;
     runtime.block_on(async {
         let mut feed = start(config).await.map_err(fatal)?;
+        spawn_dump_refresh(config)?;
         let interval = Duration::from_secs(config.crates_io.rss_poll_interval_secs);
         let mut terminate =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())

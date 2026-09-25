@@ -28,6 +28,7 @@ use crate::retry::RetryPolicy;
 const MIGRATIONS: &[(i32, &str)] = &[
     (1, include_str!("../migrations/0001_jobs.sql")),
     (2, include_str!("../migrations/0002_fetch.sql")),
+    (3, include_str!("../migrations/0003_crate_stats.sql")),
 ];
 
 /// Why a store operation failed.
@@ -607,6 +608,56 @@ impl Store {
             )
             .await?;
         Ok(())
+    }
+
+    /// Replaces the popularity of the given crates (name, downloads,
+    /// reverse dependencies) in batches.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn upsert_crate_stats(
+        &self,
+        stats: &[(String, i64, i64)],
+    ) -> Result<u64, StoreError> {
+        let mut written = 0;
+        for chunk in stats.chunks(10_000) {
+            let names: Vec<&str> = chunk.iter().map(|s| s.0.as_str()).collect();
+            let canonical: Vec<String> = chunk
+                .iter()
+                .map(|s| s.0.to_ascii_lowercase().replace('-', "_"))
+                .collect();
+            let downloads: Vec<i64> = chunk.iter().map(|s| s.1).collect();
+            let reverse: Vec<i64> = chunk.iter().map(|s| s.2).collect();
+            written += self
+                .client
+                .execute(
+                    "INSERT INTO crate_stats (canonical_name, crate_name, downloads, reverse_dependencies)
+                     SELECT * FROM unnest($1::text[], $2::text[], $3::bigint[], $4::bigint[])
+                     ON CONFLICT (canonical_name) DO UPDATE
+                     SET crate_name = EXCLUDED.crate_name, downloads = EXCLUDED.downloads,
+                         reverse_dependencies = EXCLUDED.reverse_dependencies, updated_at = now()",
+                    &[&canonical, &names, &downloads, &reverse],
+                )
+                .await?;
+        }
+        Ok(written)
+    }
+
+    /// Reverse dependency count of a crate, if the dump knows it.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn reverse_dependencies(&self, name: &CrateName) -> Result<Option<i64>, StoreError> {
+        Ok(self
+            .client
+            .query_opt(
+                "SELECT reverse_dependencies FROM crate_stats WHERE canonical_name = $1",
+                &[&name.canonical()],
+            )
+            .await?
+            .map(|r| r.get(0)))
     }
 
     /// Number of jobs per state.
