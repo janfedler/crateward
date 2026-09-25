@@ -19,6 +19,8 @@ path = "src/bin/vmjail.rs"
 [dependencies]
 bytes.workspace = true
 crateward_fake_internet.workspace = true
+# Reads scratch disks in a sandboxed child (`scratch`).
+ext4-view.workspace = true
 crateward_core = { workspace = true, features = ["app", "blobs", "cratesio", "sandbox", "store"] }
 http-body-util.workspace = true
 rand.workspace = true

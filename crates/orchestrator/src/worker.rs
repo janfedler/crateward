@@ -25,6 +25,7 @@ use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
 use crate::firecracker::vm::JobDrives;
 use crate::honeytokens::{HOME, Honeytokens};
 use crate::payload::{PROBE_DIR, Package, PayloadSpec, PayloadStats, build_image};
+use crate::scratch::{ScanSpec, ScratchReport};
 use crate::trace::TraceSummary;
 
 /// UID and GID of the guest's `builder` user.
@@ -107,6 +108,13 @@ pub struct RunReport {
     /// program's arguments. `via` names the process or path.
     #[serde(default)]
     pub tokens_in_trace: Vec<Leak>,
+    /// What the job left on its scratch disk, read by the host. `None` if
+    /// the scanner itself failed.
+    #[serde(default)]
+    pub scratch: Option<ScratchReport>,
+    /// Honeytokens copied into files on the scratch disk. `via` is the path.
+    #[serde(default)]
+    pub tokens_on_disk: Vec<Leak>,
 }
 
 /// The guest's network activity, as the fake internet saw it.
@@ -539,7 +547,7 @@ pub async fn execute(
                 read_only: false,
             },
         ],
-        directories,
+        directories: directories.clone(),
         files: tokens.files.clone(),
     };
     let mut env: Vec<(String, String)> = [
@@ -621,6 +629,22 @@ pub async fn execute(
         }
     };
     let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
+    let scratch = scan_scratch(setup, files, &directories, tokens).await;
+    let tokens_on_disk = scratch
+        .as_ref()
+        .map(|report| {
+            report
+                .tokens_found
+                .iter()
+                .filter_map(|(i, path)| {
+                    tokens.tokens.get(*i).map(|t| Leak {
+                        kind: t.kind.to_owned(),
+                        via: path.clone(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
     let tokens_in_trace = trace
         .find(&values)
@@ -634,6 +658,8 @@ pub async fn execute(
         .take(MAX_LISTED)
         .collect();
     let report = RunReport {
+        scratch,
+        tokens_on_disk,
         trace,
         tokens_in_trace,
         network,
@@ -651,6 +677,38 @@ pub async fn execute(
         missing_packages: Vec::new(),
     };
     Ok(report)
+}
+
+/// Reads the scratch disk in the sandboxed scanner. A failure of the
+/// scanner is logged and leaves the report without a scratch section; the
+/// job is not failed for it.
+async fn scan_scratch(
+    setup: &WorkerSetup,
+    files: &JobFiles,
+    directories: &[PathSpec],
+    tokens: &Honeytokens,
+) -> Option<ScratchReport> {
+    let spec = ScanSpec {
+        tokens: tokens.tokens.iter().map(|t| t.value.clone()).collect(),
+        planted: tokens.files.iter().map(|f| f.path.path.clone()).collect(),
+        created: directories.iter().map(|d| d.path.clone()).collect(),
+    };
+    let exe = setup.exe.clone();
+    let image = files.scratch.clone();
+    let result =
+        tokio::task::spawn_blocking(move || crate::scratch::scan_in_sandbox(&exe, &image, &spec))
+            .await;
+    match result {
+        Ok(Ok(report)) => Some(report),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "scratch disk scan failed");
+            None
+        }
+        Err(error) => {
+            tracing::warn!(%error, "scratch disk scan panicked");
+            None
+        }
+    }
 }
 
 async fn build_payload(

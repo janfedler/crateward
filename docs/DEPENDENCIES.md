@@ -38,6 +38,7 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `rcgen` | fake internet, xtask | Issues the fake internet's certificates per server name and creates its authority; from the rustls project. |
 | `aya` | guest agent | Loads and attaches the eBPF programs and reads their ring buffer; pure Rust, no libbpf ([ADR 0006](adr/0006-ebpf-over-ptrace.md)). |
 | `aya-ebpf` | guest eBPF programs | The Rust side of aya for writing the programs themselves; the only dependency of `crateward_guest_ebpf`, which has its own lockfile. |
+| `ext4-view` | orchestrator | Reads the guest written scratch disk in a sandboxed child; read only, no unsafe code, designed not to panic on invalid data. |
 | `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
 
 ## Tools

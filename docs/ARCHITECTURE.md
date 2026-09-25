@@ -119,8 +119,10 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    attempts; [ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) over the
    single vsock connection. The fake internet records every network attempt
    as host side ground truth, including frames no proxy sees
-   ([ADR 0018](adr/0018-frames-the-proxies-do-not-see.md)). Planned: cross target checks where the crate
-   has platform specific code, and a scratch disk diff.
+   ([ADR 0018](adr/0018-frames-the-proxies-do-not-see.md)), and after the
+   run the host reads the scratch disk in a sandboxed child
+   ([ADR 0019](adr/0019-scratch-disk-scan.md)). Planned: cross target
+   checks where the crate has platform specific code.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
 8. **supervisor** and **api** publish the verdict, raise alerts from the

@@ -187,6 +187,12 @@ pub fn run_job<W: Write>(
         // The trace ends only after the job's process group is gone.
         stop.store(true, Ordering::Release);
         let exit = result?;
+        // What the job wrote must reach the scratch disk before the host
+        // reads it; the VM ends without unmounting. Tests on the host run
+        // without an identity and must not sync the host's disks.
+        if options.identity.is_some() {
+            rustix::fs::sync();
+        }
         let drain_until = Instant::now() + TRACE_DRAIN;
         while tracing && forwarder.totals.is_none() {
             let left = drain_until.saturating_duration_since(Instant::now());

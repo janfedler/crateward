@@ -25,3 +25,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0016](0016-dynamic-runs-payload-fake-internet-honeytokens.md) | Dynamic runs with payload images, a fake internet per slot and honeytokens | Accepted |
 | [0017](0017-ebpf-tracing-in-the-guest.md) | eBPF tracing in the guest | Accepted |
 | [0018](0018-frames-the-proxies-do-not-see.md) | Logging frames the proxies do not see | Accepted |
+| [0019](0019-scratch-disk-scan.md) | Reading the scratch disk after a run | Accepted |

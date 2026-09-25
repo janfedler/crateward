@@ -112,7 +112,7 @@ test. Nothing is marked Built before the code exists.
 | Static analysis in a sandboxed child: own user and network namespaces, rlimits, no filesystem access (Landlock) ([ADR 0015](adr/0015-static-analysis-and-triage.md)) | Tested | M3 |
 | Evidence escapes control, bidi and invisible characters, so stored and displayed findings cannot hide code (Trojan Source) | Tested | M3 |
 | Payload images written from the blob store with Crateward's own tar headers and built by `mkfs.erofs` in a sandboxed child; no crate archive is extracted on the host | Built | M4 |
-| Guest disk images parsed on the host only in a sandboxed subprocess | Planned | M4 |
+| Guest disk images parsed on the host only in a sandboxed subprocess: the scratch disk is read with `ext4-view` in a child without network or filesystem access, with bounded walks ([ADR 0019](adr/0019-scratch-disk-scan.md)) | Tested (canary) | M4 |
 | No README or other crate text rendered as raw HTML; autoescaping templates; strict CSP | Planned | M6 |
 
 ### Cache poisoning (T4; B6)

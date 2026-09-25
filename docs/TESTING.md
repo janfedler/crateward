@@ -72,7 +72,9 @@ is compiled and run only inside a microVM. The test passes when the fake
 internet recorded the lookup, the orchestrator found both tokens in what
 left the VM, and the eBPF trace shows the build script reading the cargo
 credentials and connecting out, and `curl`, started by the build script,
-reading the AWS file.
+reading the AWS file. The build script also copies the token into its
+`OUT_DIR` and drops an autostart file into the home directory; the host's
+scan of the scratch disk must find both.
 
 The eBPF programs themselves only run in the guest kernel. On the host,
 tests cover the agent's record decoder (including every truncation of a

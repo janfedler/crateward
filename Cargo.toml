@@ -22,6 +22,7 @@ crateward_fake_internet = { path = "crates/fake_internet" }
 blake3 = "1.8"
 clap = { version = "4.6", features = ["derive", "env"] }
 csv = "1.4"
+ext4-view = { version = "1.0", features = ["std"] }
 flate2 = "1.1"
 bytes = "1.12"
 http-body-util = "0.1"
