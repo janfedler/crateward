@@ -155,7 +155,7 @@ The orchestrator user has requirements of its own (ADR 0012):
 2. Restart the services. The orchestrator finishes its running jobs after
    SIGTERM; start the new one after the old one exited. A second
    orchestrator refuses to start while the first holds
-   `orchestrator.lock` in `instance.run_dir`.
+   `orchestrator.lock` in `sandbox.slots_dir`.
 3. Record the integrity manifest:
    `crateward integrity --config /etc/crateward/crateward.toml record`.
    Without this step the supervisor quarantines the pipeline within

@@ -654,6 +654,16 @@ impl Vm {
     ///
     /// Fails if the process cannot be reaped or the directory not removed.
     pub async fn destroy(mut self) -> Result<(), VmError> {
+        self.kill().await?;
+        self.remove().await
+    }
+
+    /// Kills Firecracker, if it still runs, and reaps it.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the process cannot be polled or reaped.
+    pub async fn kill(&mut self) -> Result<(), VmError> {
         if self
             .child
             .try_wait()
@@ -667,6 +677,15 @@ impl Vm {
                 .await
                 .map_err(io_error("reaping firecracker"))?;
         }
+        Ok(())
+    }
+
+    /// Removes the VM directory; call after [`Vm::kill`].
+    ///
+    /// # Errors
+    ///
+    /// Fails if the directory cannot be removed.
+    pub async fn remove(self) -> Result<(), VmError> {
         tokio::fs::remove_dir_all(&self.dir)
             .await
             .map_err(io_error(format!("removing {}", self.dir.display())))

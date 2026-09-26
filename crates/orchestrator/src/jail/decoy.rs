@@ -45,11 +45,30 @@ pub fn plant(root: &Path) -> std::io::Result<()> {
     plant_at(&root.join(NAME))
 }
 
-/// Whether something read the decoy since it was planted. A decoy that is
-/// gone counts as read: only a process in the jail could remove it.
+/// What the host finds of a jail root's decoy after the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decoy {
+    /// Planted and never read.
+    Untouched,
+    /// Read, changed or removed while the jail root stayed: only a process
+    /// with the slot's rights reaches it.
+    Touched,
+    /// The whole jail root is gone. Only the host removes that, so it is a
+    /// host fault, not a finding about the job.
+    JailGone,
+}
+
+/// Inspects the decoy in `root`. Call it only after every process of the
+/// slot is dead, so no read can follow unseen.
 #[must_use]
-pub fn touched(root: &Path) -> bool {
-    touched_at(&root.join(NAME))
+pub fn inspect(root: &Path) -> Decoy {
+    if !root.is_dir() {
+        Decoy::JailGone
+    } else if touched_at(&root.join(NAME)) {
+        Decoy::Touched
+    } else {
+        Decoy::Untouched
+    }
 }
 
 /// Checks that reading a planted decoy in `dir` changes its access time,
@@ -93,21 +112,22 @@ mod tests {
         let dir = tempdir();
         assert!(atime_works(&dir).unwrap());
         plant(&dir).unwrap();
-        assert!(!touched(&dir));
+        assert_eq!(inspect(&dir), Decoy::Untouched);
         // Metadata alone (what `ls -l` does) is not a read.
         let _ = std::fs::metadata(dir.join(NAME)).unwrap();
-        assert!(!touched(&dir));
+        assert_eq!(inspect(&dir), Decoy::Untouched);
         std::fs::read(dir.join(NAME)).unwrap();
-        assert!(touched(&dir));
+        assert_eq!(inspect(&dir), Decoy::Touched);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
-    fn a_removed_decoy_counts_as_touched() {
+    fn a_removed_decoy_is_touched_and_a_removed_jail_is_not() {
         let dir = tempdir();
         plant(&dir).unwrap();
         std::fs::remove_file(dir.join(NAME)).unwrap();
-        assert!(touched(&dir));
+        assert_eq!(inspect(&dir), Decoy::Touched);
         std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(inspect(&dir), Decoy::JailGone);
     }
 }

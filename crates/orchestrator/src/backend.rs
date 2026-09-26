@@ -63,6 +63,67 @@ pub enum JobEnd {
     UnexpectedExit(String),
 }
 
+impl JobEnd {
+    /// Whether this end suggests code got out of the VM. Such an end
+    /// outranks every later error, so the job is quarantined instead of
+    /// retried.
+    #[must_use]
+    pub fn is_escape_indicator(&self) -> bool {
+        matches!(self, Self::VmmCrashed(_) | Self::DecoyTouched)
+    }
+}
+
+/// The result of a run once its slot is stopped and cleaned up.
+///
+/// A touched decoy outranks everything, then an escape indicator the run
+/// itself produced; cleanup errors never hide either, since whatever got out
+/// may also have broken the cleanup. A jail root that disappeared is a host
+/// fault (another process removed it), never a finding. Otherwise the run's
+/// own error comes first, then the first cleanup error.
+///
+/// # Errors
+///
+/// Returns the error that decides the run, as above.
+pub fn settle(
+    slot: u32,
+    end: Result<JobEnd, BackendError>,
+    decoy: Option<crate::jail::decoy::Decoy>,
+    cleanup: Vec<BackendError>,
+) -> Result<JobEnd, BackendError> {
+    use crate::jail::decoy::Decoy;
+    let end = match (decoy, end) {
+        (Some(Decoy::Touched), Err(error)) => {
+            tracing::warn!(slot, %error, "run error after the decoy was touched");
+            JobEnd::DecoyTouched
+        }
+        (Some(Decoy::Touched), Ok(_)) => JobEnd::DecoyTouched,
+        (_, Ok(end)) if end.is_escape_indicator() => end,
+        (Some(Decoy::JailGone), _) => {
+            return Err(BackendError::Io {
+                context: format!("slot {slot}: the jail root disappeared during the run"),
+                source: std::io::ErrorKind::NotFound.into(),
+            });
+        }
+        (_, end) => end?,
+    };
+    let mut cleanup = cleanup.into_iter();
+    if end.is_escape_indicator() {
+        for error in cleanup {
+            tracing::warn!(slot, %error, "cleanup failed after an escape indicator");
+        }
+        return Ok(end);
+    }
+    match cleanup.next() {
+        Some(error) => {
+            for later in cleanup {
+                tracing::warn!(slot, error = %later, "cleanup also failed");
+            }
+            Err(error)
+        }
+        None => Ok(end),
+    }
+}
+
 /// Everything one run needs.
 #[derive(Debug, Clone)]
 pub struct JobInput {
@@ -290,39 +351,47 @@ impl FirecrackerBackend {
         let run_started = Instant::now();
         let result = tokio::time::timeout(wall_clock, agent.run(job.spec)).await;
         let run = run_started.elapsed();
+        // Errors from here on are kept, not returned: the decoy is checked
+        // whatever happened.
         let end = match result {
-            Ok(Ok(outcome)) => JobEnd::Finished(outcome),
-            Err(_) => {
-                cgroup.kill()?;
-                JobEnd::HostTimeout
-            }
+            Ok(Ok(outcome)) => Ok(JobEnd::Finished(outcome)),
+            Err(_) => cgroup
+                .kill()
+                .map(|()| JobEnd::HostTimeout)
+                .map_err(BackendError::from),
             Ok(Err(error)) => {
-                let oom = cgroup.event("memory.events", "oom_kill ")?;
-                let pids = cgroup.event("pids.events", "max ")?;
-                if oom > 0 || pids > 0 {
-                    JobEnd::ResourceLimit
-                } else {
-                    let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
-                    // The console's last lines usually say why; the guest
-                    // wrote them, so they are escaped.
-                    let tail = console_tail(&launch.dir.join("firecracker.log"));
-                    classify_exit(status, &format!("{error}; console: {tail}"))
+                let limits = cgroup
+                    .event("memory.events", "oom_kill ")
+                    .and_then(|oom| Ok((oom, cgroup.event("pids.events", "max ")?)));
+                match limits {
+                    Ok((oom, pids)) if oom > 0 || pids > 0 => Ok(JobEnd::ResourceLimit),
+                    Ok(_) => {
+                        let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
+                        // The console's last lines usually say why; the guest
+                        // wrote them, so they are escaped.
+                        let tail = console_tail(&launch.dir.join("firecracker.log"));
+                        Ok(classify_exit(status, &format!("{error}; console: {tail}")))
+                    }
+                    Err(cgroup_error) => Err(cgroup_error.into()),
                 }
             }
         };
         drop(agent);
-        let end = match vm.jail_root() {
-            Some(root) if crate::jail::decoy::touched(root) => JobEnd::DecoyTouched,
-            _ => end,
-        };
-        // Whatever touched the decoy may also have broken the jail's
-        // cleanup; a failed cleanup must not hide the indicator.
-        match vm.destroy().await {
-            Err(error) if end == JobEnd::DecoyTouched => {
-                tracing::warn!(slot, %error, "cleanup failed after the decoy was touched");
-            }
-            destroyed => destroyed?,
+        // Stop every process of the slot (Firecracker and the fake
+        // internet) before looking at the decoy, so no read can follow the
+        // check unseen; then remove the evidence.
+        let mut cleanup: Vec<BackendError> = Vec::new();
+        if let Err(error) = cgroup.kill_and_wait() {
+            cleanup.push(error.into());
         }
+        if let Err(error) = vm.kill().await {
+            cleanup.push(error.into());
+        }
+        let decoy = vm.jail_root().map(crate::jail::decoy::inspect);
+        if let Err(error) = vm.remove().await {
+            cleanup.push(error.into());
+        }
+        let end = settle(slot, end, decoy, cleanup)?;
         Ok(JobRun { end, restore, run })
     }
 }
@@ -342,17 +411,31 @@ impl VmBackend for FirecrackerBackend {
         let cgroup = self.cgroups.create_slot(&slot.to_string(), limits)?;
         let result = self.run_in_slot(slot, job, wall_clock, &cgroup).await;
         // The cgroup goes away whatever happened, and with it any process.
-        let removed = cgroup.remove();
+        let mut cleanup: Vec<BackendError> = Vec::new();
+        if let Err(error) = cgroup.remove() {
+            cleanup.push(error.into());
+        }
         let dir = self.config.slots_dir.join(format!("{SLOT_PREFIX}{slot}"));
-        if dir.exists() {
-            std::fs::remove_dir_all(&dir).map_err(|source| BackendError::Io {
+        if dir.exists()
+            && let Err(source) = std::fs::remove_dir_all(&dir)
+        {
+            cleanup.push(BackendError::Io {
                 context: format!("removing {}", dir.display()),
                 source,
-            })?;
+            });
         }
-        let run = result?;
-        removed?;
-        Ok(run)
+        match result {
+            Ok(JobRun { end, restore, run }) => {
+                let end = settle(slot, Ok(end), None, cleanup)?;
+                Ok(JobRun { end, restore, run })
+            }
+            Err(error) => {
+                for later in cleanup {
+                    tracing::warn!(slot, error = %later, "cleanup failed after a failed run");
+                }
+                Err(error)
+            }
+        }
     }
 
     async fn reconcile(&self) -> Result<Reconciled, BackendError> {
@@ -485,6 +568,61 @@ mod tests {
     use crateward_core::protocol::{ExitStatus, WallClock};
 
     use super::*;
+    use crate::jail::decoy::Decoy;
+
+    fn failed() -> BackendError {
+        BackendError::NoSuchSlot(9)
+    }
+
+    #[test]
+    fn escape_indicators_outrank_every_error() {
+        // A touched decoy wins over the run's error and over cleanup errors.
+        let end = settle(0, Err(failed()), Some(Decoy::Touched), vec![failed()]);
+        assert_eq!(end.unwrap(), JobEnd::DecoyTouched);
+        let end = settle(0, Ok(JobEnd::HostTimeout), Some(Decoy::Touched), vec![]);
+        assert_eq!(end.unwrap(), JobEnd::DecoyTouched);
+        // A crashed VMM keeps its result when cleanup fails, in both stages.
+        let crashed = JobEnd::VmmCrashed("SIGSEGV".into());
+        let end = settle(
+            0,
+            Ok(crashed.clone()),
+            Some(Decoy::Untouched),
+            vec![failed()],
+        );
+        assert_eq!(end.unwrap(), crashed);
+        let end = settle(0, Ok(crashed.clone()), None, vec![failed(), failed()]);
+        assert_eq!(end.unwrap(), crashed);
+        // Even when the jail root is gone.
+        let end = settle(0, Ok(crashed.clone()), Some(Decoy::JailGone), vec![]);
+        assert_eq!(end.unwrap(), crashed);
+    }
+
+    #[test]
+    fn a_vanished_jail_is_a_host_fault_not_a_finding() {
+        let end = settle(
+            0,
+            Ok(JobEnd::HostTimeout),
+            Some(Decoy::JailGone),
+            vec![failed()],
+        );
+        let error = end.unwrap_err().to_string();
+        assert!(error.contains("jail root disappeared"), "{error}");
+    }
+
+    #[test]
+    fn otherwise_the_run_error_then_the_cleanup_error_decide() {
+        let end = settle(0, Err(failed()), Some(Decoy::Untouched), vec![]);
+        assert!(matches!(end, Err(BackendError::NoSuchSlot(9))));
+        let end = settle(
+            0,
+            Ok(JobEnd::HostTimeout),
+            Some(Decoy::Untouched),
+            vec![BackendError::NoSuchSlot(1), BackendError::NoSuchSlot(2)],
+        );
+        assert!(matches!(end, Err(BackendError::NoSuchSlot(1))));
+        let end = settle(0, Ok(JobEnd::ResourceLimit), Some(Decoy::Untouched), vec![]);
+        assert_eq!(end.unwrap(), JobEnd::ResourceLimit);
+    }
 
     fn spec() -> JobInput {
         JobInput {

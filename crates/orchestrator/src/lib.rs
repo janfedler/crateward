@@ -77,6 +77,10 @@ fn fatal(reason: impl std::fmt::Display) -> ComponentError {
 ///
 /// Returns [`ComponentError::Fatal`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
+    // Reconciliation removes every slot's leftovers, so a second instance
+    // would tear down the first one's jails. The lock is taken before the
+    // runtime exists and dropped after it, when no task runs any more.
+    let _instance = lock_instance(&config.sandbox.slots_dir)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -84,10 +88,6 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         .map_err(fatal)?;
     runtime.block_on(async {
         let sandbox = &config.sandbox;
-        // Reconciliation removes every slot's leftovers, so a second
-        // instance would tear down the first one's jails. The lock is held
-        // until the process ends.
-        let _instance = lock_instance(&config.instance.run_dir)?;
         let cgroups = CgroupTree::own().map_err(fatal)?;
         let memory_mib = u32::try_from(sandbox.memory_mib_per_slot).map_err(fatal)?;
         let fc = FirecrackerConfig {
@@ -298,14 +298,20 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
     })
 }
 
-/// Takes the lock that allows one orchestrator per `run_dir`.
-fn lock_instance(run_dir: &std::path::Path) -> Result<std::fs::File, ComponentError> {
-    std::fs::create_dir_all(run_dir).map_err(fatal)?;
-    let path = run_dir.join("orchestrator.lock");
+/// Takes the lock that allows one orchestrator per slot directory, the
+/// directory reconciliation clears. The file is private to the
+/// orchestrator's user, since holding the lock needs only read access.
+fn lock_instance(slots_dir: &std::path::Path) -> Result<std::fs::File, ComponentError> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    std::fs::create_dir_all(slots_dir)
+        .map_err(|e| fatal(format!("{}: {e}", slots_dir.display())))?;
+    let path = slots_dir.join("orchestrator.lock");
     let file = std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
+        .mode(0o600)
+        .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .open(&path)
         .map_err(|e| fatal(format!("{}: {e}", path.display())))?;
     match file.try_lock() {
@@ -340,11 +346,20 @@ mod tests {
             std::process::id(),
             rand::random::<u32>()
         ));
+        use std::os::unix::fs::PermissionsExt as _;
         let first = lock_instance(&dir).unwrap();
+        let mode = first.metadata().unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
         let second = lock_instance(&dir).unwrap_err().to_string();
         assert!(second.contains("another orchestrator"), "{second}");
         drop(first);
         drop(lock_instance(&dir).unwrap());
+        // A planted link is not followed.
+        let lock = dir.join("orchestrator.lock");
+        std::fs::remove_file(&lock).unwrap();
+        std::os::unix::fs::symlink(dir.join("elsewhere"), &lock).unwrap();
+        assert!(lock_instance(&dir).is_err());
+        assert!(!dir.join("elsewhere").exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

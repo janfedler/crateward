@@ -260,6 +260,23 @@ impl SlotCgroup {
         self.set("cgroup.kill", "1")
     }
 
+    /// Kills every process and waits until the cgroup is empty, so nothing
+    /// of the slot runs any more when this returns.
+    ///
+    /// # Errors
+    ///
+    /// Fails if processes remain after a second.
+    pub fn kill_and_wait(&self) -> Result<(), CgroupError> {
+        self.kill()?;
+        for _ in 0..200 {
+            if !self.populated()? {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Err(CgroupError::StillPopulated(self.path.clone()))
+    }
+
     /// Kills every process, waits for the cgroup to empty, and removes it.
     ///
     /// # Errors
@@ -270,13 +287,7 @@ impl SlotCgroup {
         if !self.path.exists() {
             return Ok(());
         }
-        self.kill()?;
-        for _ in 0..200 {
-            if !self.populated()? {
-                return std::fs::remove_dir(&self.path).map_err(io(&self.path));
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        Err(CgroupError::StillPopulated(self.path))
+        self.kill_and_wait()?;
+        std::fs::remove_dir(&self.path).map_err(io(&self.path))
     }
 }
