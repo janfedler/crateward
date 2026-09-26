@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+mod deploy;
 mod diagram;
 mod docs_lint;
 mod firecracker;
@@ -14,6 +15,7 @@ mod fuzz;
 mod guest_ebpf;
 mod guest_kernel;
 mod images;
+mod release;
 mod rootfs;
 
 use std::path::{Path, PathBuf};
@@ -49,6 +51,9 @@ enum Task {
     GuestEbpf,
     /// Vendor all dependencies into a reproducible tarball for a release.
     Vendor,
+    /// Build the release bundle for `deploy/ansible`: binaries, guest
+    /// images, SBOM, vendored sources and checksums.
+    Release,
     /// Download and verify the pinned Firecracker release.
     Firecracker,
     /// Build the guest kernel from the pinned source in guest/kernel.
@@ -100,6 +105,7 @@ fn main() -> ExitCode {
         Task::GuestAgent => guest_agent(),
         Task::GuestEbpf => guest_ebpf::run(&workspace_root()),
         Task::Vendor => vendor(),
+        Task::Release => release::run_release(&workspace_root()),
         Task::Firecracker => firecracker::run(&workspace_root()),
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
         Task::Rootfs => rootfs::run(&workspace_root()),
@@ -362,11 +368,13 @@ fn vendor() -> Result<(), TaskError> {
             "--numeric-owner",
             "-C",
             out,
-            "-czf",
+            // `gzip -n` leaves the name and time out of the header.
+            "--use-compress-program=gzip -n",
+            "-cf",
             "target/crateward-vendor.tar.gz",
             "vendor",
         ],
-        &[("GZIP", "-n")],
+        &[],
     )?;
     eprintln!("xtask: wrote target/crateward-vendor.tar.gz");
     Ok(())

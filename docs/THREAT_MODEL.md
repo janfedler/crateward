@@ -65,7 +65,7 @@ test. Nothing is marked Built before the code exists.
 | Fixed size scratch disk per job: a sparse ext4 image on tmpfs, writable only by the slot's UID, deleted after the run ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)) | Built | M4 |
 | Drive and network rate limiters: 256 MiB/s and 50,000 operations per second per drive, 4 MiB/s and 2000 packets per second on the network | Built | M4 |
 | SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Built (verified on the host) | M1 |
-| KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand; Ansible in M8) | M1 |
+| KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand; `deploy/ansible` for new hosts) | M1 |
 | Guest kernel without module support (`CONFIG_MODULES` off), so guest root cannot load a rootkit module | Built | M1 |
 | Check that guest visible CPU mitigations are not weaker than the host's; the stock Debian 6.12 host kernel is outside Firecracker's validated matrix | Tested | M1 |
 | Startup reconciliation removes slot cgroups and directories left by a crash; namespaces and tap devices cannot outlive their process | Tested | M1 |
@@ -133,13 +133,13 @@ test. Nothing is marked Built before the code exists.
 |------------|--------|-----------|
 | TLS to crates.io hosts (the client refuses plain HTTP); checksums from the index verified for every file | Built | M2 |
 | Repeated checksum mismatches open the fetch circuit breaker: a mismatch is an infrastructure failure, which the breaker counts, and does not use up the job's attempts | Tested | M7 |
-| Egress allowlisted per service user with nftables (host rules need root; the maintainer applies them) | Planned | M8 |
+| Egress allowlisted per service user with nftables; the sets follow the configuration (`deploy/nftables`, `crateward egress`) | Built (applied by the maintainer with `deploy/ansible`) | M8 |
 
 ### External services and the public site (T6, T8; B7, B8, B9)
 
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
-| No inbound service except WireGuard on one UDP port (host firewall, applied by the maintainer) | Planned | M8 |
+| No inbound service except WireGuard on one UDP port; SSH only through it once the maintainer confirms the tunnel | Built (applied by the maintainer with `deploy/ansible`) | M8 |
 | Admin dashboard binds to loopback only; configuration rejects any other address. Reaching it needs WireGuard and an SSH login, whose key authenticates the maintainer ([ADR 0022](adr/0022-dashboard-and-public-export.md)) | Tested | M6 |
 | Dashboard: Host check against DNS rebinding, same origin checks for writes, strict Content Security Policy, compile time escaping, read only page queries | Tested | M6 |
 | Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Tested | M5 |
@@ -158,7 +158,7 @@ forge them. It cannot reach the server or read undisclosed findings.
 | `cargo deny`, `cargo audit` and `cargo vet` in CI | Built | M0 |
 | GitHub Actions pinned by commit SHA; workflow token read only | Built | M0 |
 | `unsafe_code` denied workspace wide; one documented `unsafe` block (`crateward_core::sandbox`, wrapping `unshare(2)`) | Built | M2 |
-| Vendored sources attached to signed releases; SBOM published | Planned | M8 |
+| Release bundles with vendored sources (reproducible archive), a CycloneDX SBOM of every locked package and the pinned sandbox parts, and `SHA256SUMS` (`cargo xtask release`). Signing the sums needs the maintainer's key | Partly built | M8 |
 
 ### Integrity without ECC (A2)
 

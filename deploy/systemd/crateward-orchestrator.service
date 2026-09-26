@@ -1,0 +1,48 @@
+[Unit]
+Description=Crateward orchestrator: runs jobs in Firecracker microVMs
+Documentation=https://github.com/janfedler/crateward/blob/main/docs/OPERATIONS.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+RequiresMountsFor=/var/lib/crateward /run/crateward
+
+[Service]
+Type=simple
+User=crateward-orchestrator
+Group=crateward
+UMask=0027
+Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
+ExecStart=/usr/local/lib/crateward/bin/crateward_orchestrator
+Restart=on-failure
+RestartSec=10
+# Jobs are drained after SIGTERM; a sandbox run may take its full timeout.
+TimeoutStopSec=15min
+# ADR 0012: the rootless jail needs newuidmap and newgidmap (setuid), user,
+# mount, network, IPC and UTS namespaces, /dev/kvm and /dev/net/tun, and a
+# delegated cgroup subtree for the slot limits. Every jailed Firecracker
+# keeps the supplementary groups, so kvm is the only one.
+SupplementaryGroups=kvm
+Delegate=yes
+KillMode=mixed
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+# AF_PACKET: the capture of frames the proxies do not see (ADR 0018).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+DeviceAllow=/dev/kvm rw
+DeviceAllow=/dev/net/tun rw
+ReadWritePaths=/run/crateward
+ReadOnlyPaths=/var/lib/crateward
+
+[Install]
+WantedBy=multi-user.target

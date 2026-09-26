@@ -1,0 +1,45 @@
+[Unit]
+Description=Crateward dashboard and public export
+Documentation=https://github.com/janfedler/crateward/blob/main/docs/OPERATIONS.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+RequiresMountsFor=/var/lib/crateward /run/crateward
+
+[Service]
+Type=simple
+User=crateward-api
+Group=crateward
+UMask=0027
+Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
+ExecStart=/usr/local/lib/crateward/bin/crateward_api
+Restart=on-failure
+RestartSec=10
+# Jobs are drained after SIGTERM; a sandbox run may take its full timeout.
+TimeoutStopSec=15min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=yes
+# git and ssh for the export read the site's host key from here.
+Environment=HOME=/var/lib/crateward/api
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/crateward/api /run/crateward
+
+[Install]
+WantedBy=multi-user.target

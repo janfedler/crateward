@@ -1,0 +1,44 @@
+[Unit]
+Description=Crateward static analysis
+Documentation=https://github.com/janfedler/crateward/blob/main/docs/OPERATIONS.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+RequiresMountsFor=/var/lib/crateward /run/crateward
+
+[Service]
+Type=simple
+User=crateward-static
+Group=crateward
+UMask=0027
+Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
+ExecStart=/usr/local/lib/crateward/bin/crateward_static_analysis
+Restart=on-failure
+RestartSec=10
+# Jobs are drained after SIGTERM; a sandbox run may take its full timeout.
+TimeoutStopSec=15min
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=user net
+# The analysis child runs in its own user and network namespaces.
+RestrictAddressFamilies=AF_UNIX
+ReadOnlyPaths=/var/lib/crateward
+
+[Install]
+WantedBy=multi-user.target

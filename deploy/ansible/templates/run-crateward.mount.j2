@@ -1,0 +1,16 @@
+# Volatile state of the sandbox: per job payload and scratch images, the
+# base snapshot, the warm image and the slot jails (OPERATIONS.md). Its
+# size caps what the sandbox may hold in memory; scratch pages are also
+# charged to each slot's cgroup. relatime (the default) keeps the jail
+# decoys working (ADR 0023).
+[Unit]
+Description=Crateward sandbox tmpfs
+
+[Mount]
+What=tmpfs
+Where=/run/crateward
+Type=tmpfs
+Options=size={{ run_tmpfs_size }},mode=2770,uid=0,gid={{ getent_group['crateward'][1] }},nosuid,nodev
+
+[Install]
+WantedBy=local-fs.target

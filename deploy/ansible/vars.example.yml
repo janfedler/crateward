@@ -1,0 +1,31 @@
+# Copy to vars.yml (kept outside the repository) and fill in.
+
+# A release bundle from `cargo xtask release`: bin/, sandbox/, guest/.
+crateward_release_dir: /path/to/crateward-release
+# The deployed configuration with its secrets (database URL, ntfy topic,
+# heartbeat URL). Start from config/crateward.example.toml.
+crateward_config_file: /path/to/crateward.toml
+# The deploy key of the site repository; leave out until it exists.
+# site_deploy_key_file: /path/to/site-deploy-key
+
+# PostgreSQL major version of Debian 13.
+postgresql_version: 17
+
+# sandbox.slot_uid_base and sandbox.slots from the configuration.
+slot_id_base: 200000
+slots: 3
+
+# /run/crateward: images_tmpfs_mib + slots * scratch_mib_per_slot + the
+# base snapshot (memory_mib_per_slot), rounded up.
+run_tmpfs_size: 31g
+
+ssh_port: 22
+wireguard_port: 51820
+# Leave out the key file until WireGuard is set up; then SSH stays public.
+# wireguard_private_key_file: /path/to/wg-private-key
+wireguard_address: 10.77.0.1/24
+wireguard_peer_public_key: REPLACE
+wireguard_peer_allowed_ips: 10.77.0.2/32
+# Set only after logging in through WireGuard worked: SSH then listens on
+# the tunnel address alone.
+ssh_wireguard_only: false

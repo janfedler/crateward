@@ -1,0 +1,9 @@
+# Written by Ansible. The maintainer's peer is the only one.
+[Interface]
+Address = {{ wireguard_address }}
+ListenPort = {{ wireguard_port }}
+PrivateKey = {{ lookup('ansible.builtin.file', wireguard_private_key_file) }}
+
+[Peer]
+PublicKey = {{ wireguard_peer_public_key }}
+AllowedIPs = {{ wireguard_peer_allowed_ips }}

@@ -1013,6 +1013,7 @@ dependencies = [
  "crateward_core",
  "crateward_fake_internet",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "tar",
  "toml",

@@ -6,7 +6,7 @@
 //! comments are skipped. Names that contain hyphens (crates, tools, flags,
 //! targets) belong in inline code, which is good style anyway.
 //!
-//! Checked files: Markdown in the repository root and `docs/`, Rust doc
+//! Checked files: Markdown in the repository root, `docs/` and `deploy/`, Rust doc
 //! comments in `crates/`, and comments in `config/*.toml`.
 
 use std::fmt;
@@ -75,7 +75,7 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
             let descend = if nested {
                 !matches!(name, "target" | "fixtures")
             } else {
-                matches!(name, "docs" | "crates" | "config")
+                matches!(name, "docs" | "crates" | "config" | "deploy")
             };
             if descend && !name.starts_with('.') {
                 collect(&path, out, true)?;

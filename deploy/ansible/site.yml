@@ -1,0 +1,462 @@
+---
+# Sets up the Crateward server from a fresh Debian 13 install, following
+# docs/OPERATIONS.md ("Host setup done by hand", "Services and users") and
+# docs/ARCHITECTURE.md ("Egress"). Uses only ansible.builtin modules.
+#
+#   ansible-playbook -i inventory.yml site.yml -e @vars.yml
+#
+# vars.example.yml lists every variable. Secrets (the configuration file,
+# the site deploy key, the WireGuard private key) stay outside the
+# repository and are read from local paths the maintainer passes in.
+
+- name: Crateward server
+  hosts: crateward
+  become: true
+  vars:
+    crateward_users:
+      - { name: crateward-feed, role: feed }
+      - { name: crateward-fetcher, role: fetcher }
+      - { name: crateward-static, role: static }
+      - { name: crateward-orchestrator, role: orchestrator }
+      - { name: crateward-analyzer, role: analyzer }
+      - { name: crateward-api, role: api }
+      - { name: crateward-supervisor, role: supervisor }
+      - { name: crateward-builder, role: builder }
+    crateward_services:
+      - crateward-feed
+      - crateward-fetcher
+      - crateward-static-analysis
+      - crateward-orchestrator
+      - crateward-analyzer
+      - crateward-api
+      - crateward-supervisor
+    crateward_timers:
+      - crateward-egress
+      - crateward-db-dump
+    # The host cargo for resolution: the same release as rust-toolchain.toml
+    # and guest/rootfs/rust.toml (a test in crates/xtask keeps them equal).
+    cargo_url: https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz
+    cargo_sha256: ea1de9f9e23107d97ee2b41a72c552f34064a593da503789218387aee59f3ba4
+    # GitHub's host key for the export, checked against
+    # https://api.github.com/meta and its SHA256 fingerprint
+    # +DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU on 2026-09-26.
+    github_host_key: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+
+  handlers:
+    - name: Update grub
+      ansible.builtin.command: update-grub
+      changed_when: true
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Reload nftables
+      ansible.builtin.systemd_service:
+        name: nftables
+        state: reloaded
+
+    - name: Restart postgresql
+      ansible.builtin.systemd_service:
+        name: postgresql
+        state: restarted
+
+    - name: Reload sshd
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded
+
+  tasks:
+    - name: Only Debian 13 is supported
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == "Debian"
+          - ansible_facts.distribution_major_version == "13"
+
+    # Host (OPERATIONS.md, ADR 0010)
+
+    - name: Kernel command line without SMT and with full MDS and L1TF mitigations
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet nosmt mds=full,nosmt l1tf=full,force"'
+      notify: Update grub
+
+    - name: No swap in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s.*)$'
+        replace: '# \1'
+
+    - name: No active swap
+      ansible.builtin.command: swapoff --all
+      changed_when: false
+
+    - name: KSM off at every boot
+      ansible.builtin.copy:
+        dest: /etc/tmpfiles.d/crateward-ksm.conf
+        content: "w /sys/kernel/mm/ksm/run - - - - 0\n"
+        mode: "0644"
+
+    - name: Data checksums for every new PostgreSQL cluster
+      ansible.builtin.copy:
+        dest: /etc/postgresql-common/createcluster.d/crateward.conf
+        content: "initdb_options = '--data-checksums'\n"
+        mode: "0644"
+
+    - name: Packages
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - acl
+          - bc
+          - bison
+          - build-essential
+          - dwarves
+          - e2fsprogs
+          - erofs-utils
+          - flex
+          - git
+          - iproute2
+          - libelf-dev
+          - libssl-dev
+          - mmdebstrap
+          - musl-tools
+          - nftables
+          - postgresql
+          - systemd-resolved
+          - uidmap
+          - unattended-upgrades
+          - wireguard-tools
+          - xz-utils
+
+    - name: Data checksums are on
+      ansible.builtin.command: psql --no-psqlrc --tuples-only --command "SHOW data_checksums"
+      become_user: postgres
+      register: checksums
+      changed_when: false
+      failed_when: checksums.stdout | trim != "on"
+
+    # Users and directories (OPERATIONS.md, "Services and users")
+
+    - name: Shared group
+      ansible.builtin.group:
+        name: crateward
+        system: true
+
+    - name: One system user per component
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        group: crateward
+        groups: "{{ ['kvm'] if item.role == 'orchestrator' else [] }}"
+        system: true
+        create_home: false
+        home: /nonexistent
+        shell: /usr/sbin/nologin
+      loop: "{{ crateward_users }}"
+
+    - name: Subordinate IDs for the slots (ADR 0012), used by no one else
+      ansible.builtin.lineinfile:
+        path: "{{ item }}"
+        regexp: '^crateward-orchestrator:'
+        line: "crateward-orchestrator:{{ slot_id_base }}:65536"
+      loop: [/etc/subuid, /etc/subgid]
+
+    - name: Read the user IDs
+      ansible.builtin.getent:
+        database: passwd
+
+    - name: Read the group IDs
+      ansible.builtin.getent:
+        database: group
+
+    - name: Directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner | default('root') }}"
+        group: "{{ item.group | default('crateward') }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /etc/crateward, mode: "0750" }
+        - { path: /usr/local/lib/crateward, group: root, mode: "0755" }
+        - { path: /usr/local/lib/crateward/bin, group: root, mode: "0755" }
+        - { path: /usr/local/lib/crateward/guest, group: crateward, mode: "0750" }
+        - { path: /usr/local/lib/crateward/toolchain, group: root, mode: "0755" }
+        - { path: /usr/local/lib/crateward/toolchain/bin, group: root, mode: "0755" }
+        # Setgid, so files stay in the group; UMask=0027 in the units keeps
+        # each component's files writable by it alone.
+        - { path: /var/lib/crateward, mode: "2770" }
+        - { path: /var/lib/crateward/api, owner: crateward-api, mode: "0700" }
+        - { path: /var/lib/crateward/api/.ssh, owner: crateward-api, mode: "0700" }
+        - { path: /var/lib/crateward/decoys, owner: crateward-supervisor, mode: "0750" }
+        - { path: /var/backups/crateward, owner: postgres, group: postgres, mode: "0700" }
+        # The home the host decoys pretend to be (ADR 0023).
+        - { path: /home/crateward, owner: crateward-supervisor, mode: "0755" }
+        - { path: /home/crateward/.aws, owner: crateward-supervisor, mode: "0755" }
+        - { path: /home/crateward/.ssh, owner: crateward-supervisor, mode: "0755" }
+
+    - name: tmpfs for jobs, images and snapshots at /run/crateward
+      ansible.builtin.template:
+        src: run-crateward.mount.j2
+        dest: /etc/systemd/system/run-crateward.mount
+        mode: "0644"
+      notify: Reload systemd
+
+    # PostgreSQL: one role, reached over the socket by every service user
+
+    - name: Service users map to the crateward role
+      ansible.builtin.blockinfile:
+        path: "/etc/postgresql/{{ postgresql_version }}/main/pg_ident.conf"
+        marker: "# {mark} crateward"
+        block: |
+          {% for user in crateward_users if user.role != 'builder' %}
+          crateward {{ user.name }} crateward
+          {% endfor %}
+          crateward postgres postgres
+      notify: Restart postgresql
+
+    - name: Peer authentication through the map
+      ansible.builtin.lineinfile:
+        path: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+        line: "local crateward all peer map=crateward"
+        insertbefore: '^local\s+all\s+all'
+      notify: Restart postgresql
+
+    - name: Apply the PostgreSQL changes before creating the database
+      ansible.builtin.meta: flush_handlers
+
+    - name: Role
+      ansible.builtin.command: >-
+        psql --no-psqlrc --tuples-only --command
+        "SELECT 1 FROM pg_roles WHERE rolname = 'crateward'"
+      become_user: postgres
+      register: role
+      changed_when: false
+
+    - name: Create the role
+      ansible.builtin.command: createuser crateward
+      become_user: postgres
+      when: role.stdout | trim != "1"
+      changed_when: true
+
+    - name: Database
+      ansible.builtin.command: >-
+        psql --no-psqlrc --tuples-only --command
+        "SELECT 1 FROM pg_database WHERE datname = 'crateward'"
+      become_user: postgres
+      register: database
+      changed_when: false
+
+    - name: Create the database
+      ansible.builtin.command: createdb --owner=crateward crateward
+      become_user: postgres
+      when: database.stdout | trim != "1"
+      changed_when: true
+
+    # Software (a release bundle from `cargo xtask release`)
+
+    - name: Crateward binaries
+      ansible.builtin.copy:
+        src: "{{ crateward_release_dir }}/bin/"
+        dest: /usr/local/lib/crateward/bin/
+        owner: root
+        group: root
+        mode: "0755"
+      register: binaries
+
+    - name: The command line tool on the PATH
+      ansible.builtin.file:
+        src: /usr/local/lib/crateward/bin/crateward
+        dest: /usr/local/bin/crateward
+        state: link
+
+    - name: Firecracker, the jail launcher and the fake internet
+      ansible.builtin.copy:
+        src: "{{ crateward_release_dir }}/sandbox/{{ item }}"
+        dest: "/usr/local/lib/crateward/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [firecracker, crateward-vmjail, crateward_fake_internet]
+
+    - name: Guest kernel and root filesystem
+      ansible.builtin.copy:
+        src: "{{ crateward_release_dir }}/guest/{{ item }}"
+        dest: "/usr/local/lib/crateward/guest/{{ item }}"
+        owner: root
+        group: crateward
+        mode: "0640"
+      loop: [kernel.bzImage, rootfs.erofs]
+
+    - name: The fake internet's TLS authority, readable by the orchestrator only
+      ansible.builtin.copy:
+        src: "{{ crateward_release_dir }}/guest/authority.pem"
+        dest: /usr/local/lib/crateward/guest/authority.pem
+        owner: crateward-orchestrator
+        group: crateward
+        mode: "0600"
+
+    - name: Download cargo, verified by its pinned SHA-256
+      ansible.builtin.get_url:
+        url: "{{ cargo_url }}"
+        dest: /var/cache/crateward-cargo.tar.xz
+        checksum: "sha256:{{ cargo_sha256 }}"
+        mode: "0644"
+
+    - name: Unpack cargo
+      ansible.builtin.unarchive:
+        src: /var/cache/crateward-cargo.tar.xz
+        dest: /var/cache/
+        remote_src: true
+        creates: /var/cache/cargo-1.98.1-x86_64-unknown-linux-gnu
+
+    - name: Install cargo for the resolution sandbox
+      ansible.builtin.copy:
+        src: /var/cache/cargo-1.98.1-x86_64-unknown-linux-gnu/cargo/bin/cargo
+        dest: /usr/local/lib/crateward/toolchain/bin/cargo
+        remote_src: true
+        mode: "0755"
+
+    # Configuration and secrets
+
+    - name: Configuration, readable by the service users
+      ansible.builtin.copy:
+        src: "{{ crateward_config_file }}"
+        dest: /etc/crateward/crateward.toml
+        owner: root
+        group: crateward
+        mode: "0640"
+      register: configuration
+
+    - name: The site deploy key, readable by the api user only
+      ansible.builtin.copy:
+        src: "{{ site_deploy_key_file }}"
+        dest: /etc/crateward/site-deploy-key
+        owner: crateward-api
+        group: crateward
+        mode: "0600"
+      when: site_deploy_key_file is defined
+
+    - name: GitHub's host key for the export
+      ansible.builtin.copy:
+        dest: /var/lib/crateward/api/.ssh/known_hosts
+        content: "{{ github_host_key }}\n"
+        owner: crateward-api
+        group: crateward
+        mode: "0600"
+
+    - name: The configuration is valid
+      ansible.builtin.command: /usr/local/bin/crateward config check --config /etc/crateward/crateward.toml
+      changed_when: false
+
+    # Network: WireGuard, SSH and the firewall
+
+    - name: WireGuard interface
+      ansible.builtin.template:
+        src: wg0.conf.j2
+        dest: /etc/wireguard/wg0.conf
+        mode: "0600"
+      when: wireguard_private_key_file is defined
+
+    - name: WireGuard at boot
+      ansible.builtin.systemd_service:
+        name: wg-quick@wg0
+        enabled: true
+        state: started
+      when: wireguard_private_key_file is defined
+
+    - name: Drop in directory for ssh.service
+      ansible.builtin.file:
+        path: /etc/systemd/system/ssh.service.d
+        state: directory
+        mode: "0755"
+      when: ssh_wireguard_only
+
+    - name: SSH starts after the tunnel it listens on
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/ssh.service.d/crateward.conf
+        content: |
+          [Unit]
+          After=wg-quick@wg0.service
+          Wants=wg-quick@wg0.service
+        mode: "0644"
+      when: ssh_wireguard_only
+      notify: Reload systemd
+
+    - name: SSH with keys only, and only through WireGuard once confirmed
+      ansible.builtin.template:
+        src: sshd-crateward.conf.j2
+        dest: /etc/ssh/sshd_config.d/crateward.conf
+        mode: "0644"
+        validate: /usr/sbin/sshd -t -f %s
+      notify: Reload sshd
+
+    - name: Firewall variables
+      ansible.builtin.template:
+        src: nftables-vars.nft.j2
+        dest: /etc/crateward/nftables-vars.nft
+        group: root
+        mode: "0644"
+      notify: Reload nftables
+
+    - name: Firewall rules
+      ansible.builtin.copy:
+        src: ../nftables/crateward.nft
+        dest: /etc/nftables.d/crateward.nft
+        mode: "0644"
+      notify: Reload nftables
+
+    - name: nftables loads the Crateward rules
+      ansible.builtin.lineinfile:
+        path: /etc/nftables.conf
+        line: 'include "/etc/nftables.d/crateward.nft"'
+      notify: Reload nftables
+
+    - name: nftables at boot
+      ansible.builtin.systemd_service:
+        name: nftables
+        enabled: true
+        state: started
+
+    # Services
+
+    - name: Unit files
+      ansible.builtin.copy:
+        src: "../systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        mode: "0644"
+      loop: "{{ (crateward_services | map('regex_replace', '$', '.service') | list)
+        + (crateward_timers | map('regex_replace', '$', '.service') | list)
+        + (crateward_timers | map('regex_replace', '$', '.timer') | list) }}"
+      notify: Reload systemd
+
+    - name: Apply the unit changes
+      ansible.builtin.meta: flush_handlers
+
+    - name: The tmpfs is mounted
+      ansible.builtin.systemd_service:
+        name: run-crateward.mount
+        enabled: true
+        state: started
+
+    - name: Record the integrity manifest of this deploy (ADR 0023)
+      ansible.builtin.command: /usr/local/bin/crateward integrity --config /etc/crateward/crateward.toml record
+      changed_when: true
+
+    - name: Timers
+      ansible.builtin.systemd_service:
+        name: "{{ item }}.timer"
+        enabled: true
+        state: started
+      loop: "{{ crateward_timers }}"
+
+    # A restart waits for the old process to exit (the orchestrator drains
+    # its jobs; TimeoutStopSec) before the new one starts, so two
+    # orchestrators never overlap.
+    - name: Services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: true
+        state: "{{ 'restarted' if (binaries.changed or configuration.changed) else 'started' }}"
+      loop: "{{ crateward_services }}"

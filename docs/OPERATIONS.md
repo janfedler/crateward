@@ -25,8 +25,7 @@ KSM disabled, no swap.
 |-------|--------|----------|
 | `/boot` | md RAID1 | kernel and initramfs |
 | `/` | ext4 on md RAID1 (`md2`), unencrypted; monthly `mdcheck` scrub | system, Postgres, content addressed store, evidence, logs, image archive |
-| `/run/crateward/images` | tmpfs, 14 GiB | promoted images |
-| `/run/crateward/scratch` | tmpfs, capped | per job scratch disks |
+| `/run/crateward` | tmpfs, capped at the images, the scratch disks and the snapshot together (31 GiB) | the base snapshot, the warm image, per job payload and scratch images, the slot jails, the fetcher's and the export's work directories |
 
 PostgreSQL clusters are created with data checksums enabled.
 
@@ -81,7 +80,8 @@ publishes the share of versions with dynamic results.
 | Task | When |
 |------|------|
 | RSS poll | every 2 minutes |
-| Database dump | daily |
+| Database dump (`crateward-db-dump.timer`, to `/var/backups/crateward`) | daily |
+| Egress allowlist refresh (`crateward-egress.timer`) | every 2 minutes |
 | Canaries | hourly |
 | Image refresh (Debian packages, toolchain) | weekly, at night |
 | Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs; jobs wait meanwhile); stop and start the orchestrator to refresh it |
@@ -90,10 +90,11 @@ publishes the share of versions with dynamic results.
 | Integrity manifest check | every `supervisor.integrity_interval_minutes` (60) |
 | Heartbeat | every minute |
 
-## Host setup done by hand (Ansible in M8)
+## Host setup
 
-These steps were applied to the production server on 2026-09-24 and are the
-specification for the Ansible role.
+These steps were applied to the production server by hand on 2026-09-24.
+`deploy/ansible/site.yml` now encodes them, with everything else a fresh
+server needs; see [deploy/README.md](../deploy/README.md).
 
 * Kernel command line: `nosmt mds=full,nosmt l1tf=full,force` in
   `GRUB_CMDLINE_LINUX_DEFAULT`. Verified: SMT `forceoff`, L1TF "VMX: cache
@@ -124,10 +125,12 @@ ssh -N -L 8080:127.0.0.1:8080 <server>
 
 ## Services and users
 
-Each component runs as its own system user under systemd with
-`NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, and a minimal
-capability bounding set. Unit files arrive with the milestones that build
-the components.
+Each component runs as its own system user (`crateward-feed`,
+`crateward-fetcher` and so on, all in the group `crateward`) under systemd
+with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, no
+capabilities and `UMask=0027`. The units are in `deploy/systemd`; all
+score "OK" in `systemd-analyze security`. All users reach PostgreSQL over
+the socket as the one role `crateward`, through a peer map.
 
 The orchestrator user has requirements of its own (ADR 0012):
 
@@ -138,8 +141,12 @@ The orchestrator user has requirements of its own (ADR 0012):
   other user shares;
 * its unit runs with `Delegate=yes`, so it owns a cgroup subtree for the
   slot limits;
-* every other Crateward unit sets `RestrictNamespaces=yes`, since only the
-  orchestrator needs unprivileged user namespaces.
+* it keeps `NoNewPrivileges` off, because `newuidmap` and `newgidmap` are
+  setuid programs.
+
+The fetcher and the static analysis create user and network namespaces for
+their sandboxed children, so their units allow exactly those two; every
+other unit sets `RestrictNamespaces=yes`.
 
 ## External services
 
@@ -151,15 +158,19 @@ The orchestrator user has requirements of its own (ADR 0012):
 
 ## Deploying a new build
 
-1. Build the release binaries and install them next to each other.
-2. Restart the services. The orchestrator finishes its running jobs after
-   SIGTERM; start the new one after the old one exited. A second
-   orchestrator refuses to start while the first holds
-   `orchestrator.lock` in `sandbox.slots_dir`.
-3. Record the integrity manifest:
-   `crateward integrity --config /etc/crateward/crateward.toml record`.
-   Without this step the supervisor quarantines the pipeline within
-   `supervisor.integrity_interval_minutes`, since the binaries changed.
+1. `cargo xtask release` builds the release bundle.
+2. `ansible-playbook -i inventory.yml deploy/ansible/site.yml -e @vars.yml`
+   installs it, records the integrity manifest and restarts the services
+   whose binaries or configuration changed.
+
+By hand, the same steps are: install the binaries next to each other,
+restart the services, and record the manifest with
+`crateward integrity --config /etc/crateward/crateward.toml record`.
+Without the manifest the supervisor quarantines the pipeline within
+`supervisor.integrity_interval_minutes`, since the binaries changed. The
+orchestrator finishes its running jobs after SIGTERM; `systemctl restart`
+waits for it, and a second orchestrator refuses to start while the first
+holds `orchestrator.lock` in `sandbox.slots_dir`.
 
 The decoys in `supervisor.decoys` look like credentials. Backups, indexers
 and anything else that reads the home directories must exclude them, or

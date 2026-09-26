@@ -299,13 +299,15 @@ time fell by 28 percent. See
 |----------|--------|----------|
 | `/boot` | md RAID1 | kernel and initramfs |
 | `/` and `/var/lib` | ext4 on md RAID1, unencrypted | Postgres, content addressed store, evidence, logs, image archive |
-| `/run/crateward/images` | tmpfs | promoted images, verified by BLAKE3 on copy |
-| `/run/crateward/scratch` | tmpfs with a hard cap | per job scratch disks (sparse files) |
+| `/run/crateward` | tmpfs with a hard cap | base snapshot, warm image, per job payload and scratch images (sparse files), slot jails |
 
 ## Egress
 
 Every allowlist is enforced per service user by nftables sets that are filled
-from DNS.
+from DNS (`deploy/nftables/crateward.nft`; `crateward egress` derives the
+hosts from the configuration, and a root timer loads them every two
+minutes). A packet from a slot UID on the host network is logged and
+dropped.
 
 | Service user | Destinations | Purpose |
 |--------------|--------------|---------|

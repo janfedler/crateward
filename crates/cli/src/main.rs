@@ -7,6 +7,8 @@
 
 #![forbid(unsafe_code)]
 
+mod egress;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -71,6 +73,13 @@ enum Command {
     Integrity {
         #[command(subcommand)]
         command: IntegrityCommand,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
+    /// Print the nftables script that fills the egress allowlist sets
+    /// (`deploy/nftables/crateward.nft`) from the configured hosts.
+    Egress {
         /// Configuration file.
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
@@ -269,6 +278,22 @@ fn main() -> ExitCode {
             Ok(())
         }),
         Command::Integrity { command, config } => integrity(&config, &command),
+        Command::Egress { config } => {
+            let config = match Config::load(&config) {
+                Ok(config) => config,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::from(EXIT_CONFIG);
+                }
+            };
+            let (sets, errors) = egress::resolve(&egress::allowances(&config));
+            for error in &errors {
+                eprintln!("not resolved: {error}");
+            }
+            // A host that stops resolving ages out of its set.
+            out!("{}", egress::render(&sets).trim_end());
+            ExitCode::SUCCESS
+        }
         Command::Breaker {
             command: BreakerCommand::Close { stage },
             config,

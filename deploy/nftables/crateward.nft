@@ -1,0 +1,75 @@
+#!/usr/sbin/nft -f
+# Crateward host firewall: WireGuard is the only inbound service, and every
+# service user reaches only its allowlisted hosts (ARCHITECTURE.md,
+# "Egress"; THREAT_MODEL.md). The address sets are filled by
+# `crateward egress | nft -f -`, run by crateward-egress.timer as root.
+#
+# The variables file defines WG_PORT, SSH_PORT, SSH_IFACES (the WireGuard
+# interface; until WireGuard is confirmed working, also the public one),
+# SLOT_UIDS (a range) and one numeric UID per service user. Ansible writes
+# it.
+include "/etc/crateward/nftables-vars.nft"
+
+destroy table inet crateward
+
+table inet crateward {
+	set feed_v4 { type ipv4_addr; flags timeout; }
+	set feed_v6 { type ipv6_addr; flags timeout; }
+	set fetcher_v4 { type ipv4_addr; flags timeout; }
+	set fetcher_v6 { type ipv6_addr; flags timeout; }
+	set supervisor_v4 { type ipv4_addr; flags timeout; }
+	set supervisor_v6 { type ipv6_addr; flags timeout; }
+	set api_v4 { type ipv4_addr; flags timeout; }
+	set api_v6 { type ipv6_addr; flags timeout; }
+	set builder_v4 { type ipv4_addr; flags timeout; }
+	set builder_v6 { type ipv6_addr; flags timeout; }
+
+	chain input {
+		type filter hook input priority filter; policy drop;
+		ct state established,related accept
+		ct state invalid drop
+		iif lo accept
+		# WireGuard answers nothing to unauthenticated packets.
+		udp dport $WG_PORT accept
+		# SSH only through the tunnel, once `ssh_wireguard_only` is set.
+		iifname $SSH_IFACES tcp dport $SSH_PORT accept
+		icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+		icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+	}
+
+	chain output {
+		type filter hook output priority filter; policy accept;
+		# A slot UID never uses the host's network; its VM lives in its own
+		# namespace. A packet from one here means an escaped process.
+		meta skuid $SLOT_UIDS log prefix "crateward slot egress: " level warn drop
+		meta skuid { $FEED_UID, $FETCHER_UID, $STATIC_UID, $ORCHESTRATOR_UID, $ANALYZER_UID, $API_UID, $SUPERVISOR_UID, $BUILDER_UID } jump service
+	}
+
+	chain service {
+		ct state established,related accept
+		# The untrusted zone has no network at all; Postgres is a socket.
+		meta skuid $ORCHESTRATOR_UID goto denied
+		# Loopback: the local resolver and the dashboard.
+		oif lo accept
+		meta skuid $FEED_UID ip daddr @feed_v4 tcp dport 443 accept
+		meta skuid $FEED_UID ip6 daddr @feed_v6 tcp dport 443 accept
+		meta skuid $FETCHER_UID ip daddr @fetcher_v4 tcp dport 443 accept
+		meta skuid $FETCHER_UID ip6 daddr @fetcher_v6 tcp dport 443 accept
+		meta skuid $SUPERVISOR_UID ip daddr @supervisor_v4 tcp dport 443 accept
+		meta skuid $SUPERVISOR_UID ip6 daddr @supervisor_v6 tcp dport 443 accept
+		meta skuid $API_UID ip daddr @api_v4 tcp dport 22 accept
+		meta skuid $API_UID ip6 daddr @api_v6 tcp dport 22 accept
+		meta skuid $BUILDER_UID ip daddr @builder_v4 tcp dport 443 accept
+		meta skuid $BUILDER_UID ip6 daddr @builder_v6 tcp dport 443 accept
+		goto denied
+	}
+
+	chain denied {
+		limit rate 10/minute log prefix "crateward egress denied: " level warn
+		reject with icmpx admin-prohibited
+	}
+}

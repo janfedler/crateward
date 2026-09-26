@@ -1,0 +1,31 @@
+[Unit]
+Description=Crateward egress allowlist: refresh the nftables address sets
+Documentation=https://github.com/janfedler/crateward/blob/main/docs/OPERATIONS.md
+After=nftables.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Runs as root because it loads nftables; the tool only resolves names and
+# prints the elements.
+Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
+ExecStart=/bin/sh -c '/usr/local/bin/crateward egress | /usr/sbin/nft -f -'
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native

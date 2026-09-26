@@ -1,0 +1,4 @@
+crateward:
+  hosts:
+    crateward.example:
+      ansible_user: root
