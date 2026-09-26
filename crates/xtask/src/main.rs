@@ -69,6 +69,9 @@ enum Task {
         #[arg(long, default_value_t = 50)]
         jobs: u32,
     },
+    /// Check deploy/: playbook syntax, unit files, firewall rules. Needs
+    /// `ansible-playbook`, `systemd-analyze`, `nft` and `unshare`.
+    DeployCheck,
     /// Run every fuzz target for a while (needs `cargo fuzz`).
     Fuzz {
         /// Seconds per target.
@@ -115,6 +118,7 @@ fn main() -> ExitCode {
         Task::BumpDebianSnapshot => rootfs::bump_snapshot(&workspace_root()),
         Task::Soak { jobs } => soak(jobs),
         Task::Canary => canary(),
+        Task::DeployCheck => deploy::run(&workspace_root()),
         Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
     };
     match result {

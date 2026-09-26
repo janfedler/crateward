@@ -115,6 +115,28 @@ jobs:
       - name: Build with the pinned bpf-linker and check the license section
         run: cargo xtask guest-ebpf
 
+  deploy:
+    name: deployment checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install ansible-core (hash pinned) and nftables
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nftables
+          python3 -m venv "$RUNNER_TEMP/ansible"
+          "$RUNNER_TEMP/ansible/bin/pip" install --require-hashes -r deploy/ansible/requirements.txt
+          echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
+          # Ubuntu restricts unprivileged user namespaces with AppArmor; the
+          # firewall check loads the rules in one.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: cargo xtask deploy-check
+
   fuzz:
     name: fuzz smoke
     runs-on: ubuntu-24.04

@@ -19,6 +19,7 @@ server.
 | End to end tests | Canary crates through the whole pipeline with the fake VM backend | M5 |
 | Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly); `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default; run on the server with `--ignored` |
+| Deployment checks | The playbooks parse, the units verify with `systemd-analyze`, the firewall loads in a throwaway network namespace; unit tests keep the playbook's pins and unit list in sync | `cargo xtask deploy-check`, in CI |
 | Soak test | Sequential jailed jobs, a host side timeout and crash reconciliation, then checks for leaked processes, cgroups, directories, network interfaces, file descriptors and memory | `cargo xtask soak --jobs 50`, on the server |
 
 ## State machine properties
