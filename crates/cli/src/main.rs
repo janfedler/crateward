@@ -20,6 +20,20 @@ use secrecy::ExposeSecret;
 /// `EX_CONFIG` from `sysexits.h`.
 const EXIT_CONFIG: u8 = 78;
 
+/// Like `println!`, but a closed pipe (`crateward status | head`) ends the
+/// program quietly instead of panicking.
+macro_rules! out {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        if let Err(error) = writeln!(std::io::stdout().lock(), $($arg)*) {
+            if error.kind() == std::io::ErrorKind::BrokenPipe {
+                std::process::exit(0);
+            }
+            eprintln!("writing to stdout: {error}");
+            std::process::exit(1);
+        }
+    }};
+}
 #[derive(Debug, Parser)]
 #[command(name = "crateward", version, about = "Crateward maintainer tool")]
 struct Cli {
@@ -173,7 +187,7 @@ fn integrity(config: &Path, command: &IntegrityCommand) -> ExitCode {
                     let temporary = manifest.with_extension("tmp");
                     std::fs::write(&temporary, &text).map_err(|e| e.to_string())?;
                     std::fs::rename(&temporary, &manifest).map_err(|e| e.to_string())?;
-                    println!("recorded {} files in {}", files.len(), manifest.display());
+                    out!("recorded {} files in {}", files.len(), manifest.display());
                     Ok(())
                 }),
             IntegrityCommand::Check => std::fs::read_to_string(&manifest)
@@ -182,10 +196,10 @@ fn integrity(config: &Path, command: &IntegrityCommand) -> ExitCode {
                 .and_then(|parsed| {
                     let mismatches = integrity::verify(&parsed);
                     for m in &mismatches {
-                        println!("MISMATCH {}: {}", m.path.display(), m.reason);
+                        out!("MISMATCH {}: {}", m.path.display(), m.reason);
                     }
                     if mismatches.is_empty() {
-                        println!("{} files match", parsed.len());
+                        out!("{} files match", parsed.len());
                         Ok(())
                     } else {
                         Err(format!("{} files differ", mismatches.len()))
@@ -205,11 +219,11 @@ async fn status(store: Store) -> Result<(), String> {
     let now = store.now_epoch().await.map_err(|e| e.to_string())?;
     let pauses = store.pauses().await.map_err(|e| e.to_string())?;
     if pauses.is_empty() {
-        println!("pauses: none");
+        out!("pauses: none");
     }
     for p in pauses {
         let job = p.job.map_or(String::new(), |j| format!(", job {}", j.0));
-        println!(
+        out!(
             "paused: {} for {} s{job}: {}",
             p.reason.name(),
             now - p.since,
@@ -222,17 +236,17 @@ async fn status(store: Store) -> Result<(), String> {
             .get(&stage)
             .copied()
             .unwrap_or(BreakerState::Closed);
-        println!("breaker {:<16} {}", stage.name(), state.name());
+        out!("breaker {:<16} {}", stage.name(), state.name());
     }
     for (name, passed, at) in store.latest_canaries().await.map_err(|e| e.to_string())? {
         let result = if passed { "passed" } else { "FAILED" };
-        println!("canary {name:<16} {result} {} s ago", now - at);
+        out!("canary {name:<16} {result} {} s ago", now - at);
     }
     let pending = store
         .pending_alerts(1000)
         .await
         .map_err(|e| e.to_string())?;
-    println!("alerts waiting: {}", pending.len());
+    out!("alerts waiting: {}", pending.len());
     Ok(())
 }
 
@@ -248,9 +262,9 @@ fn main() -> ExitCode {
                 .await
                 .map_err(|e| e.to_string())?
             {
-                println!("quarantine lifted");
+                out!("quarantine lifted");
             } else {
-                println!("no quarantine was active");
+                out!("no quarantine was active");
             }
             Ok(())
         }),
@@ -268,7 +282,7 @@ fn main() -> ExitCode {
                     .set_breaker(stage, BreakerState::Closed)
                     .await
                     .map_err(|e| e.to_string())?;
-                println!("breaker of {} closed", stage.name());
+                out!("breaker of {} closed", stage.name());
                 Ok(())
             })
         }
@@ -276,7 +290,7 @@ fn main() -> ExitCode {
             command: ConfigCommand::Check { config },
         } => match Config::load(&config) {
             Ok(_) => {
-                println!("{} is valid", config.display());
+                out!("{} is valid", config.display());
                 ExitCode::SUCCESS
             }
             Err(error) => {
@@ -297,7 +311,7 @@ fn main() -> ExitCode {
                 let owner = state
                     .stage()
                     .map_or("none (terminal)", |stage| stage.name());
-                println!("{:<20} {owner}", state.name());
+                out!("{:<20} {owner}", state.name());
             }
             ExitCode::SUCCESS
         }

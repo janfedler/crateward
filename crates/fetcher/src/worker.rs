@@ -31,11 +31,14 @@ pub struct FetchFailure {
 }
 
 impl FetchFailure {
-    fn transient(message: impl Into<String>) -> Self {
-        Self {
-            class: FailureClass::Transient,
-            message: message.into(),
-        }
+    /// A download whose digest differs from the index. The body arrived
+    /// complete, so crates.io, its CDN or the path to it served the wrong
+    /// bytes: an infrastructure failure. It does not use up the job's
+    /// attempts and counts toward the fetch circuit breaker, so a tampered
+    /// or broken mirror stops the stage and raises an alert instead of
+    /// failing job after job (THREAT_MODEL, downloads).
+    fn checksum_mismatch(name: &CrateName, version: &semver::Version) -> Self {
+        Self::infrastructure(format!("checksum mismatch for {name} {version}"))
     }
 
     fn infrastructure(message: impl std::fmt::Display) -> Self {
@@ -305,12 +308,8 @@ impl Fetcher {
         }
         let digest: [u8; 32] = hasher.finalize().into();
         if &Sha256Digest::from_bytes(digest) != sha256 {
-            // Could be a truncated download; persistent mismatches exhaust
-            // the attempts. They do not count toward the breaker yet (THREAT_MODEL).
             tracing::warn!(%name, %version, expected = %sha256, "checksum mismatch");
-            return Err(FetchFailure::transient(format!(
-                "checksum mismatch for {name} {version}"
-            )));
+            return Err(FetchFailure::checksum_mismatch(name, version));
         }
         let exe = self.setup.exe.clone();
         let (n, v) = (name.to_string(), version.to_string());
@@ -354,5 +353,20 @@ impl Fetcher {
         };
         self.store.record_crate_file(&file).await?;
         Ok(Some(file))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checksum_mismatches_feed_the_circuit_breaker() {
+        let name: CrateName = "serde".parse().unwrap();
+        let failure = FetchFailure::checksum_mismatch(&name, &semver::Version::new(1, 0, 0));
+        // Only infrastructure failures are counted by the breaker
+        // (`Store::stage_counts`).
+        assert_eq!(failure.class, FailureClass::Infrastructure);
+        assert_eq!(failure.message, "checksum mismatch for serde 1.0.0");
     }
 }

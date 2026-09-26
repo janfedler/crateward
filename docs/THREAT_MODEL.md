@@ -132,7 +132,7 @@ test. Nothing is marked Built before the code exists.
 | Mitigation | Status | Milestone |
 |------------|--------|-----------|
 | TLS to crates.io hosts (the client refuses plain HTTP); checksums from the index verified for every file | Built | M2 |
-| Repeated checksum mismatches open the fetch circuit breaker. Not built: a mismatch is a transient failure that uses up the job's attempts, and the breaker counts only infrastructure failures | Planned | M8 |
+| Repeated checksum mismatches open the fetch circuit breaker: a mismatch is an infrastructure failure, which the breaker counts, and does not use up the job's attempts | Tested | M7 |
 | Egress allowlisted per service user with nftables (host rules need root; the maintainer applies them) | Planned | M8 |
 
 ### External services and the public site (T6, T8; B7, B8, B9)
