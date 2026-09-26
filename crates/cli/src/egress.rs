@@ -53,8 +53,9 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
         cio.rss_updates_url.as_str(),
         cio.rss_new_crates_url.as_str(),
         cio.db_dump_url.as_str(),
-        cio.api_url.as_str(),
     ]);
+    // `crates_io.api_url` is configured for a last resort, but nothing
+    // calls the API, so its host stays closed.
     // The fetcher downloads from the `dl` URL of the index's config.json,
     // which is the static host.
     let fetcher = collect(&[cio.index_url.as_str(), cio.static_url.as_str()]);
@@ -199,10 +200,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(get("fetcher"), ["index.crates.io", "static.crates.io"]);
-        assert_eq!(
-            get("feed"),
-            ["crates.io", "index.crates.io", "static.crates.io"]
-        );
+        assert_eq!(get("feed"), ["index.crates.io", "static.crates.io"]);
         assert_eq!(get("supervisor"), ["hc-ping.com", "ntfy.sh"]);
         assert_eq!(get("api"), ["github.com"]);
     }

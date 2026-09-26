@@ -136,10 +136,12 @@ vmjail_bin = "/usr/local/lib/crateward/crateward-vmjail"
 fake_internet_bin = "/usr/local/lib/crateward/crateward_fake_internet"
 # Its TLS authority (certificate and key), from `cargo xtask rootfs`, which
 # also makes the guest image trust the certificate. Mode 0600.
-fake_internet_authority = "/usr/local/lib/crateward/guest/authority.pem"
+fake_internet_authority = "/usr/local/lib/crateward/guest/current/authority.pem"
 # Guest images, from `cargo xtask guest-kernel` and `cargo xtask rootfs`.
-kernel_image = "/usr/local/lib/crateward/guest/kernel.bzImage"
-rootfs_image = "/usr/local/lib/crateward/guest/rootfs.erofs"
+# `current` is a link that a deploy or a rollback moves (ADR 0024); the
+# orchestrator resolves it once at startup.
+kernel_image = "/usr/local/lib/crateward/guest/current/kernel.bzImage"
+rootfs_image = "/usr/local/lib/crateward/guest/current/rootfs.erofs"
 # One subdirectory per slot, private to the orchestrator user.
 slots_dir = "/run/crateward/slots"
 # Slot n runs Firecracker as slot_uid_base + n. The range must lie in the

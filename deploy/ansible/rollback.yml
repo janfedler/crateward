@@ -1,0 +1,57 @@
+---
+# Switches the guest files back to the previous version and restarts the
+# orchestrator on them (ADR 0024, RUNBOOK.md "Canary failure"). Running it
+# again switches forward again.
+#
+#   ansible-playbook -i inventory.yml rollback.yml
+
+- name: Roll the guest files back
+  hosts: crateward
+  become: true
+  vars:
+    guest_root: /usr/local/lib/crateward/guest
+    restart: true
+
+  tasks:
+    - name: The current version
+      ansible.builtin.stat:
+        path: "{{ guest_root }}/current"
+      register: current
+
+    - name: The previous version
+      ansible.builtin.stat:
+        path: "{{ guest_root }}/previous"
+      register: previous
+
+    - name: There is a version to go back to
+      ansible.builtin.assert:
+        that:
+          - current.stat.islnk | default(false)
+          - previous.stat.islnk | default(false)
+        fail_msg: "no previous guest version under {{ guest_root }}"
+
+    - name: Previous becomes current
+      ansible.builtin.file:
+        src: "{{ previous.stat.lnk_source }}"
+        dest: "{{ guest_root }}/current"
+        state: link
+        force: true
+
+    - name: Current becomes previous
+      ansible.builtin.file:
+        src: "{{ current.stat.lnk_source }}"
+        dest: "{{ guest_root }}/previous"
+        state: link
+        force: true
+
+    # The restart waits until the running orchestrator has drained its jobs.
+    - name: Restart the orchestrator on the other version
+      ansible.builtin.systemd_service:
+        name: crateward-orchestrator
+        state: restarted
+      when: restart | bool
+
+    - name: Record the integrity manifest for the switched files
+      ansible.builtin.command: /usr/local/bin/crateward integrity --config /etc/crateward/crateward.toml record
+      changed_when: true
+      when: restart | bool

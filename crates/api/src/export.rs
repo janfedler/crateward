@@ -29,6 +29,12 @@ struct SitePage {
     generated: String,
 }
 
+/// What Crateward is and does; the user agent of every request to
+/// crates.io points here.
+#[derive(Template)]
+#[template(path = "about.html")]
+struct AboutPage;
+
 fn coverage_label(kind: &str) -> String {
     match kind {
         "dynamic_linux" => "Built and traced in a microVM on Linux".into(),
@@ -84,6 +90,10 @@ pub fn render(
             page.render().map_err(|e| e.to_string())?.into_bytes(),
         ),
         (
+            "about/index.html".into(),
+            AboutPage.render().map_err(|e| e.to_string())?.into_bytes(),
+        ),
+        (
             "stats.json".into(),
             serde_json::to_vec_pretty(&json).map_err(|e| e.to_string())?,
         ),
@@ -105,7 +115,11 @@ pub fn render(
 pub fn write(dir: &Path, files: &[(String, Vec<u8>)]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     for (name, data) in files {
-        std::fs::write(dir.join(name), data)?;
+        let path = dir.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, data)?;
     }
     Ok(())
 }
@@ -282,9 +296,22 @@ mod tests {
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             names,
-            ["index.html", "stats.json", "site.css", "CNAME", ".nojekyll"]
+            [
+                "index.html",
+                "about/index.html",
+                "stats.json",
+                "site.css",
+                "CNAME",
+                ".nojekyll"
+            ]
         );
-        // The page loads nothing but its own stylesheet.
+        // The pages load nothing but their own stylesheet.
         assert!(!index.contains("<script"));
+        let about = String::from_utf8(files[1].1.clone()).unwrap();
+        assert!(!about.contains("<script"));
+        // The user agent points at this page.
+        assert!(
+            about.contains("crateward/0.1 (+https://crateward.com/about; security@crateward.com)")
+        );
     }
 }

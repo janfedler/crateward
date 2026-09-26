@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'">
+<title>About Crateward</title>
+<link rel="stylesheet" href="../site.css">
+</head>
+<body>
+<main>
+<h1>About Crateward</h1>
+<p><a href="../">Back to the numbers</a></p>
+
+<p>Crateward is a supply chain scanner for crates.io, run by one person on
+one server. It looks at every new crate version for signs of malicious
+behavior, such as a build script that reads credentials or talks to the
+network, and reports what it finds to the people who can act on it.</p>
+
+<h2>What it reads from crates.io</h2>
+<p>Crateward uses only public read access, as the
+<a href="https://crates.io/data-access">crates.io data access policy</a>
+describes: the RSS feeds of new versions, the sparse index, the crate files
+on the static host, and the daily database dump. It does not call the
+crates.io API. It downloads each crate file once and keeps its own copy,
+and it limits its own request rate. Every request carries the user agent
+<code>crateward/0.1 (+https://crateward.com/about; security@crateward.com)</code>.
+If these requests cause trouble, please write to the address below.</p>
+
+<h2>How a version is analyzed</h2>
+<p>Every version gets a static analysis of its files. A version whose build
+runs its own code (a build script, a procedural macro, or such a
+dependency) is also built with <code>cargo check</code> inside a Firecracker
+microVM. The VM has no internet: a fake one answers and records every
+attempt. Planted fake credentials show whether the build reads them. Nothing
+the build does leaves the VM except the record. A verdict names the reasons
+and says what the analysis covered; a low risk level is not a claim that a
+version is safe.</p>
+
+<h2>What is published</h2>
+<p>This site shows aggregate numbers only. Crateward never publishes a
+finding about a crate before it was reported and handled: malicious crates
+go to the crates.io team, and vulnerabilities to the crate's maintainers
+first. A finding appears here after that, with its timeline.</p>
+
+<h2>Contact</h2>
+<p>security@crateward.com, for reports about Crateward itself, for a
+version you believe was flagged by mistake, and for anything about the
+requests it makes. False positives are treated as bugs.</p>
+</main>
+</body>
+</html>

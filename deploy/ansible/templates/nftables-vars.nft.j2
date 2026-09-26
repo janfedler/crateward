@@ -1,7 +1,7 @@
 # Written by Ansible (deploy/ansible/site.yml); read by crateward.nft.
 define WG_PORT = {{ wireguard_port }}
 define SSH_PORT = {{ ssh_port }}
-{% if ssh_wireguard_only %}
+{% if ssh_wireguard_only | bool %}
 define SSH_IFACES = { "wg0" }
 {% else %}
 # Until WireGuard is confirmed working, SSH stays reachable publicly too.

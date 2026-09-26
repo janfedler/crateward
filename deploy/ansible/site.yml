@@ -280,22 +280,15 @@
         mode: "0755"
       loop: [firecracker, crateward-vmjail, crateward_fake_internet]
 
-    - name: Guest kernel and root filesystem
-      ansible.builtin.copy:
-        src: "{{ crateward_release_dir }}/guest/{{ item }}"
-        dest: "/usr/local/lib/crateward/guest/{{ item }}"
-        owner: root
-        group: crateward
-        mode: "0640"
-      loop: [kernel.bzImage, rootfs.erofs]
-
-    - name: The fake internet's TLS authority, readable by the orchestrator only
-      ansible.builtin.copy:
-        src: "{{ crateward_release_dir }}/guest/authority.pem"
-        dest: /usr/local/lib/crateward/guest/authority.pem
-        owner: crateward-orchestrator
-        group: crateward
-        mode: "0600"
+    # Guest files are versioned by the root filesystem's digest, with
+    # `current` and `previous` links (ADR 0024).
+    - name: Guest files
+      ansible.builtin.include_tasks: tasks/guest.yml
+      vars:
+        guest_root: /usr/local/lib/crateward/guest
+        guest_owner: root
+        guest_group: crateward
+        authority_owner: crateward-orchestrator
 
     - name: Download cargo, verified by its pinned SHA-256
       ansible.builtin.get_url:
@@ -371,7 +364,7 @@
         path: /etc/systemd/system/ssh.service.d
         state: directory
         mode: "0755"
-      when: ssh_wireguard_only
+      when: ssh_wireguard_only | bool
 
     - name: SSH starts after the tunnel it listens on
       ansible.builtin.copy:
@@ -381,7 +374,7 @@
           After=wg-quick@wg0.service
           Wants=wg-quick@wg0.service
         mode: "0644"
-      when: ssh_wireguard_only
+      when: ssh_wireguard_only | bool
       notify: Reload systemd
 
     - name: SSH with keys only, and only through WireGuard once confirmed
@@ -458,5 +451,6 @@
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         enabled: true
-        state: "{{ 'restarted' if (binaries.changed or configuration.changed) else 'started' }}"
+        state: "{{ 'restarted' if (binaries.changed or configuration.changed or guest_switched.changed)
+          else 'started' }}"
       loop: "{{ crateward_services }}"

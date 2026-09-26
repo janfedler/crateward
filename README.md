@@ -7,14 +7,13 @@ metal Linux server, scores the risk with reasons that link to evidence, and
 shows everything on a web dashboard. It asks its maintainer for help only
 when something genuinely needs a human.
 
-> **Status: milestones M0 to M3 are done, M4 is in progress.** New
-> crates.io versions become jobs, are fetched, validated and resolved, and
-> get a static report with evidence and a triage decision. Versions with
-> build time code run `cargo check` in jailed microVMs with honeytokens
-> planted and a fake internet that records every network attempt. See
+> **Status: milestones M0 to M7 are done; M8 (launch) is in progress.**
+> The whole pipeline runs on a development host against live crates.io
+> data: new versions are fetched, analyzed statically, built in jailed
+> microVMs when their build runs their own code, and scored with reasons.
+> The deployment for the production server is ready in [deploy/](deploy/)
+> and waits for the maintainer to apply it. See
 > [the milestones](#milestones).
-
-*A dashboard screenshot will appear here with milestone M6.*
 
 ## How it works
 
@@ -132,7 +131,7 @@ cargo run -p crateward_cli -- state-machine diagram
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | done: breakers, quarantine, pauses, canaries, deadlines, alerts, heartbeat (ADR 0020) |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | done: scoring and review inbox (ADR 0021), dashboard (loopback, reached through an SSH tunnel) and public export (ADR 0022) |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | done: 13 fuzz targets, host escape detection and retention (ADR 0023), [security checklist](docs/SECURITY_CHECKLIST.md), measured storage budget; the offsite backup target waits for the maintainer |
-| M8 | Launch: deployment, runbook, disclosure workflow, write up | planned |
+| M8 | Launch: deployment, runbook, disclosure workflow, write up | in progress: Ansible, hardened units and firewall ([deploy/](deploy/)), release bundles with SBOM, guest versions with rollback (ADR 0024), the public about page; applying them to the server waits for the maintainer |
 
 ## Documentation
 

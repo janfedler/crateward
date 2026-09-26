@@ -1,0 +1,84 @@
+---
+# The guest files of a release bundle, versioned by the root filesystem's
+# digest under `guest_root`, with `current` and `previous` links. The
+# version in use becomes `previous`; older ones are removed. rollback.yml
+# swaps the two links (ADR 0024). The authority belongs to the image that
+# trusts it, so it is versioned with it.
+#
+# Sets `guest_switched`, which restarts the orchestrator.
+
+- name: Version of the guest files in this bundle
+  ansible.builtin.set_fact:
+    guest_version: "{{ (lookup('ansible.builtin.file', crateward_release_dir + '/SHA256SUMS')
+      | regex_search('([0-9a-f]{64})  guest/rootfs.erofs', '\\1') | first)[:16] }}"
+
+- name: Directory of this guest version
+  ansible.builtin.file:
+    path: "{{ guest_root }}/{{ guest_version }}"
+    state: directory
+    owner: "{{ guest_owner }}"
+    group: "{{ guest_group }}"
+    mode: "0750"
+
+- name: Guest kernel and root filesystem
+  ansible.builtin.copy:
+    src: "{{ crateward_release_dir }}/guest/{{ item }}"
+    dest: "{{ guest_root }}/{{ guest_version }}/{{ item }}"
+    owner: "{{ guest_owner }}"
+    group: "{{ guest_group }}"
+    mode: "0640"
+  loop: [kernel.bzImage, rootfs.erofs]
+
+- name: The fake internet's TLS authority, readable by the orchestrator only
+  ansible.builtin.copy:
+    src: "{{ crateward_release_dir }}/guest/authority.pem"
+    dest: "{{ guest_root }}/{{ guest_version }}/authority.pem"
+    owner: "{{ authority_owner }}"
+    group: "{{ guest_group }}"
+    mode: "0600"
+
+- name: The guest version in use
+  ansible.builtin.stat:
+    path: "{{ guest_root }}/current"
+  register: current_guest
+
+- name: Keep the version in use as the previous one
+  ansible.builtin.file:
+    src: "{{ current_guest.stat.lnk_source }}"
+    dest: "{{ guest_root }}/previous"
+    state: link
+    force: true
+  when:
+    - current_guest.stat.islnk is defined and current_guest.stat.islnk
+    - current_guest.stat.lnk_source | basename != guest_version
+
+- name: Use this guest version
+  ansible.builtin.file:
+    src: "{{ guest_root }}/{{ guest_version }}"
+    dest: "{{ guest_root }}/current"
+    state: link
+    force: true
+  register: guest_switched
+
+- name: The guest versions on the host
+  ansible.builtin.find:
+    paths: "{{ guest_root }}"
+    file_type: directory
+  register: guest_versions
+
+- name: The previous version
+  ansible.builtin.stat:
+    path: "{{ guest_root }}/previous"
+  register: previous_guest
+
+- name: Only the current and the previous version stay
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ guest_versions.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - item.path | basename != guest_version
+    - not (previous_guest.stat.islnk | default(false)
+      and item.path == previous_guest.stat.lnk_source)

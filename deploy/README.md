@@ -5,6 +5,7 @@ applies it as root; nothing here runs automatically.
 
 | Path | What |
 |------|------|
+| `ansible/rollback.yml` | Switches the guest files back to the previous version and restarts the orchestrator ([ADR 0024](../docs/adr/0024-guest-image-versions-and-rollback.md)) |
 | `ansible/site.yml` | The whole host: kernel command line, swap and KSM, packages, users, directories, the sandbox tmpfs, PostgreSQL with data checksums, the release bundle, the configuration, WireGuard, SSH, the firewall, the units, the integrity manifest |
 | `ansible/vars.example.yml` | Every variable of the playbook |
 | `systemd/` | One hardened unit per component, the egress refresh and the daily database dump |
@@ -34,6 +35,14 @@ binaries or configuration changed; `systemctl restart` waits until the
 orchestrator has drained its jobs. The playbook records the integrity
 manifest after installing, so the supervisor does not quarantine the
 pipeline for the new binaries.
+
+## Rolling back the guest
+
+The guest kernel, root filesystem and authority are installed per version
+under `/usr/local/lib/crateward/guest/`, with `current` and `previous`
+links. After a deploy, the orchestrator runs the canaries before any job.
+If they fail, the pipeline pauses and the alert says so; then run
+`ansible-playbook -i inventory.yml deploy/ansible/rollback.yml`.
 
 ## What the playbook cannot know
 

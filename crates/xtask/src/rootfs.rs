@@ -430,3 +430,58 @@ fn stage_trust(root: &Path, base: &Path, work: &Path) -> Result<PathBuf, TaskErr
     }
     Ok(staging)
 }
+
+/// Moves the Debian snapshot pin of the root filesystem to today (UTC), the
+/// first step of the image refresh (ADR 0024). The build, the canary and
+/// the commit that follow stay deliberate steps.
+///
+/// # Errors
+///
+/// Fails if the pin file cannot be read, has no snapshot line, or the date
+/// cannot be read.
+pub fn bump_snapshot(root: &Path) -> Result<(), TaskError> {
+    let path = root.join("guest").join("rootfs").join("rootfs.toml");
+    let text = std::fs::read_to_string(&path).map_err(|e| TaskError::Io(path.clone(), e))?;
+    let out = std::process::Command::new("date")
+        .args(["--utc", "+%Y%m%dT000000Z"])
+        .output()
+        .map_err(|e| TaskError::Command(format!("date: {e}")))?;
+    let today = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    let (updated, old) = with_snapshot(&text, &today)
+        .ok_or_else(|| TaskError::Check(format!("{}: no snapshot line", path.display())))?;
+    std::fs::write(&path, updated).map_err(|e| TaskError::Io(path.clone(), e))?;
+    eprintln!("xtask: Debian snapshot {old} -> {today}");
+    eprintln!("xtask: next: cargo xtask rootfs, cargo xtask canary, commit, cargo xtask release");
+    Ok(())
+}
+
+/// `text` with its `snapshot = "..."` line set to `snapshot`, and the old
+/// value.
+fn with_snapshot(text: &str, snapshot: &str) -> Option<(String, String)> {
+    let mut old = None;
+    let lines: Vec<String> = text
+        .lines()
+        .map(|line| match line.strip_prefix("snapshot = \"") {
+            Some(rest) if old.is_none() => {
+                old = rest.strip_suffix('"').map(str::to_owned);
+                format!("snapshot = \"{snapshot}\"")
+            }
+            _ => line.to_owned(),
+        })
+        .collect();
+    Some((lines.join("\n") + "\n", old?))
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_snapshot_line_changes() {
+        let text = "# c\n[debian]\nsuite = \"trixie\"\nsnapshot = \"20260924T000000Z\"\nvariant = \"minbase\"\n";
+        let (updated, old) = with_snapshot(text, "20261001T000000Z").unwrap();
+        assert_eq!(old, "20260924T000000Z");
+        assert_eq!(updated, text.replace("20260924", "20261001"));
+        assert!(with_snapshot("[debian]\n", "x").is_none());
+    }
+}

@@ -30,3 +30,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0021](0021-explainable-scoring.md) | Explainable scoring, behavior profiles and the review inbox | Accepted |
 | [0022](0022-dashboard-and-public-export.md) | The dashboard and the public export | Accepted |
 | [0023](0023-host-escape-detection-and-retention.md) | Host escape detection and retention | Accepted |
+| [0024](0024-guest-image-versions-and-rollback.md) | Guest image versions, refresh and rollback | Accepted |

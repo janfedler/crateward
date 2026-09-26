@@ -57,7 +57,7 @@ versions).
 | of which run reports, before trimming | 24 MB | 48 kB per run, up to 255 kB |
 | of which static reports | 14 MB | 6 MB |
 | Behavior profiles and diffs | inside the run reports and verdicts | |
-| Image archive (last two promoted versions) | not built yet (M8) | |
+| Guest image versions (current and previous) | about 800 MB each | |
 | Database dump (latest only, streamed) | about the database size, compressed | |
 
 Retention trims the raw part of unflagged run reports (the process list
@@ -83,7 +83,7 @@ publishes the share of versions with dynamic results.
 | Database dump (`crateward-db-dump.timer`, to `/var/backups/crateward`) | daily |
 | Egress allowlist refresh (`crateward-egress.timer`) | every 2 minutes |
 | Canaries | hourly |
-| Image refresh (Debian packages, toolchain) | weekly, at night |
+| Image refresh: `cargo xtask bump-debian-snapshot`, rootfs build, canary, release, deploy ([ADR 0024](adr/0024-guest-image-versions-and-rollback.md)) | weekly, by the maintainer |
 | Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs; jobs wait meanwhile); stop and start the orchestrator to refresh it |
 | Guest kernel rebuild | only when its version or configuration changes |
 | Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every supervisor round |

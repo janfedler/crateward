@@ -88,6 +88,15 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         .map_err(fatal)?;
     runtime.block_on(async {
         let sandbox = &config.sandbox;
+        // A deploy switches the guest files by moving a link (ADR 0024).
+        // Resolving them once keeps a running orchestrator on the files its
+        // base snapshot was made from.
+        let resolve = |path: &std::path::Path| {
+            std::fs::canonicalize(path).map_err(|e| fatal(format!("{}: {e}", path.display())))
+        };
+        let kernel_image = resolve(&sandbox.kernel_image)?;
+        let rootfs_image = resolve(&sandbox.rootfs_image)?;
+        let authority = resolve(&sandbox.fake_internet_authority)?;
         let cgroups = CgroupTree::own().map_err(fatal)?;
         let memory_mib = u32::try_from(sandbox.memory_mib_per_slot).map_err(fatal)?;
         let fc = FirecrackerConfig {
@@ -109,7 +118,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 .max(sandbox.warm.as_ref().map_or(0, warm::scratch_mib))
                 << 20,
             fake_internet: Some(sandbox.fake_internet_bin.clone()),
-            authority: Some(sandbox.fake_internet_authority.clone()),
+            authority: Some(authority),
         };
         // A jail has no dynamic loader, so everything executed in one must
         // be static.
@@ -146,8 +155,8 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             std::fs::File::create(file).map_err(fatal)?;
         }
         let boot = BootSpec {
-            kernel: sandbox.kernel_image.clone(),
-            rootfs: sandbox.rootfs_image.clone(),
+            kernel: kernel_image,
+            rootfs: rootfs_image,
             boot_args: format!(
                 "{} {}",
                 BootSpec::default_boot_args(AGENT_PATH),
@@ -238,6 +247,13 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
 
 
+        let canary_interval = Duration::from_secs(sandbox.canary_interval_minutes * 60);
+        // No slot claims a job before the first canaries ran on these guest
+        // files: a new version must pass them first (ADR 0024). A failure
+        // pauses the stage, which the workers then honor.
+        let (canaries_ran, canaries_ran_rx) =
+            tokio::sync::watch::channel(canary_interval.is_zero());
+        let canaries_ran = Arc::new(canaries_ran);
         let mut tasks = Vec::new();
         for slot in 0..sandbox.slots {
             let store = Store::connect(url).await.map_err(fatal)?;
@@ -253,9 +269,20 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 lease,
             );
             let stop = Arc::clone(&stop);
-            let canary_interval = Duration::from_secs(sandbox.canary_interval_minutes * 60);
+            let canaries_ran = Arc::clone(&canaries_ran);
+            let mut canaries_ran_rx = canaries_ran_rx.clone();
             tasks.push(tokio::spawn(async move {
                 let mut last_reap = tokio::time::Instant::now();
+                if slot != 0 {
+                    while !*canaries_ran_rx.borrow() && !stop.load(Ordering::SeqCst) {
+                        // Wakes on the signal, or every second to see a stop.
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(1),
+                            canaries_ran_rx.changed(),
+                        )
+                        .await;
+                    }
+                }
                 // Canaries run first, right after the warm build, then on
                 // their schedule, all in slot 0 between jobs.
                 let mut last_canary: Option<tokio::time::Instant> = None;
@@ -267,6 +294,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                             return Err(error);
                         }
                         last_canary = Some(tokio::time::Instant::now());
+                        canaries_ran.send_replace(true);
                     }
                     if slot == 0 && last_reap.elapsed() >= Duration::from_secs(60) {
                         let policies = worker.policies.clone();

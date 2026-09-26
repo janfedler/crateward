@@ -65,9 +65,14 @@ pass again (they run every `sandbox.canary_interval_minutes`).
 
 **What to do.**
 1. Compare the canary run with the last passing run on the Operations page.
-2. If the rollback restored passing canaries, investigate the new image
-   offline before the next weekly refresh.
-3. If the canaries still fail on the old image, suspect the host (kernel
+2. If a deploy just changed the guest version, roll it back:
+   `ansible-playbook -i inventory.yml deploy/ansible/rollback.yml`
+   ([ADR 0024](adr/0024-guest-image-versions-and-rollback.md)). The
+   orchestrator restarts on the previous version and runs the canaries
+   first.
+3. If the rollback restored passing canaries, investigate the new image
+   offline before the next refresh.
+4. If the canaries still fail on the old image, suspect the host (kernel
    update, disk, memory) and check the other alerts.
 
 ## High risk verdict

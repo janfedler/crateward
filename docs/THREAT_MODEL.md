@@ -124,8 +124,8 @@ test. Nothing is marked Built before the code exists.
 | The base snapshot is a fresh clean boot; the warm image is a drive switched in per job, so no memory of the VM that ran build scripts reaches a job | Built | M1.5 |
 | Warm set limited to versions Crateward stored at least 14 days ago, locked by several recent jobs, with a static report without high findings; the crate under analysis is replaced by a stub and its units are never cached | Tested | M1.5 |
 | The warm build is analyzed like a job (trace, fake internet, honeytokens, scratch scan) and used only if all are clean; a promotion check runs one job with the image before any other job sees it | Tested | M1.5 |
-| Warm images named by their BLAKE3 digest; a signed manifest follows when images outlive the orchestrator process | Partly built | M1.5, M8 |
-| Hourly canaries (known bad, known good); a wrong result pauses the producing stages until they pass again. Image promotion and rollback follow with the weekly refresh | Partly built | M5, M8 |
+| Warm images named by their BLAKE3 digest and never outliving the orchestrator process, so no signed manifest is needed ([ADR 0024](adr/0024-guest-image-versions-and-rollback.md)) | Built | M1.5, M8 |
+| Hourly canaries (known bad, known good); a wrong result pauses the producing stages until they pass again. After every start no slot takes a job before the first canaries ran, so a new guest version is promoted only by passing them; `deploy/ansible/rollback.yml` switches back ([ADR 0024](adr/0024-guest-image-versions-and-rollback.md)) | Built | M5, M8 |
 
 ### Downloads (T5; B7)
 

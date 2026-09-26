@@ -60,6 +60,9 @@ enum Task {
     GuestKernel,
     /// Build the guest root filesystem image from the pins in guest/rootfs.
     Rootfs,
+    /// Move the root filesystem's Debian snapshot pin to today (image
+    /// refresh, ADR 0024).
+    BumpDebianSnapshot,
     /// Run sequential jailed jobs on this host and check for leaked resources.
     Soak {
         /// Number of sequential jobs.
@@ -109,6 +112,7 @@ fn main() -> ExitCode {
         Task::Firecracker => firecracker::run(&workspace_root()),
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
         Task::Rootfs => rootfs::run(&workspace_root()),
+        Task::BumpDebianSnapshot => rootfs::bump_snapshot(&workspace_root()),
         Task::Soak { jobs } => soak(jobs),
         Task::Canary => canary(),
         Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
