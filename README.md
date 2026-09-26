@@ -131,7 +131,7 @@ cargo run -p crateward_cli -- state-machine diagram
 | M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | done: breakers, quarantine, pauses, canaries, deadlines, alerts, heartbeat (ADR 0020) |
 | M6 | Analyzer and web: scoring, profiles, dashboard, public export | done: scoring and review inbox (ADR 0021), dashboard (loopback, reached through an SSH tunnel) and public export (ADR 0022) |
 | M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | done: 13 fuzz targets, host escape detection and retention (ADR 0023), [security checklist](docs/SECURITY_CHECKLIST.md), measured storage budget; the offsite backup target waits for the maintainer |
-| M8 | Launch: deployment, runbook, disclosure workflow, write up | in progress: Ansible, hardened units and firewall ([deploy/](deploy/)), release bundles with SBOM, guest versions with rollback (ADR 0024), the public about page; applying them to the server waits for the maintainer |
+| M8 | Launch: deployment, runbook, disclosure workflow, write up | built, not deployed: Ansible, hardened units and firewall ([deploy/](deploy/)), release bundles with SBOM, guest versions with rollback (ADR 0024), evidence packs and disclosure records, the public about page, a [write up draft](docs/WRITEUP.md); applying them to the server waits for the maintainer |
 
 ## Documentation
 
@@ -140,6 +140,7 @@ cargo run -p crateward_cli -- state-machine diagram
 * [Runbook](docs/RUNBOOK.md), [operations](docs/OPERATIONS.md) and [testing](docs/TESTING.md)
 * [Dependencies](docs/DEPENDENCIES.md), one line of justification each
 * [Architecture decision records](docs/adr/README.md)
+* [Launch write up](docs/WRITEUP.md) (draft), [deployment](deploy/README.md)
 
 ## License
 
