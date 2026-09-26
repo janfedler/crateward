@@ -77,8 +77,8 @@ pass again (they run every `sandbox.canary_interval_minutes`).
 
 ## High risk verdict
 
-**Meaning.** A verdict needs human review. It is in the "needs you" inbox
-with an evidence pack.
+**Meaning.** A verdict needs human review. It is in the "needs you" inbox;
+`crateward evidence <job> --out <dir>` writes its evidence pack.
 
 **Already done.** Nothing was published. The verdict stays private.
 

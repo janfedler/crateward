@@ -145,7 +145,7 @@ test. Nothing is marked Built before the code exists.
 | Alerts carry no crate names or details before disclosure; details stay behind WireGuard | Tested | M5 |
 | ntfy topic of at least 32 random characters; configuration rejects shorter topics | Tested | M0 |
 | Secrets redacted from `Debug` output and logs | Tested | M0 |
-| Public site is a static export of aggregate statistics and disclosed findings only, pushed with a deploy key limited to one repository | Built (push waits for the repository) | M6 |
+| Public site is a static export of aggregate statistics and disclosed findings only, pushed with a deploy key limited to one repository. A finding is listed only after it was reported and resolved; the database refuses to publish it earlier (`crateward disclosure`) | Tested (push waits for the repository) | M6, M8 |
 
 A compromised external service can deface the public site, suppress alerts or
 forge them. It cannot reach the server or read undisclosed findings.

@@ -1,7 +1,9 @@
 # Finding: `<crate>` `<versions>`
 
-<!-- Copy this file to findings/<year>-<crate>.md. Publish only after the
-disclosure workflow in DISCLOSURE.md is complete. -->
+<!-- Write the finding from this outline as findings/<slug>/index.html in
+the site repository; the site is served without Jekyll, so Markdown is not
+rendered. Publish only after the disclosure workflow in DISCLOSURE.md is
+complete, with `crateward disclosure publish <job> --slug <slug>`. -->
 
 * **Crate:** `<crate>` on crates.io
 * **Affected versions:** `<versions>`

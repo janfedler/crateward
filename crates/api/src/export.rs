@@ -3,16 +3,17 @@
 //! The server never serves the public. It renders a few static files and,
 //! when `[export]` is configured, pushes them to the site repository with a
 //! deploy key that can write to that repository only; GitHub Pages serves
-//! them. The export contains counts only: no crate names, no evidence, no
-//! undisclosed findings. Findings are added by hand after disclosure
-//! (DISCLOSURE.md).
+//! them. The export contains counts, and the crate names of findings only
+//! once the maintainer published them after disclosure (`crateward
+//! disclosure publish`, DISCLOSURE.md); no evidence, no undisclosed
+//! findings. The finding pages themselves are written by hand.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use askama::Template;
 use crateward_core::config::ExportConfig;
-use crateward_core::store::{PublicStats, Store, StoreError};
+use crateward_core::store::{PublicStats, PublishedFinding, Store, StoreError};
 
 /// The site's domain, written to `CNAME` for GitHub Pages.
 pub const DOMAIN: &str = "crateward.com";
@@ -26,7 +27,18 @@ struct SitePage {
     levels: Vec<(String, i64)>,
     daily: Vec<(String, i64)>,
     canaries: String,
+    findings: Vec<FindingLine>,
     generated: String,
+}
+
+/// One published finding on the public page.
+struct FindingLine {
+    name: String,
+    version: String,
+    kind: &'static str,
+    reported_on: String,
+    published_on: String,
+    slug: String,
 }
 
 /// What Crateward is and does; the user agent of every request to
@@ -52,6 +64,7 @@ fn coverage_label(kind: &str) -> String {
 pub fn render(
     stats: &PublicStats,
     canaries: &[(String, bool, i64)],
+    findings: &[PublishedFinding],
     generated: &str,
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
     let total = stats.finished.max(1);
@@ -73,6 +86,17 @@ pub fn render(
         levels: stats.levels.clone(),
         daily: stats.daily.clone(),
         canaries: canary_text,
+        findings: findings
+            .iter()
+            .map(|f| FindingLine {
+                name: f.name.clone(),
+                version: f.version.clone(),
+                kind: f.kind.name(),
+                reported_on: f.reported_on.clone(),
+                published_on: f.published_on.clone(),
+                slug: f.slug.clone(),
+            })
+            .collect(),
         generated: generated.to_owned(),
     };
     let json = serde_json::json!({
@@ -83,6 +107,14 @@ pub fn render(
         "levels": stats.levels.iter().map(|(l, n)| serde_json::json!({"level": l, "count": n})).collect::<Vec<_>>(),
         "daily": stats.daily.iter().map(|(d, n)| serde_json::json!({"day": d, "finished": n})).collect::<Vec<_>>(),
         "canaries_pass": !canaries.is_empty() && canaries.iter().all(|(_, p, _)| *p),
+        "findings": findings.iter().map(|f| serde_json::json!({
+            "crate": f.name,
+            "version": f.version,
+            "kind": f.kind.name(),
+            "reported": f.reported_on,
+            "published": f.published_on,
+            "page": format!("findings/{}/", f.slug),
+        })).collect::<Vec<_>>(),
     });
     Ok(vec![
         (
@@ -218,8 +250,12 @@ pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, String> {
         .await
         .map_err(|e: StoreError| e.to_string())?;
     let canaries = store.latest_canaries().await.map_err(|e| e.to_string())?;
+    let findings = store
+        .published_findings()
+        .await
+        .map_err(|e| e.to_string())?;
     let now = store.now_epoch().await.map_err(|e| e.to_string())?;
-    render(&stats, &canaries, &format_utc(now))
+    render(&stats, &canaries, &findings, &format_utc(now))
 }
 
 /// Seconds since the epoch as `YYYY-MM-DD HH:MM UTC`.
@@ -288,7 +324,7 @@ mod tests {
             levels: vec![("none".into(), 7), ("high".into(), 1)],
             daily: vec![("2026-09-25".into(), 8)],
         };
-        let files = render(&stats, &[("canary-exfil".into(), true, 0)], "now").unwrap();
+        let files = render(&stats, &[("canary-exfil".into(), true, 0)], &[], "now").unwrap();
         let index = String::from_utf8(files[0].1.clone()).unwrap();
         assert!(index.contains("Built and traced in a microVM on Linux"));
         assert!(index.contains("(25%)"));
@@ -313,5 +349,33 @@ mod tests {
         assert!(
             about.contains("crateward/0.1 (+https://crateward.com/about; security@crateward.com)")
         );
+    }
+
+    #[test]
+    fn published_findings_are_listed_with_their_page() {
+        use crateward_core::store::DisclosureKind;
+        let stats = PublicStats {
+            versions: 1,
+            finished: 1,
+            coverage: Vec::new(),
+            levels: Vec::new(),
+            daily: Vec::new(),
+        };
+        let finding = PublishedFinding {
+            name: "evil<b>".into(),
+            version: "0.1.0".into(),
+            kind: DisclosureKind::Malicious,
+            reported_on: "2026-09-20".into(),
+            published_on: "2026-10-04".into(),
+            slug: "evil-0-1-0".into(),
+        };
+        let files = render(&stats, &[], &[finding], "now").unwrap();
+        let index = String::from_utf8(files[0].1.clone()).unwrap();
+        assert!(index.contains(r#"<a href="findings/evil-0-1-0/">details</a>"#));
+        // Crate names are escaped like any other text.
+        assert!(index.contains("evil&#60;b&#62;") || index.contains("evil&lt;b&gt;"));
+        assert!(!index.contains("None yet."));
+        let json: serde_json::Value = serde_json::from_slice(&files[2].1).unwrap();
+        assert_eq!(json["findings"][0]["page"], "findings/evil-0-1-0/");
     }
 }

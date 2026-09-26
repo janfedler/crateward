@@ -270,6 +270,25 @@ async fn job(
     };
     let verdict = store.verdict(job.id).await?;
     let static_report = store.static_report(&job.cksum).await?;
+    let disclosure = store
+        .disclosure(job.id)
+        .await?
+        .map(|d| {
+            let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
+            vec![
+                ("Kind".to_owned(), d.kind.name().to_owned()),
+                (
+                    "Reported".to_owned(),
+                    format!("{} to {}", d.reported_on, d.reported_to),
+                ),
+                ("Reference".to_owned(), dash(d.reference)),
+                ("Resolved".to_owned(), dash(d.resolved_on)),
+                ("Published".to_owned(), dash(d.published_on)),
+                ("Page".to_owned(), dash(d.slug)),
+                ("Note".to_owned(), dash(d.note)),
+            ]
+        })
+        .unwrap_or_default();
     let now = std::time::SystemTime::now();
     let timeline = store
         .events(job.id)
@@ -345,6 +364,7 @@ async fn job(
         findings: static_report.map(|(_, r)| findings(&r)).unwrap_or_default(),
         timeline,
         runs,
+        disclosure,
     };
     Ok(Html(page.render()?).into_response())
 }
@@ -417,7 +437,10 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let url = config.database.url.expose_secret();
         let reader = Store::connect(url).await.map_err(fatal)?;
         reader.make_read_only().await.map_err(fatal)?;
-        let writer = Store::connect(url).await.map_err(fatal)?;
+        let mut writer = Store::connect(url).await.map_err(fatal)?;
+        // Like every service, the dashboard brings the schema up to date, so
+        // it never queries a table that a later migration adds.
+        writer.migrate().await.map_err(fatal)?;
         // The public export runs next to the dashboard, on its own
         // read only connection.
         let exporter = Store::connect(url).await.map_err(fatal)?;

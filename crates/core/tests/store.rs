@@ -16,11 +16,12 @@ use std::time::Duration;
 use crateward_core::breaker::{BreakerState, Counts};
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
-use crateward_core::job::{JobEvent, JobState, Limits, Stage, StageLimits, Triage};
+use crateward_core::job::{JobEvent, JobId, JobState, Limits, Stage, StageLimits, Triage};
 use crateward_core::name::CrateName;
 use crateward_core::retry::RetryPolicy;
 use crateward_core::store::{
-    AlertOutcome, CrateFile, NewJob, PauseReason, Policies, Review, Store, StoreError,
+    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, NewJob, PauseReason, Policies,
+    Review, Store, StoreError,
 };
 use crateward_core::verdict::{Coverage, RiskLevel, Verdict};
 
@@ -115,7 +116,10 @@ async fn migrations_are_idempotent() {
         return;
     };
     let mut store = db.store().await;
-    assert_eq!(store.migrate().await.unwrap(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(
+        store.migrate().await.unwrap(),
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+    );
     assert!(store.migrate().await.unwrap().is_empty());
     db.drop().await;
 }
@@ -801,5 +805,101 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
         .collect();
     assert!(!outdated.contains(&jobs[0]));
     assert!(outdated.contains(&jobs[2]));
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn findings_are_reported_resolved_and_only_then_published() {
+    let Some(db) = TestDb::new().await else {
+        return;
+    };
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let job = store
+        .enqueue(&new_job("evil", "0.1.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let other = store
+        .enqueue(&new_job("worse", "0.2.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let verdict = Verdict {
+        score: 90,
+        level: RiskLevel::from_score(90),
+        coverage: Coverage::DynamicLinux,
+        evidence: Vec::new(),
+        profile: Vec::new(),
+        new_behavior: Vec::new(),
+        analyzer_version: 1,
+    };
+    let report = |job| {
+        let store = &store;
+        async move {
+            store
+                .record_report(job, DisclosureKind::Malicious, "help@crates.io", None, None)
+                .await
+                .unwrap()
+        }
+    };
+    // No verdict, then an unconfirmed one: nothing is reported.
+    assert_eq!(report(job).await, Err(DisclosureRefusal::NotConfirmed));
+    store.record_verdict(job, &verdict).await.unwrap();
+    store.set_review(job, Review::Pending, None).await.unwrap();
+    assert_eq!(report(job).await, Err(DisclosureRefusal::NotConfirmed));
+    // Publishing needs a report, then a resolution.
+    assert_eq!(
+        store.publish_finding(job, "evil").await.unwrap(),
+        Err(DisclosureRefusal::NotReported)
+    );
+    assert_eq!(
+        store.mark_resolved(job, None).await.unwrap(),
+        Err(DisclosureRefusal::NotReported)
+    );
+    store
+        .set_review(job, Review::Confirmed, None)
+        .await
+        .unwrap();
+    assert_eq!(report(job).await, Ok(()));
+    assert_eq!(
+        store.publish_finding(job, "evil").await.unwrap(),
+        Err(DisclosureRefusal::NotResolved)
+    );
+    assert!(store.published_findings().await.unwrap().is_empty());
+    assert_eq!(
+        store.mark_resolved(job, Some("CRATES-1")).await.unwrap(),
+        Ok(())
+    );
+    assert_eq!(
+        store.publish_finding(job, "Bad/Slug").await.unwrap(),
+        Err(DisclosureRefusal::BadSlug)
+    );
+    assert_eq!(
+        store.publish_finding(job, "evil-0-1-0").await.unwrap(),
+        Ok(())
+    );
+    let record = store.disclosure(job).await.unwrap().unwrap();
+    assert_eq!(record.reference.as_deref(), Some("CRATES-1"));
+    assert!(record.resolved_on.is_some() && record.published_on.is_some());
+    let published = store.published_findings().await.unwrap();
+    assert_eq!(published.len(), 1);
+    assert_eq!(
+        (published[0].name.as_str(), published[0].slug.as_str()),
+        ("evil", "evil-0-1-0")
+    );
+    // A second finding cannot take the same page.
+    store.record_verdict(other, &verdict).await.unwrap();
+    store
+        .set_review(other, Review::Confirmed, None)
+        .await
+        .unwrap();
+    assert_eq!(report(other).await, Ok(()));
+    store.mark_resolved(other, None).await.unwrap().unwrap();
+    assert_eq!(
+        store.publish_finding(other, "evil-0-1-0").await.unwrap(),
+        Err(DisclosureRefusal::SlugTaken)
+    );
+    assert!(store.disclosure(JobId(i64::MAX)).await.unwrap().is_none());
     db.drop().await;
 }

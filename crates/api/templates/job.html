@@ -14,6 +14,20 @@
 </form>
 {% endif %}
 
+{% if review == "confirmed" %}
+<h2>Disclosure</h2>
+{% if disclosure.is_empty() %}
+<p class="muted">Not reported yet. Write the evidence pack with
+<code>crateward evidence {{ id }} --out &lt;dir&gt;</code>, report it
+(DISCLOSURE.md), then record it with
+<code>crateward disclosure report {{ id }} --kind &lt;malicious|vulnerability&gt; --to &lt;recipient&gt;</code>.</p>
+{% else %}
+<table>
+{% for (label, value) in disclosure %}<tr><th>{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+{% endif %}
+
 <h2>Evidence</h2>
 {% if evidence.is_empty() %}<p class="muted">No evidence.</p>{% else %}
 <table>

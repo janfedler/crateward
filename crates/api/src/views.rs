@@ -181,4 +181,6 @@ pub struct JobPage {
     pub timeline: Vec<(String, String, String, String, String)>,
     /// Run kind and its report, pretty printed.
     pub runs: Vec<(String, String)>,
+    /// The disclosure record as label and value, empty without a report.
+    pub disclosure: Vec<(String, String)>,
 }

@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+mod disclosure;
 mod egress;
 
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use crateward_core::breaker::BreakerState;
 use crateward_core::config::{Config, DEFAULT_CONFIG_PATH};
-use crateward_core::job::{JobState, Stage, mermaid_diagram};
+use crateward_core::job::{JobId, JobState, Stage, mermaid_diagram};
 use crateward_core::store::{PauseReason, Store};
 use secrecy::ExposeSecret;
 
@@ -84,6 +85,25 @@ enum Command {
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
+    /// Write the evidence pack of a job for a report (DISCLOSURE.md).
+    Evidence {
+        /// The job's number, as the dashboard shows it.
+        job: i64,
+        /// A new directory for the pack.
+        #[arg(long)]
+        out: PathBuf,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
+    /// Record the steps of a disclosure (DISCLOSURE.md).
+    Disclosure {
+        #[command(subcommand)]
+        command: DisclosureCommand,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+    },
     /// Circuit breaker control.
     Breaker {
         #[command(subcommand)]
@@ -114,6 +134,49 @@ enum BreakerCommand {
     Close {
         /// The stage, for example `sandbox`.
         stage: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DisclosureCommand {
+    /// A confirmed finding was reported.
+    Report {
+        /// The job's number.
+        job: i64,
+        /// `malicious` (reported to the crates.io team) or `vulnerability`
+        /// (reported to the owners).
+        #[arg(long)]
+        kind: String,
+        /// Who received the report, for example `help@crates.io`.
+        #[arg(long)]
+        to: String,
+        /// The recipient's ticket or advisory number.
+        #[arg(long)]
+        reference: Option<String>,
+        /// A note for the record.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// The recipient acted: the crate was removed or a fix released.
+    Resolved {
+        /// The job's number.
+        job: i64,
+        /// The recipient's ticket or advisory number.
+        #[arg(long)]
+        reference: Option<String>,
+    },
+    /// The finding page `findings/<slug>/` is written; list it publicly.
+    Publish {
+        /// The job's number.
+        job: i64,
+        /// Page name: lowercase letters, digits and dashes.
+        #[arg(long)]
+        slug: String,
+    },
+    /// Show a job's disclosure record.
+    Show {
+        /// The job's number.
+        job: i64,
     },
 }
 
@@ -278,6 +341,81 @@ fn main() -> ExitCode {
             Ok(())
         }),
         Command::Integrity { command, config } => integrity(&config, &command),
+        Command::Evidence { job, out, config } => {
+            let data_dir = match Config::load(&config) {
+                Ok(loaded) => loaded.instance.data_dir,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::from(EXIT_CONFIG);
+                }
+            };
+            with_store(&config, |store| async move {
+                let written =
+                    disclosure::evidence_pack(&store, &data_dir, JobId(job), &out).await?;
+                out!("wrote {} files to {}", written.len(), out.display());
+                for name in written {
+                    out!("  {name}");
+                }
+                Ok(())
+            })
+        }
+        Command::Disclosure { command, config } => with_store(&config, |store| async move {
+            let e = |error: crateward_core::store::StoreError| error.to_string();
+            match command {
+                DisclosureCommand::Report {
+                    job,
+                    kind,
+                    to,
+                    reference,
+                    note,
+                } => {
+                    let kind = disclosure::kind(&kind)?;
+                    disclosure::refused(
+                        store
+                            .record_report(
+                                JobId(job),
+                                kind,
+                                &to,
+                                reference.as_deref(),
+                                note.as_deref(),
+                            )
+                            .await
+                            .map_err(e)?,
+                    )?;
+                    out!("recorded the report of job {job} to {to}");
+                }
+                DisclosureCommand::Resolved { job, reference } => {
+                    disclosure::refused(
+                        store
+                            .mark_resolved(JobId(job), reference.as_deref())
+                            .await
+                            .map_err(e)?,
+                    )?;
+                    out!("job {job} is resolved; it may be published");
+                }
+                DisclosureCommand::Publish { job, slug } => {
+                    disclosure::refused(
+                        store.publish_finding(JobId(job), &slug).await.map_err(e)?,
+                    )?;
+                    out!("job {job} is listed as findings/{slug}/ at the next export");
+                }
+                DisclosureCommand::Show { job } => {
+                    match store.disclosure(JobId(job)).await.map_err(e)? {
+                        None => out!("job {job} has no disclosure record"),
+                        Some(d) => {
+                            out!("kind       {}", d.kind.name());
+                            out!("reported   {} to {}", d.reported_on, d.reported_to);
+                            out!("reference  {}", d.reference.as_deref().unwrap_or("-"));
+                            out!("resolved   {}", d.resolved_on.as_deref().unwrap_or("-"));
+                            out!("published  {}", d.published_on.as_deref().unwrap_or("-"));
+                            out!("page       {}", d.slug.as_deref().unwrap_or("-"));
+                            out!("note       {}", d.note.as_deref().unwrap_or("-"));
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }),
         Command::Egress { config } => {
             let config = match Config::load(&config) {
                 Ok(config) => config,

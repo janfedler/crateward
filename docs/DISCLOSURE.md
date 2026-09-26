@@ -19,33 +19,49 @@ asks not to be the first recipient.
 
 ## Steps
 
-1. **Detection.** The analyzer produces a high risk verdict. The supervisor
-   builds an evidence pack (findings with file and line, the event stream,
-   tap capture, disk diff, the original `.crate` file and its checksum) and
-   puts the job into the "needs you" inbox. The alert text carries no crate
-   name.
+1. **Detection.** The analyzer produces a high risk verdict and puts the
+   job into the "needs you" inbox. The alert text carries no crate name.
 2. **Review.** The maintainer checks the evidence on the dashboard. Common
    false positives: `-sys` crates that download prebuilt libraries, build
    scripts that probe the network for feature detection, code generators
    that write outside `OUT_DIR`.
-3. **Confirmation.** The job is rerun in a fresh VM with the full build
-   escalation, unless the finding came from a sandbox escape indicator; such
-   crates are never executed again without a deliberate decision.
+3. **Confirmation.** A high or critical verdict from `cargo check` has
+   already been confirmed automatically by a full build in a fresh VM
+   (ADR 0021), unless the finding came from a sandbox escape indicator;
+   such crates are never executed again without a deliberate decision.
+   After the review, mark the verdict confirmed on the dashboard, then
+   write the evidence pack: `crateward evidence <job> --out <dir>`. It
+   holds the job and its events, the verdict with its evidence, the static
+   report, every VM run (trace, network log, scratch disk scan), the
+   resolution, the original `.crate` file, and `SHA256SUMS`; honeytokens
+   are redacted.
 4. **Report.**
    * Malicious: email `help@crates.io` with the crate name, affected
      versions, the behavior observed, and the evidence pack.
    * Vulnerability: contact the owners through their security policy; after
      they confirm, file a RustSec advisory by pull request to
      `RustSec/advisory-db`.
+
+   Then record it:
+   `crateward disclosure report <job> --kind malicious --to help@crates.io`
+   (or `--kind vulnerability --to <owners>`), with `--reference` once the
+   recipient gives one. Only a confirmed verdict can be recorded.
 5. **Wait.** Default embargo proposals, to be confirmed by the maintainer
    before M8:
    * malicious crates: publish after crates.io has acted, or 14 days after an
      acknowledged report;
    * vulnerabilities: follow the owners' timeline, at most 90 days.
+
+   When the recipient acted, or the embargo passed, record it:
+   `crateward disclosure resolved <job>`.
 6. **Publish.** Write the finding page from
-   [the template](findings/TEMPLATE.md) and export it to crateward.com.
-7. **Record.** Store the report dates and references with the job, so the
-   public page and the dashboard show the timeline.
+   [the template](findings/TEMPLATE.md) into the site repository as
+   `findings/<slug>/index.html`, then run
+   `crateward disclosure publish <job> --slug <slug>`. The database refuses
+   to publish a finding that was not reported and resolved. The next export
+   lists it on crateward.com with its dates and a link to the page.
+7. **Record.** `crateward disclosure show <job>` and the job page on the
+   dashboard show the timeline: reported, reference, resolved, published.
 
 ## Rules
 

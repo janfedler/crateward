@@ -17,6 +17,8 @@ clap.workspace = true
 # The job store, for pipeline status and quarantine control.
 crateward_core = { workspace = true, features = ["store", "integrity"] }
 secrecy.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 
 [lints]

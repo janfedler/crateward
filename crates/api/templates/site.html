@@ -42,7 +42,14 @@ was not built.</p>
 <p>{{ canaries }}</p>
 
 <h2>Published findings</h2>
-<p>None yet.</p>
+{% if findings.is_empty() %}<p>None yet.</p>{% else %}
+<table>
+<tr><th>Crate</th><th>Kind</th><th>Reported</th><th>Published</th><th></th></tr>
+{% for f in findings %}
+<tr><td>{{ f.name }} {{ f.version }}</td><td>{{ f.kind }}</td><td>{{ f.reported_on }}</td><td>{{ f.published_on }}</td><td><a href="findings/{{ f.slug }}/">details</a></td></tr>
+{% endfor %}
+</table>
+{% endif %}
 
 <p class="muted">Updated {{ generated }}. Machine readable: <a href="stats.json">stats.json</a>.
 <a href="about/">About Crateward</a>.

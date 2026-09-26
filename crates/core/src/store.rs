@@ -13,10 +13,12 @@
 
 mod autonomy;
 mod dashboard;
+mod disclosures;
 mod retention;
 mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
 pub use dashboard::{JobFilter, JobRow, Overview, PublicStats};
+pub use disclosures::{Disclosure, DisclosureKind, DisclosureRefusal, PublishedFinding};
 pub use verdicts::Review;
 
 use std::collections::BTreeMap;
@@ -43,6 +45,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (6, include_str!("../migrations/0006_autonomy.sql")),
     (7, include_str!("../migrations/0007_verdicts.sql")),
     (8, include_str!("../migrations/0008_retention.sql")),
+    (9, include_str!("../migrations/0009_disclosures.sql")),
 ];
 
 /// The server's message for database errors, which the error's own

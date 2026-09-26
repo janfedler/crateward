@@ -849,6 +849,8 @@ dependencies = [
  "clap",
  "crateward_core",
  "secrecy",
+ "serde_json",
+ "sha2 0.10.9",
  "tokio",
 ]
 
