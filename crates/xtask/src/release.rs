@@ -188,7 +188,11 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
     for dir in ["ansible", "systemd", "nftables"] {
         copy_tree(&deploy.join(dir), &out.join("deploy").join(dir))?;
     }
-    copy(&deploy.join("README.md"), &out.join("deploy/README.md"), 0o644)?;
+    copy(
+        &deploy.join("README.md"),
+        &out.join("deploy/README.md"),
+        0o644,
+    )?;
     copy(&deploy.join("install.sh"), &out.join("install.sh"), 0o755)?;
     std::fs::create_dir_all(out.join("config")).map_err(io(&out))?;
     copy(
@@ -256,7 +260,10 @@ pub fn pack(bundle: &Path) -> Result<PathBuf, TaskError> {
         )));
     }
     let (Some(parent), Some(name)) = (bundle.parent(), bundle.file_name()) else {
-        return Err(TaskError::Check(format!("{} has no name", bundle.display())));
+        return Err(TaskError::Check(format!(
+            "{} has no name",
+            bundle.display()
+        )));
     };
     let name = name.to_string_lossy().into_owned();
     let archive = parent.join(format!("{name}.tar.gz"));
