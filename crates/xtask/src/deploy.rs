@@ -46,7 +46,7 @@ fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
 pub fn run(root: &Path) -> Result<(), TaskError> {
     let deploy = root.join("deploy");
     let ansible = deploy.join("ansible");
-    for playbook in ["site.yml", "rollback.yml"] {
+    for playbook in ["site.yml", "rollback.yml", "uninstall.yml"] {
         check(
             Command::new("ansible-playbook")
                 .current_dir(&ansible)
@@ -61,6 +61,21 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
             &format!("ansible-playbook --syntax-check {playbook}"),
         )?;
         eprintln!("xtask: {playbook} parses");
+    }
+    // shellcheck is on the CI runners; a development machine may lack it.
+    let script = deploy.join("install.sh");
+    match Command::new("shellcheck").arg(&script).output() {
+        Ok(out) if out.status.success() => eprintln!("xtask: install.sh passes shellcheck"),
+        Ok(out) => {
+            return Err(TaskError::Check(format!(
+                "shellcheck install.sh:\n{}",
+                String::from_utf8_lossy(&out.stdout).trim()
+            )));
+        }
+        Err(_) if std::env::var_os("CI").is_some() => {
+            return Err(TaskError::Command("shellcheck is missing".into()));
+        }
+        Err(_) => eprintln!("xtask: no shellcheck here; CI runs it on install.sh"),
     }
     let units = deploy.join("systemd");
     let mut names: Vec<String> = std::fs::read_dir(&units)
@@ -152,16 +167,19 @@ mod tests {
         assert!(playbook.contains(&format!("cargo-{version}-x86_64-unknown-linux-gnu")));
     }
 
-    /// Every unit the playbook installs exists, and every unit in
-    /// `deploy/systemd` is installed.
+    /// Every unit the playbooks install and remove exists, and every unit
+    /// in `deploy/systemd` is installed and removed.
     #[test]
-    fn the_playbook_installs_every_unit() {
-        let playbook = read("deploy/ansible/site.yml");
+    fn the_playbooks_cover_every_unit() {
+        let playbook = read("deploy/ansible/components.yml");
+        for user in ["site.yml", "uninstall.yml"] {
+            assert!(read(&format!("deploy/ansible/{user}")).contains("    - components.yml\n"));
+        }
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/systemd");
         for entry in std::fs::read_dir(root).unwrap() {
             let name = entry.unwrap().file_name().into_string().unwrap();
             let stem = name.rsplit_once('.').unwrap().0;
-            assert!(playbook.contains(&format!("      - {stem}\n")), "{name}");
+            assert!(playbook.contains(&format!("  - {stem}\n")), "{name}");
         }
     }
 }

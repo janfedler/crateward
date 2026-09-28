@@ -51,9 +51,15 @@ enum Task {
     GuestEbpf,
     /// Vendor all dependencies into a reproducible tarball for a release.
     Vendor,
-    /// Build the release bundle for `deploy/ansible`: binaries, guest
-    /// images, SBOM, vendored sources and checksums.
+    /// Build the release bundle and its tarball: binaries, guest images,
+    /// playbooks, `install.sh`, SBOM, vendored sources and checksums.
     Release,
+    /// Pack a release bundle directory again, for example after adding
+    /// `SHA256SUMS.sig`.
+    Pack {
+        /// The bundle directory under `target/release-bundle`.
+        bundle: PathBuf,
+    },
     /// Download and verify the pinned Firecracker release.
     Firecracker,
     /// Build the guest kernel from the pinned source in guest/kernel.
@@ -112,6 +118,9 @@ fn main() -> ExitCode {
         Task::GuestEbpf => guest_ebpf::run(&workspace_root()),
         Task::Vendor => vendor(),
         Task::Release => release::run_release(&workspace_root()),
+        Task::Pack { bundle } => release::pack(&bundle).map(|archive| {
+            eprintln!("xtask: wrote {}", archive.display());
+        }),
         Task::Firecracker => firecracker::run(&workspace_root()),
         Task::GuestKernel => guest_kernel::run(&workspace_root()),
         Task::Rootfs => rootfs::run(&workspace_root()),

@@ -1,0 +1,24 @@
+---
+# The service users, services and timers, shared by site.yml and
+# uninstall.yml.
+
+crateward_users:
+  - { name: crateward-feed, role: feed }
+  - { name: crateward-fetcher, role: fetcher }
+  - { name: crateward-static, role: static }
+  - { name: crateward-orchestrator, role: orchestrator }
+  - { name: crateward-analyzer, role: analyzer }
+  - { name: crateward-api, role: api }
+  - { name: crateward-supervisor, role: supervisor }
+  - { name: crateward-builder, role: builder }
+crateward_services:
+  - crateward-feed
+  - crateward-fetcher
+  - crateward-static-analysis
+  - crateward-orchestrator
+  - crateward-analyzer
+  - crateward-api
+  - crateward-supervisor
+crateward_timers:
+  - crateward-egress
+  - crateward-db-dump

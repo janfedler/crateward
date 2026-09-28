@@ -158,10 +158,12 @@ other unit sets `RestrictNamespaces=yes`.
 
 ## Deploying a new build
 
-1. `cargo xtask release` builds the release bundle.
-2. `ansible-playbook -i inventory.yml deploy/ansible/site.yml -e @vars.yml`
-   installs it, records the integrity manifest and restarts the services
-   whose binaries or configuration changed.
+1. `cargo xtask release` builds the release bundle and its tarball; sign
+   `SHA256SUMS` and run `cargo xtask pack` ([deploy/README.md](../deploy/README.md)).
+2. `./install.sh` in the unpacked bundle verifies it, runs
+   `deploy/ansible/site.yml` on the server, records the integrity manifest
+   and restarts the services whose binaries or configuration changed.
+   `./install.sh uninstall` removes the software again and keeps the state.
 
 By hand, the same steps are: install the binaries next to each other,
 restart the services, and record the manifest with

@@ -14,7 +14,7 @@ each control exists; this page says how to see that it still holds.
 | No new `unsafe` outside `crateward_core::sandbox` | `unsafe_code` is denied workspace wide; `grep -rn "allow(unsafe_code)" crates` lists only that module |
 | New or updated dependencies are audited | `cargo vet` passes without new exemptions, or each exemption is explained in the commit |
 | The threat model matches the code | every row marked Built or Tested points at code that exists |
-| The release bundle is complete and signed | `cargo xtask release` on a clean tree (no `-dirty` in the name); `sha256sum -c SHA256SUMS`; the signature over `SHA256SUMS` verifies with `ssh-keygen -Y verify` |
+| The release bundle is complete and signed | `cargo xtask release` on a clean tree (no `-dirty` in the name); `sha256sum -c SHA256SUMS`; the signature over `SHA256SUMS` verifies with `ssh-keygen -Y verify`, which `install.sh` also checks |
 
 ## After every deploy
 

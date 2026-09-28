@@ -1,11 +1,14 @@
-//! Builds the release bundle that `deploy/ansible/site.yml` installs.
+//! Builds the release bundle that `install.sh` installs.
 //!
 //! The bundle holds the service binaries (`bin/`), the sandbox binaries
 //! (`sandbox/`), the guest images with the fake internet's authority
-//! (`guest/`), a CycloneDX software bill of materials, the vendored sources
-//! of every dependency, and `SHA256SUMS` over all of it. Signing the sums
-//! file needs the maintainer's key, so this task stops before that and
-//! prints the command.
+//! (`guest/`), the playbooks and units (`deploy/`), the example
+//! configuration (`config/`), `install.sh`, a CycloneDX software bill of
+//! materials, the vendored sources of every dependency, and `SHA256SUMS`
+//! over all of it. The bundle directory is packed into a tarball next to
+//! it. Signing the sums file needs the maintainer's key, so this task stops
+//! before that and prints the commands; `cargo xtask pack` packs the
+//! bundle again once the signature is in it.
 //!
 //! The guest kernel, the root filesystem and Firecracker take long to build
 //! or download; the task expects them from `cargo xtask guest-kernel`,
@@ -181,6 +184,19 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
         0o600,
     )?;
 
+    let deploy = root.join("deploy");
+    for dir in ["ansible", "systemd", "nftables"] {
+        copy_tree(&deploy.join(dir), &out.join("deploy").join(dir))?;
+    }
+    copy(&deploy.join("README.md"), &out.join("deploy/README.md"), 0o644)?;
+    copy(&deploy.join("install.sh"), &out.join("install.sh"), 0o755)?;
+    std::fs::create_dir_all(out.join("config")).map_err(io(&out))?;
+    copy(
+        &root.join("config/crateward.example.toml"),
+        &out.join("config/crateward.example.toml"),
+        0o644,
+    )?;
+
     let sbom = sbom(root, version)?;
     let sbom_path = out.join("sbom.cdx.json");
     std::fs::write(&sbom_path, sbom).map_err(io(&sbom_path))?;
@@ -195,12 +211,77 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
     let sums = sums(&out)?;
     let sums_path = out.join("SHA256SUMS");
     std::fs::write(&sums_path, sums).map_err(io(&sums_path))?;
+    let archive = pack(&out)?;
     eprintln!("xtask: wrote {}", out.display());
+    eprintln!("xtask: wrote {}", archive.display());
     eprintln!(
-        "xtask: sign it with `ssh-keygen -Y sign -f <release key> -n file {}`",
-        sums_path.display()
+        "xtask: to sign it, run `ssh-keygen -Y sign -f <release key> -n file {}`, \
+         then `cargo xtask pack {}`",
+        sums_path.display(),
+        out.display()
     );
     Ok(())
+}
+
+/// Copies the files below `from` to `to`, readable by everyone.
+fn copy_tree(from: &Path, to: &Path) -> Result<(), TaskError> {
+    std::fs::create_dir_all(to).map_err(io(to))?;
+    for entry in std::fs::read_dir(from).map_err(io(from))? {
+        let path = entry.map_err(io(from))?.path();
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        if path.is_dir() {
+            copy_tree(&path, &to.join(name))?;
+        } else {
+            copy(&path, &to.join(name), 0o644)?;
+        }
+    }
+    Ok(())
+}
+
+/// Packs a bundle directory into `<directory>.tar.gz` next to it, with
+/// sorted names, fixed owner and timestamps, so the same bundle gives the
+/// same archive. A `SHA256SUMS.sig` in the directory is packed with it.
+///
+/// # Errors
+///
+/// Fails if the directory has no `SHA256SUMS` or `tar` fails.
+pub fn pack(bundle: &Path) -> Result<PathBuf, TaskError> {
+    let bundle = &bundle.canonicalize().map_err(io(bundle))?;
+    if !bundle.join("SHA256SUMS").is_file() {
+        return Err(TaskError::Check(format!(
+            "{} is not a release bundle: no SHA256SUMS",
+            bundle.display()
+        )));
+    }
+    let (Some(parent), Some(name)) = (bundle.parent(), bundle.file_name()) else {
+        return Err(TaskError::Check(format!("{} has no name", bundle.display())));
+    };
+    let name = name.to_string_lossy().into_owned();
+    let archive = parent.join(format!("{name}.tar.gz"));
+    let archive_arg = archive.to_string_lossy().into_owned();
+    let parent_arg = parent.to_string_lossy().into_owned();
+    run(
+        "tar",
+        &[
+            "--sort=name",
+            "--mtime=@0",
+            "--owner=0",
+            "--group=0",
+            "--numeric-owner",
+            // Root unpacks it as is; nothing in it is writable by others.
+            "--mode=go-w",
+            "-C",
+            &parent_arg,
+            "--use-compress-program=gzip -n",
+            "-cf",
+            &archive_arg,
+            &name,
+        ],
+        &[],
+    )?;
+    Ok(archive)
 }
 
 /// `sha256sum` lines for every file below `dir`, sorted by path.

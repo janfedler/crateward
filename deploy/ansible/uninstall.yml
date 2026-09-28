@@ -1,0 +1,180 @@
+---
+# Removes Crateward from the server. By default it removes the software
+# and keeps every piece of state, so installing again continues where it
+# stopped: the configuration, the database, the data directory, the
+# backups, the service users and the firewall.
+#
+#   ansible-playbook -i inventory.yml uninstall.yml
+#   ansible-playbook -i inventory.yml uninstall.yml -e purge=true
+#
+# With purge=true it also deletes all of that state and the firewall rules.
+# It never touches SSH, WireGuard, or the host settings site.yml made for
+# the sandbox (kernel command line, swap, KSM), because removing them can
+# lock the maintainer out or weaken the host.
+
+- name: Remove Crateward
+  hosts: crateward
+  become: true
+  vars_files:
+    - components.yml
+  vars:
+    purge: false
+    postgresql_version: 17
+
+  handlers:
+    - name: Restart postgresql
+      ansible.builtin.systemd_service:
+        name: postgresql
+        state: restarted
+
+  tasks:
+    # Services. Stopping the orchestrator waits until it has drained its
+    # jobs (TimeoutStopSec).
+
+    - name: Installed units
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ item }}"
+      loop: "{{ (crateward_timers | map('regex_replace', '$', '.timer') | list)
+        + (crateward_services | map('regex_replace', '$', '.service') | list)
+        + (crateward_timers | map('regex_replace', '$', '.service') | list)
+        + ['run-crateward.mount'] }}"
+      register: units
+
+    - name: Stop and disable the units
+      ansible.builtin.systemd_service:
+        name: "{{ item.item }}"
+        state: stopped
+        enabled: false
+      loop: "{{ units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+
+    - name: Remove the unit files
+      ansible.builtin.file:
+        path: "/etc/systemd/system/{{ item.item }}"
+        state: absent
+      loop: "{{ units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+
+    - name: Reload systemd
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    # Software
+
+    - name: Remove the binaries, the sandbox parts and the guest files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /usr/local/bin/crateward
+        - /usr/local/lib/crateward
+        - /var/cache/crateward-cargo.tar.xz
+
+    - name: Unpacked cargo releases
+      ansible.builtin.find:
+        paths: /var/cache
+        patterns: "cargo-*-x86_64-unknown-linux-gnu"
+        file_type: directory
+      register: cargo_dirs
+
+    - name: Remove the unpacked cargo
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ cargo_dirs.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    # State, only with purge=true
+
+    - name: Firewall rules are no longer loaded
+      ansible.builtin.lineinfile:
+        path: /etc/nftables.conf
+        line: 'include "/etc/nftables.d/crateward.nft"'
+        state: absent
+      when: purge | bool
+
+    - name: Remove the firewall rules
+      ansible.builtin.file:
+        path: /etc/nftables.d/crateward.nft
+        state: absent
+      when: purge | bool
+
+    - name: Unload the firewall table
+      ansible.builtin.command: nft destroy table inet crateward
+      changed_when: true
+      when: purge | bool
+
+    - name: Database
+      ansible.builtin.command: >-
+        psql --no-psqlrc --tuples-only --command
+        "SELECT 1 FROM pg_database WHERE datname = 'crateward'"
+      become_user: postgres
+      register: database
+      changed_when: false
+      when: purge | bool
+
+    - name: Drop the database
+      ansible.builtin.command: dropdb crateward
+      become_user: postgres
+      changed_when: true
+      when: purge | bool and database.stdout | trim == "1"
+
+    - name: Drop the role
+      ansible.builtin.command: dropuser --if-exists crateward
+      become_user: postgres
+      changed_when: true
+      when: purge | bool
+
+    - name: Remove the user map
+      ansible.builtin.blockinfile:
+        path: "/etc/postgresql/{{ postgresql_version }}/main/pg_ident.conf"
+        marker: "# {mark} crateward"
+        state: absent
+      notify: Restart postgresql
+      when: purge | bool
+
+    - name: Remove the peer authentication line
+      ansible.builtin.lineinfile:
+        path: "/etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf"
+        line: "local crateward all peer map=crateward"
+        state: absent
+      notify: Restart postgresql
+      when: purge | bool
+
+    - name: Remove the configuration, the data, the backups and the decoys
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/crateward
+        - /var/lib/crateward
+        - /var/backups/crateward
+        - /home/crateward
+        - /etc/postgresql-common/createcluster.d/crateward.conf
+      when: purge | bool
+
+    - name: Remove the service users
+      ansible.builtin.user:
+        name: "{{ item.name }}"
+        state: absent
+      loop: "{{ crateward_users }}"
+      when: purge | bool
+
+    - name: Remove the shared group
+      ansible.builtin.group:
+        name: crateward
+        state: absent
+      when: purge | bool
+
+    - name: Remove the subordinate IDs of the slots
+      ansible.builtin.lineinfile:
+        path: "{{ item }}"
+        regexp: '^crateward-orchestrator:'
+        state: absent
+      loop: [/etc/subuid, /etc/subgid]
+      when: purge | bool

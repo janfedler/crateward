@@ -12,27 +12,9 @@
 - name: Crateward server
   hosts: crateward
   become: true
+  vars_files:
+    - components.yml
   vars:
-    crateward_users:
-      - { name: crateward-feed, role: feed }
-      - { name: crateward-fetcher, role: fetcher }
-      - { name: crateward-static, role: static }
-      - { name: crateward-orchestrator, role: orchestrator }
-      - { name: crateward-analyzer, role: analyzer }
-      - { name: crateward-api, role: api }
-      - { name: crateward-supervisor, role: supervisor }
-      - { name: crateward-builder, role: builder }
-    crateward_services:
-      - crateward-feed
-      - crateward-fetcher
-      - crateward-static-analysis
-      - crateward-orchestrator
-      - crateward-analyzer
-      - crateward-api
-      - crateward-supervisor
-    crateward_timers:
-      - crateward-egress
-      - crateward-db-dump
     # The host cargo for resolution: the same release as rust-toolchain.toml
     # and guest/rootfs/rust.toml (a test in crates/xtask keeps them equal).
     cargo_url: https://static.rust-lang.org/dist/2026-09-03/cargo-1.98.1-x86_64-unknown-linux-gnu.tar.xz
