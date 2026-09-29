@@ -39,10 +39,10 @@ pub mod notify;
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use crateward_core::app::ComponentError;
+use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::breaker::{Change, Counts};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
@@ -252,13 +252,13 @@ async fn heartbeat(
     url: String,
     interval: Duration,
     last_ok: Arc<AtomicI64>,
-    stop: Arc<AtomicBool>,
+    stop: Stop,
 ) {
     let placeholder = checks::is_placeholder_ping(&url);
     if placeholder {
         tracing::warn!("heartbeat.ping_url is the example placeholder; not pinging");
     }
-    while !stop.load(Ordering::SeqCst) {
+    while !stop.is_requested() {
         let fresh = now_secs().saturating_sub(last_ok.load(Ordering::SeqCst))
             <= i64::try_from(interval.as_secs().saturating_mul(3)).unwrap_or(i64::MAX);
         if fresh && !placeholder {
@@ -268,7 +268,7 @@ async fn heartbeat(
                 Err(error) => tracing::warn!(error = %error.without_url(), "heartbeat failed"),
             }
         }
-        tokio::time::sleep(interval).await;
+        stop.sleep(interval).await;
     }
 }
 
@@ -284,11 +284,7 @@ fn now_secs() -> i64 {
 ///
 /// Fails if the database or the HTTP client cannot be set up.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(fatal)?;
+    let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {
         let mut store = Store::connect(config.database.url.expose_secret())
             .await
@@ -317,35 +313,24 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             .map_err(fatal)?,
         };
 
-        let stop = Arc::new(AtomicBool::new(false));
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(fatal)?;
-        let flag = Arc::clone(&stop);
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = tokio::signal::ctrl_c() => {}
-            }
-            flag.store(true, Ordering::SeqCst);
-        });
+        let stop = Stop::install().map_err(fatal)?;
         let last_ok = Arc::new(AtomicI64::new(0));
         tokio::spawn(heartbeat(
             client,
             config.heartbeat.ping_url.expose_secret().to_owned(),
             Duration::from_secs(config.heartbeat.interval_secs),
             Arc::clone(&last_ok),
-            Arc::clone(&stop),
+            stop.clone(),
         ));
 
         let interval = Duration::from_secs(config.supervisor.interval_secs);
-        while !stop.load(Ordering::SeqCst) {
+        while !stop.is_requested() {
             match supervisor.round().await {
                 Ok(()) => last_ok.store(now_secs(), Ordering::SeqCst),
                 // The heartbeat stops by itself; the next round retries.
                 Err(error) => tracing::error!(%error, "supervisor round failed"),
             }
-            tokio::time::sleep(interval).await;
+            stop.sleep(interval).await;
         }
         tracing::info!("stopping");
         Ok(())

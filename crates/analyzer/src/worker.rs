@@ -52,11 +52,6 @@ impl Analyzer {
         }
     }
 
-    /// The store, for reaping.
-    pub fn store(&mut self) -> &mut Store {
-        &mut self.store
-    }
-
     /// The retry policies.
     #[must_use]
     pub fn policies(&self) -> &Policies {

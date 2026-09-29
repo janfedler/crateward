@@ -10,9 +10,9 @@ homepage.workspace = true
 
 [features]
 default = []
-# Process harness for host services: command line parsing and tracing setup.
-# The guest agent does not enable it.
-app = ["dep:clap", "dep:tracing", "dep:tracing-subscriber"]
+# Process harness for host services: command line parsing, tracing setup,
+# the runtime and the stop signal. The guest agent does not enable it.
+app = ["dep:clap", "dep:tokio", "dep:tracing", "dep:tracing-subscriber"]
 # The Postgres job store (ADR 0004). Host services only.
 store = ["dep:tokio-postgres", "dep:tokio", "cratesio", "dep:tracing"]
 # Parsers for crates.io data: sparse index lines and RSS feeds.
@@ -41,7 +41,7 @@ semver = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 serde.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["signal"] }
 tokio-postgres = { workspace = true, optional = true }
 toml.workspace = true
 tracing = { workspace = true, optional = true }

@@ -33,7 +33,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Router, middleware};
-use crateward_core::app::ComponentError;
+use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
@@ -428,11 +428,7 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
 ///
 /// Fails if the database or the listening socket cannot be set up.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(fatal)?;
+    let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {
         let url = config.database.url.expose_secret();
         let reader = Store::connect(url).await.map_err(fatal)?;
@@ -454,20 +450,9 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let listen = config.web.listen;
         let listener = tokio::net::TcpListener::bind(listen).await.map_err(fatal)?;
         tracing::info!(%listen, "dashboard listening");
+        let stop = Stop::install().map_err(fatal)?;
         axum::serve(listener, router(state, listen.port()))
-            .with_graceful_shutdown(async {
-                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-                    Ok(mut terminate) => {
-                        tokio::select! {
-                            _ = terminate.recv() => {}
-                            _ = tokio::signal::ctrl_c() => {}
-                        }
-                    }
-                    Err(_) => {
-                        let _ = tokio::signal::ctrl_c().await;
-                    }
-                }
-            })
+            .with_graceful_shutdown(async move { stop.wait().await })
             .await
             .map_err(fatal)
     })

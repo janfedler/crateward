@@ -346,11 +346,6 @@ impl SandboxWorker {
         }
     }
 
-    /// The job store, for reaping expired leases.
-    pub fn store(&mut self) -> &mut Store {
-        &mut self.store
-    }
-
     /// Runs both canaries (ADR 0020) in this worker's slot and records the
     /// results. Nothing runs while the pipeline is quarantined.
     ///

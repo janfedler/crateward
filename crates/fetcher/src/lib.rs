@@ -30,11 +30,9 @@ pub mod sandboxed;
 pub mod worker;
 
 use std::error::Error;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crateward_core::app::ComponentError;
+use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::http::{ClientConfig, Fetched, PoliteClient};
@@ -122,46 +120,22 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
 /// Returns [`ComponentError::Fatal`] if the fetcher cannot start or the
 /// store fails; systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(fatal)?;
+    let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {
         let mut fetcher = start(config).await.map_err(fatal)?;
-        // A signal stops the loop between jobs: a job in progress finishes,
-        // so no lease is left to expire.
-        let stop = Arc::new(AtomicBool::new(false));
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(fatal)?;
-        let flag = Arc::clone(&stop);
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = tokio::signal::ctrl_c() => {}
+        let stop = Stop::install().map_err(fatal)?;
+        let reaper = Store::connect(config.database.url.expose_secret())
+            .await
+            .map_err(fatal)?;
+        tokio::spawn(app::reap_loop(
+            reaper,
+            fetcher.policies.clone(),
+            stop.clone(),
+        ));
+        while !stop.is_requested() {
+            if !fetcher.run_once().await.map_err(fatal)? {
+                stop.sleep(Duration::from_secs(1)).await;
             }
-            flag.store(true, Ordering::SeqCst);
-        });
-        let mut last_reap = tokio::time::Instant::now();
-        while !stop.load(Ordering::SeqCst) {
-            if last_reap.elapsed() >= Duration::from_secs(60) {
-                let policies = fetcher.policies.clone();
-                let reaped = fetcher
-                    .store()
-                    .reap_expired(&policies)
-                    .await
-                    .map_err(fatal)?;
-                if reaped > 0 {
-                    tracing::warn!(reaped, "reaped expired leases");
-                }
-                last_reap = tokio::time::Instant::now();
-            }
-            let worked = fetcher.run_once().await.map_err(fatal)?;
-            if worked {
-                continue;
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
         tracing::info!("stopping");
         Ok(())

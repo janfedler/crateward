@@ -38,16 +38,18 @@ pub mod trace;
 pub mod warm;
 pub mod worker;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crateward_core::app::ComponentError;
+use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
-use crateward_core::config::Config;
-use crateward_core::store::{Policies, Store};
+use crateward_core::config::{Config, SandboxConfig, WarmConfig};
+use crateward_core::store::{Policies, Store, StoreError};
 use secrecy::ExposeSecret;
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
 
 use crate::backend::{FirecrackerBackend, FirecrackerConfig, VmBackend};
 use crate::cgroup::{CgroupTree, SlotLimits};
@@ -81,253 +83,285 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
     // would tear down the first one's jails. The lock is taken before the
     // runtime exists and dropped after it, when no task runs any more.
     let _instance = lock_instance(&config.sandbox.slots_dir)?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
+    let runtime = app::runtime().map_err(fatal)?;
+    runtime.block_on(serve(config))
+}
+
+async fn serve(config: &Config) -> Result<(), ComponentError> {
+    let sandbox = &config.sandbox;
+    let (backend, work) = boot(config).await?;
+    let mut store = Store::connect(config.database.url.expose_secret())
+        .await
         .map_err(fatal)?;
-    runtime.block_on(async {
-        let sandbox = &config.sandbox;
-        // A deploy switches the guest files by moving a link (ADR 0024).
-        // Resolving them once keeps a running orchestrator on the files its
-        // base snapshot was made from.
-        let resolve = |path: &std::path::Path| {
-            std::fs::canonicalize(path).map_err(|e| fatal(format!("{}: {e}", path.display())))
-        };
-        let kernel_image = resolve(&sandbox.kernel_image)?;
-        let rootfs_image = resolve(&sandbox.rootfs_image)?;
-        let authority = resolve(&sandbox.fake_internet_authority)?;
-        let cgroups = CgroupTree::own().map_err(fatal)?;
-        let memory_mib = u32::try_from(sandbox.memory_mib_per_slot).map_err(fatal)?;
-        let fc = FirecrackerConfig {
-            firecracker: sandbox.firecracker_bin.clone(),
-            launcher: sandbox.vmjail_bin.clone(),
-            slots_dir: sandbox.slots_dir.clone(),
-            slots: sandbox.slots,
-            uid_base: sandbox.slot_uid_base,
-            gid_base: sandbox.slot_gid_base,
-            limits: SlotLimits {
-                cpus: sandbox.vcpus_per_slot,
-                memory_mib: sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB,
-                pids: 64,
-            },
-            // Firecracker writes the base snapshot's memory file and the
-            // scratch disks (a job's, or the larger one of the warm build).
-            max_file_size: (sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB)
-                .max(sandbox.scratch_mib_per_slot)
-                .max(sandbox.warm.as_ref().map_or(0, warm::scratch_mib))
-                << 20,
-            fake_internet: Some(sandbox.fake_internet_bin.clone()),
-            authority: Some(authority),
-        };
-        // A jail has no dynamic loader, so everything executed in one must
-        // be static.
-        let fake_internet = std::fs::read(&sandbox.fake_internet_bin)
-            .map_err(|e| fatal(format!("{}: {e}", sandbox.fake_internet_bin.display())))?;
-        if !crateward_core::elf::is_static(&fake_internet).map_err(fatal)? {
-            return Err(fatal(format!(
-                "{} is dynamically linked; build it for x86_64-unknown-linux-musl",
-                sandbox.fake_internet_bin.display()
-            )));
-        }
-        drop(fake_internet);
-        std::fs::create_dir_all(&fc.slots_dir).map_err(fatal)?;
-        // The jail decoys rely on reads updating the access time (ADR 0023).
-        if !jail::decoy::atime_works(&fc.slots_dir).map_err(fatal)? {
-            return Err(fatal(format!(
-                "reads do not update access times below {}; mount it with relatime or strictatime",
-                fc.slots_dir.display()
-            )));
-        }
-        let work = config.instance.run_dir.join("orchestrator");
-        let _ = std::fs::remove_dir_all(&work);
-        std::fs::create_dir_all(&work).map_err(fatal)?;
-        let placeholders = JobDrives {
-            payload: work.join("placeholder-payload.img"),
-            scratch: work.join("placeholder-scratch.img"),
-            warm: work.join("placeholder-warm.img"),
-        };
-        for file in [
-            &placeholders.payload,
-            &placeholders.scratch,
-            &placeholders.warm,
-        ] {
-            std::fs::File::create(file).map_err(fatal)?;
-        }
-        let boot = BootSpec {
-            kernel: kernel_image,
-            rootfs: rootfs_image,
-            boot_args: format!(
-                "{} {}",
-                BootSpec::default_boot_args(AGENT_PATH),
-                BootSpec::network_boot_args()
-            ),
-            vcpus: u8::try_from(sandbox.vcpus_per_slot).map_err(fatal)?,
-            memory_mib,
-            drives: Some(placeholders),
-            network: true,
-        };
-        let backend0 = FirecrackerBackend::new(fc.clone(), cgroups.clone(), placeholder_snapshot());
-        let reconciled = backend0.reconcile().await.map_err(fatal)?;
-        if !reconciled.cgroups.is_empty() || !reconciled.directories.is_empty() {
-            tracing::warn!(?reconciled, "removed leftovers of an earlier run");
-        }
-        let started = std::time::Instant::now();
-        let snapshot = FirecrackerBackend::create_base_snapshot(&fc, &boot, &work.join("snapshot"))
-            .await
-            .map_err(fatal)?;
-        tracing::info!(ms = started.elapsed().as_millis(), "base snapshot ready");
-        let backend = Arc::new(FirecrackerBackend::new(fc, cgroups, snapshot));
+    store.migrate().await.map_err(fatal)?;
+    let policies = Policies::from_config(&config.stages).map_err(fatal)?;
+    // Installed before the warm build, so a stop request during it ends
+    // its VM through reconciliation instead of leaving it behind.
+    let stop = Stop::install().map_err(fatal)?;
+    let mut template = Sandbox {
+        backend,
+        slot: 0,
+        setup: WorkerSetup {
+            exe: std::env::current_exe().map_err(fatal)?,
+            work_dir: work.clone(),
+            scratch_mib: sandbox.scratch_mib_per_slot,
+            check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
+            full_timeout: Duration::from_secs(sandbox.full_timeout_secs),
+            warm: None,
+            warm_placeholder: work.join("placeholder-warm.img"),
+        },
+        blobs: BlobStore::open(&config.instance.data_dir.join("cas")).map_err(fatal)?,
+    };
+    if let Some(warm_config) = &sandbox.warm {
+        template.setup.warm = warm_cache(&template, &store, warm_config, &stop).await?;
+    }
+    if stop.is_requested() {
+        return Ok(());
+    }
+    tokio::spawn(app::reap_loop(store, policies.clone(), stop.clone()));
+    for task in spawn_slots(config, &template, &policies, &stop).await? {
+        task.await.map_err(fatal)?.map_err(fatal)?;
+    }
+    tracing::info!("stopping");
+    Ok(())
+}
 
-        let url = config.database.url.expose_secret();
-        let mut store = Store::connect(url).await.map_err(fatal)?;
-        store.migrate().await.map_err(fatal)?;
-        let blobs = BlobStore::open(&config.instance.data_dir.join("cas")).map_err(fatal)?;
-        let policies = Policies::from_config(&config.stages).map_err(fatal)?;
-        // Installed before the warm build, so a stop request during it ends
-        // its VM through reconciliation instead of leaving it behind.
-        let stop = Arc::new(AtomicBool::new(false));
-        let (stopped_tx, stopped) = tokio::sync::watch::channel(false);
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(fatal)?;
-        let flag = Arc::clone(&stop);
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = tokio::signal::ctrl_c() => {}
-            }
-            flag.store(true, Ordering::SeqCst);
-            let _ = stopped_tx.send(true);
-        });
-        let mut slot0 = Sandbox {
-            backend,
-            slot: 0,
-            setup: WorkerSetup {
-                exe: std::env::current_exe().map_err(fatal)?,
-                work_dir: work.clone(),
-                scratch_mib: sandbox.scratch_mib_per_slot,
-                check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
-                full_timeout: Duration::from_secs(sandbox.full_timeout_secs),
-                warm: None,
-                warm_placeholder: work.join("placeholder-warm.img"),
-            },
-            blobs,
-        };
-        // The warm build cache (ADR 0008). Any failure means cold builds,
-        // never a failed start.
-        if let Some(warm_config) = &sandbox.warm {
-            match warm::plan_from_store(&store, warm_config).await {
-                Ok(plan) if plan.probes.is_empty() => {
-                    tracing::info!("nothing qualifies for the warm build cache");
-                }
-                Ok(plan) => {
-                    tracing::info!(
-                        probes = plan.probes.len(),
-                        units = plan.units,
-                        packages = plan.packages.len(),
-                        replayed = %plan.stubs.join(" "),
-                        "building the warm build cache"
-                    );
-                    let mut stopping = stopped.clone();
-                    let built = tokio::select! {
-                        built = warm::build(&slot0, warm_config, &plan) => built,
-                        _ = stopping.wait_for(|s| *s) => {
-                            let reconciled = slot0.backend.reconcile().await.map_err(fatal)?;
-                            tracing::info!(?reconciled, "stopped during the warm build");
-                            return Ok(());
-                        }
-                    };
-                    match built {
-                        Ok(image) => {
-                            tracing::info!(image = ?image, "warm build cache ready");
-                            slot0.setup.warm = image;
-                        }
-                        Err(error) => tracing::warn!(%error, "no warm build cache"),
-                    }
-                }
-                Err(error) => tracing::warn!(%error, "cannot plan the warm build cache"),
-            }
-        }
-        let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
+/// Clears the leftovers of an earlier run and boots a clean VM for the base
+/// snapshot. Returns the backend and the work directory.
+async fn boot(config: &Config) -> Result<(Arc<FirecrackerBackend>, PathBuf), ComponentError> {
+    let sandbox = &config.sandbox;
+    // A deploy switches the guest files by moving a link (ADR 0024).
+    // Resolving them once keeps a running orchestrator on the files its
+    // base snapshot was made from.
+    let kernel = resolve(&sandbox.kernel_image)?;
+    let rootfs = resolve(&sandbox.rootfs_image)?;
+    let authority = resolve(&sandbox.fake_internet_authority)?;
+    let cgroups = CgroupTree::own().map_err(fatal)?;
+    let fc = firecracker_config(sandbox, authority);
+    check_host(sandbox)?;
+    let work = config.instance.run_dir.join("orchestrator");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(fatal)?;
+    let boot = boot_spec(sandbox, kernel, rootfs, placeholders(&work)?)?;
+    let leftovers = FirecrackerBackend::new(fc.clone(), cgroups.clone(), placeholder_snapshot());
+    let reconciled = leftovers.reconcile().await.map_err(fatal)?;
+    if !reconciled.cgroups.is_empty() || !reconciled.directories.is_empty() {
+        tracing::warn!(?reconciled, "removed leftovers of an earlier run");
+    }
+    let started = std::time::Instant::now();
+    let snapshot = FirecrackerBackend::create_base_snapshot(&fc, &boot, &work.join("snapshot"))
+        .await
+        .map_err(fatal)?;
+    tracing::info!(ms = started.elapsed().as_millis(), "base snapshot ready");
+    let backend = FirecrackerBackend::new(fc, cgroups, snapshot);
+    Ok((Arc::new(backend), work))
+}
 
-        let canary_interval = Duration::from_secs(sandbox.canary_interval_minutes * 60);
-        // No slot claims a job before the first canaries ran on these guest
-        // files: a new version must pass them first (ADR 0024). A failure
-        // pauses the stage, which the workers then honor.
-        let (canaries_ran, canaries_ran_rx) =
-            tokio::sync::watch::channel(canary_interval.is_zero());
-        let canaries_ran = Arc::new(canaries_ran);
-        let mut tasks = Vec::new();
-        for slot in 0..sandbox.slots {
-            let store = Store::connect(url).await.map_err(fatal)?;
-            let heartbeats = Store::connect(url).await.map_err(fatal)?;
-            let sandbox = Sandbox {
-                slot,
-                ..slot0.clone()
-            };
-            let mut worker =
-                SandboxWorker::new(store, heartbeats, sandbox, policies.clone(), lease);
-            let stop = Arc::clone(&stop);
-            let canaries_ran = Arc::clone(&canaries_ran);
-            let mut canaries_ran_rx = canaries_ran_rx.clone();
-            tasks.push(tokio::spawn(async move {
-                let mut last_reap = tokio::time::Instant::now();
-                if slot != 0 {
-                    while !*canaries_ran_rx.borrow() && !stop.load(Ordering::SeqCst) {
-                        // Wakes on the signal, or every second to see a stop.
-                        let _ =
-                            tokio::time::timeout(Duration::from_secs(1), canaries_ran_rx.changed())
-                                .await;
-                    }
-                }
-                // Canaries run first, right after the warm build, then on
-                // their schedule, all in slot 0 between jobs.
-                let mut last_canary: Option<tokio::time::Instant> = None;
-                while !stop.load(Ordering::SeqCst) {
-                    let due = last_canary.is_none_or(|at| at.elapsed() >= canary_interval);
-                    if slot == 0 && !canary_interval.is_zero() && due {
-                        if let Err(error) = worker.run_canaries().await {
-                            tracing::error!(slot, %error, "job store failed");
-                            return Err(error);
-                        }
-                        last_canary = Some(tokio::time::Instant::now());
-                        canaries_ran.send_replace(true);
-                    }
-                    if slot == 0 && last_reap.elapsed() >= Duration::from_secs(60) {
-                        let policies = worker.policies.clone();
-                        match worker.store().reap_expired(&policies).await {
-                            Ok(0) => {}
-                            Ok(reaped) => tracing::warn!(reaped, "reaped expired leases"),
-                            Err(error) => tracing::warn!(%error, "reaping failed"),
-                        }
-                        last_reap = tokio::time::Instant::now();
-                    }
-                    match worker.run_once().await {
-                        Ok(true) => {}
-                        Ok(false) => tokio::time::sleep(Duration::from_secs(1)).await,
-                        Err(error) => {
-                            tracing::error!(slot, %error, "job store failed");
-                            return Err(error);
-                        }
-                    }
-                }
-                Ok(())
-            }));
-        }
-        drop(store);
-        for task in tasks {
-            task.await.map_err(fatal)?.map_err(fatal)?;
-        }
-        tracing::info!("stopping");
-        Ok(())
+fn resolve(path: &Path) -> Result<PathBuf, ComponentError> {
+    std::fs::canonicalize(path).map_err(|e| fatal(format!("{}: {e}", path.display())))
+}
+
+fn firecracker_config(sandbox: &SandboxConfig, authority: PathBuf) -> FirecrackerConfig {
+    FirecrackerConfig {
+        firecracker: sandbox.firecracker_bin.clone(),
+        launcher: sandbox.vmjail_bin.clone(),
+        slots_dir: sandbox.slots_dir.clone(),
+        slots: sandbox.slots,
+        uid_base: sandbox.slot_uid_base,
+        gid_base: sandbox.slot_gid_base,
+        limits: SlotLimits {
+            cpus: sandbox.vcpus_per_slot,
+            memory_mib: sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB,
+            pids: 64,
+        },
+        // Firecracker writes the base snapshot's memory file and the
+        // scratch disks (a job's, or the larger one of the warm build).
+        max_file_size: (sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB)
+            .max(sandbox.scratch_mib_per_slot)
+            .max(sandbox.warm.as_ref().map_or(0, warm::scratch_mib))
+            << 20,
+        fake_internet: Some(sandbox.fake_internet_bin.clone()),
+        authority: Some(authority),
+    }
+}
+
+/// A jail has no dynamic loader, so everything executed in one must be
+/// static. Its decoys rely on reads updating the access time (ADR 0023).
+fn check_host(sandbox: &SandboxConfig) -> Result<(), ComponentError> {
+    let bin = &sandbox.fake_internet_bin;
+    let elf = std::fs::read(bin).map_err(|e| fatal(format!("{}: {e}", bin.display())))?;
+    if !crateward_core::elf::is_static(&elf).map_err(fatal)? {
+        return Err(fatal(format!(
+            "{} is dynamically linked; build it for x86_64-unknown-linux-musl",
+            bin.display()
+        )));
+    }
+    let slots_dir = &sandbox.slots_dir;
+    std::fs::create_dir_all(slots_dir).map_err(fatal)?;
+    if !jail::decoy::atime_works(slots_dir).map_err(fatal)? {
+        return Err(fatal(format!(
+            "reads do not update access times below {}; mount it with relatime or strictatime",
+            slots_dir.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Empty files that stand in for the job drives in the base snapshot.
+fn placeholders(work: &Path) -> Result<JobDrives, ComponentError> {
+    let drives = JobDrives {
+        payload: work.join("placeholder-payload.img"),
+        scratch: work.join("placeholder-scratch.img"),
+        warm: work.join("placeholder-warm.img"),
+    };
+    for file in [&drives.payload, &drives.scratch, &drives.warm] {
+        std::fs::File::create(file).map_err(fatal)?;
+    }
+    Ok(drives)
+}
+
+fn boot_spec(
+    sandbox: &SandboxConfig,
+    kernel: PathBuf,
+    rootfs: PathBuf,
+    drives: JobDrives,
+) -> Result<BootSpec, ComponentError> {
+    Ok(BootSpec {
+        kernel,
+        rootfs,
+        boot_args: format!(
+            "{} {}",
+            BootSpec::default_boot_args(AGENT_PATH),
+            BootSpec::network_boot_args()
+        ),
+        vcpus: u8::try_from(sandbox.vcpus_per_slot).map_err(fatal)?,
+        memory_mib: u32::try_from(sandbox.memory_mib_per_slot).map_err(fatal)?,
+        drives: Some(drives),
+        network: true,
     })
+}
+
+/// Builds the warm build cache (ADR 0008) and returns its image. Any
+/// failure means cold builds, never a failed start. A stop request during
+/// the build ends its VM through reconciliation.
+async fn warm_cache(
+    slot0: &Sandbox,
+    store: &Store,
+    config: &WarmConfig,
+    stop: &Stop,
+) -> Result<Option<PathBuf>, ComponentError> {
+    let plan = match warm::plan_from_store(store, config).await {
+        Ok(plan) if plan.probes.is_empty() => {
+            tracing::info!("nothing qualifies for the warm build cache");
+            return Ok(None);
+        }
+        Ok(plan) => plan,
+        Err(error) => {
+            tracing::warn!(%error, "cannot plan the warm build cache");
+            return Ok(None);
+        }
+    };
+    tracing::info!(
+        probes = plan.probes.len(),
+        units = plan.units,
+        packages = plan.packages.len(),
+        replayed = %plan.stubs.join(" "),
+        "building the warm build cache"
+    );
+    let built = tokio::select! {
+        built = warm::build(slot0, config, &plan) => built,
+        () = stop.wait() => {
+            let reconciled = slot0.backend.reconcile().await.map_err(fatal)?;
+            tracing::info!(?reconciled, "stopped during the warm build");
+            return Ok(None);
+        }
+    };
+    match built {
+        Ok(image) => {
+            tracing::info!(image = ?image, "warm build cache ready");
+            Ok(image)
+        }
+        Err(error) => {
+            tracing::warn!(%error, "no warm build cache");
+            Ok(None)
+        }
+    }
+}
+
+type SlotTask = JoinHandle<Result<(), StoreError>>;
+
+async fn spawn_slots(
+    config: &Config,
+    template: &Sandbox,
+    policies: &Policies,
+    stop: &Stop,
+) -> Result<Vec<SlotTask>, ComponentError> {
+    let url = config.database.url.expose_secret();
+    let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
+    let canary_every = Duration::from_secs(config.sandbox.canary_interval_minutes * 60);
+    // No slot claims a job before the first canaries ran on these guest
+    // files: a new version must pass them first (ADR 0024). A failure
+    // pauses the stage, which the workers then honor.
+    let ran = Arc::new(watch::channel(canary_every.is_zero()).0);
+    let mut tasks = Vec::new();
+    for slot in 0..config.sandbox.slots {
+        let store = Store::connect(url).await.map_err(fatal)?;
+        let heartbeats = Store::connect(url).await.map_err(fatal)?;
+        let sandbox = Sandbox {
+            slot,
+            ..template.clone()
+        };
+        let worker = SandboxWorker::new(store, heartbeats, sandbox, policies.clone(), lease);
+        let canaries = (slot == 0 && !canary_every.is_zero()).then_some(canary_every);
+        let (ran, stop) = (Arc::clone(&ran), stop.clone());
+        tasks.push(tokio::spawn(async move {
+            slot_loop(worker, canaries, ran, stop)
+                .await
+                .inspect_err(|error| tracing::error!(slot, %error, "job store failed"))
+        }));
+    }
+    Ok(tasks)
+}
+
+/// Runs the jobs of one slot until `stop`. The slot with `canaries` also
+/// runs them, first and then on their schedule, between jobs; the others
+/// wait for the first run.
+async fn slot_loop(
+    mut worker: SandboxWorker,
+    canaries: Option<Duration>,
+    ran: Arc<watch::Sender<bool>>,
+    stop: Stop,
+) -> Result<(), StoreError> {
+    if canaries.is_none() {
+        tokio::select! {
+            () = canaries_ran(&ran) => {}
+            () = stop.wait() => {}
+        }
+    }
+    let mut last_canary: Option<tokio::time::Instant> = None;
+    while !stop.is_requested() {
+        if let Some(every) = canaries
+            && last_canary.is_none_or(|at| at.elapsed() >= every)
+        {
+            worker.run_canaries().await?;
+            last_canary = Some(tokio::time::Instant::now());
+            ran.send_replace(true);
+        }
+        if !worker.run_once().await? {
+            stop.sleep(Duration::from_secs(1)).await;
+        }
+    }
+    Ok(())
+}
+
+async fn canaries_ran(ran: &watch::Sender<bool>) {
+    let _ = ran.subscribe().wait_for(|ran| *ran).await;
 }
 
 /// Takes the lock that allows one orchestrator per slot directory, the
 /// directory reconciliation clears. The file is private to the
 /// orchestrator's user, since holding the lock needs only read access.
-fn lock_instance(slots_dir: &std::path::Path) -> Result<std::fs::File, ComponentError> {
+fn lock_instance(slots_dir: &Path) -> Result<std::fs::File, ComponentError> {
     use std::os::unix::fs::OpenOptionsExt as _;
     std::fs::create_dir_all(slots_dir)
         .map_err(|e| fatal(format!("{}: {e}", slots_dir.display())))?;
@@ -355,9 +389,9 @@ fn lock_instance(slots_dir: &std::path::Path) -> Result<std::fs::File, Component
 /// A snapshot value for the reconciling backend, which never restores.
 fn placeholder_snapshot() -> firecracker::vm::Snapshot {
     firecracker::vm::Snapshot {
-        state: std::path::PathBuf::new(),
-        memory: std::path::PathBuf::new(),
-        rootfs: std::path::PathBuf::new(),
+        state: PathBuf::new(),
+        memory: PathBuf::new(),
+        rootfs: PathBuf::new(),
     }
 }
 

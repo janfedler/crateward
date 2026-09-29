@@ -14,7 +14,7 @@ reqwest.workspace = true
 rustix = { workspace = true, features = ["fs"] }
 secrecy.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["signal"] }
+tokio.workspace = true
 tracing.workspace = true
 
 [lints]

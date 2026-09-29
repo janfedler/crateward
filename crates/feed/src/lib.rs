@@ -26,7 +26,7 @@ pub mod poller;
 
 use std::time::Duration;
 
-use crateward_core::app::ComponentError;
+use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::http::{ClientConfig, PoliteClient};
@@ -115,19 +115,13 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
 /// Returns [`ComponentError::Fatal`] if the feed cannot start or hits a
 /// permanent error; systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(fatal)?;
+    let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {
         let mut feed = start(config).await.map_err(fatal)?;
         spawn_dump_refresh(config)?;
         let interval = Duration::from_secs(config.crates_io.rss_poll_interval_secs);
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(fatal)?;
-        loop {
+        let stop = Stop::install().map_err(fatal)?;
+        while !stop.is_requested() {
             match feed.poll_once().await {
                 Ok(report) => tracing::info!(?report, "poll finished"),
                 Err(error) if error.is_transient() => {
@@ -135,11 +129,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 }
                 Err(error) => return Err(fatal(error)),
             }
-            tokio::select! {
-                () = tokio::time::sleep(interval) => {}
-                _ = terminate.recv() => break,
-                _ = tokio::signal::ctrl_c() => break,
-            }
+            stop.sleep(interval).await;
         }
         tracing::info!("stopping");
         Ok(())

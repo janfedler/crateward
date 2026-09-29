@@ -144,11 +144,6 @@ impl Fetcher {
         }
     }
 
-    /// The job store, for reaping expired leases.
-    pub fn store(&mut self) -> &mut Store {
-        &mut self.store
-    }
-
     /// Claims and processes one job. Returns `false` when there was none.
     ///
     /// # Errors

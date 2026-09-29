@@ -31,11 +31,9 @@ pub mod worker;
 pub mod yara;
 
 use std::error::Error;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crateward_core::app::ComponentError;
+use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
@@ -82,41 +80,21 @@ async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
 ///
 /// Returns [`ComponentError::Fatal`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .map_err(fatal)?;
+    let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {
         let mut analyzer = start(config).await.map_err(fatal)?;
-        let stop = Arc::new(AtomicBool::new(false));
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .map_err(fatal)?;
-        let flag = Arc::clone(&stop);
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = tokio::signal::ctrl_c() => {}
-            }
-            flag.store(true, Ordering::SeqCst);
-        });
-        let mut last_reap = tokio::time::Instant::now();
-        while !stop.load(Ordering::SeqCst) {
-            if last_reap.elapsed() >= Duration::from_secs(60) {
-                let policies = analyzer.policies.clone();
-                let reaped = analyzer
-                    .store()
-                    .reap_expired(&policies)
-                    .await
-                    .map_err(fatal)?;
-                if reaped > 0 {
-                    tracing::warn!(reaped, "reaped expired leases");
-                }
-                last_reap = tokio::time::Instant::now();
-            }
+        let stop = Stop::install().map_err(fatal)?;
+        let reaper = Store::connect(config.database.url.expose_secret())
+            .await
+            .map_err(fatal)?;
+        tokio::spawn(app::reap_loop(
+            reaper,
+            analyzer.policies.clone(),
+            stop.clone(),
+        ));
+        while !stop.is_requested() {
             if !analyzer.run_once().await.map_err(fatal)? {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                stop.sleep(Duration::from_secs(1)).await;
             }
         }
         tracing::info!("stopping");
