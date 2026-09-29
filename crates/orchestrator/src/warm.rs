@@ -27,15 +27,17 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
+use crateward_core::child::ChildError;
 use crateward_core::config::WarmConfig;
 use crateward_core::digest::Sha256Digest;
+use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::store::Store;
 
 use crate::backend::FirecrackerBackend;
 use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
-use crate::worker::{BUILDER, JobFiles, Locked, RunPlan, RunReport, WorkerSetup, execute};
+use crate::worker::{BUILDER, Failure, JobFiles, Locked, RunPlan, RunReport, WorkerSetup, execute};
 
 /// A crate version.
 type Key = (String, String);
@@ -303,6 +305,67 @@ pub fn scratch_mib(config: &WarmConfig) -> u64 {
     config.max_image_mib.saturating_add(2048)
 }
 
+/// Why no warm image was produced.
+#[derive(Debug, thiserror::Error)]
+pub enum WarmError {
+    /// The build could not run.
+    #[error("warm build: {0}")]
+    Build(#[from] Failure),
+    /// The build ran, but its result is not clean.
+    #[error("warm build rejected: {0}")]
+    Rejected(String),
+    /// The packing task panicked or was cancelled.
+    #[error(transparent)]
+    Task(#[from] tokio::task::JoinError),
+    /// A child that packs the image failed.
+    #[error(transparent)]
+    Pack(#[from] ChildError),
+    /// The image file could not be read or moved.
+    #[error("{}: {source}", .path.display())]
+    Image {
+        /// The file.
+        path: PathBuf,
+        /// What went wrong.
+        source: std::io::Error,
+    },
+    /// The image is above the size limit.
+    #[error("the warm image has {0} bytes, above the limit")]
+    TooLarge(u64),
+    /// A job with the image mounted did not come out clean.
+    #[error("promotion check failed: {0}")]
+    Check(#[from] CheckError),
+}
+
+/// Why the promotion check refused an image.
+#[derive(Debug, thiserror::Error)]
+pub enum CheckError {
+    /// The plan has no probe to check with.
+    #[error("no probe to check with")]
+    NoProbe,
+    /// The check build could not run.
+    #[error(transparent)]
+    Run(#[from] Failure),
+    /// The check build did not succeed.
+    #[error("the check build ended {outcome:?}: {stderr}")]
+    Ended {
+        /// How it ended.
+        outcome: BuildOutcome,
+        /// What it printed last.
+        stderr: String,
+    },
+    /// The image did not cover the dependencies.
+    #[error("the check build compiled {0} units itself")]
+    Compiled(usize),
+    /// The check build was not clean.
+    #[error("{0}")]
+    Rejected(String),
+}
+
+fn image_io(path: &Path) -> impl FnOnce(std::io::Error) -> WarmError {
+    let path = path.to_path_buf();
+    move |source| WarmError::Image { path, source }
+}
+
 /// Builds the warm image in `slot` and returns its path, or `None` when
 /// there is nothing to warm. The image lands in `setup.work_dir`.
 ///
@@ -317,7 +380,7 @@ pub async fn build(
     blobs: &BlobStore,
     config: &WarmConfig,
     plan: &Plan,
-) -> Result<Option<PathBuf>, String> {
+) -> Result<Option<PathBuf>, WarmError> {
     let Some((first, rest)) = plan.probes.split_first() else {
         return Ok(None);
     };
@@ -359,8 +422,7 @@ pub async fn build(
             &files,
             &run,
         )
-        .await
-        .map_err(|f| format!("warm build: {f:?}"))?;
+        .await?;
         tracing::info!(
             run_ms = report.run_ms,
             outcome = ?report.outcome,
@@ -375,7 +437,7 @@ pub async fn build(
             "warm build finished"
         );
         if let Some(why) = rejection(&report) {
-            return Err(format!("warm build rejected: {why}"));
+            return Err(WarmError::Rejected(why));
         }
         let image = work.join("warm-staging.erofs");
         let exe = setup.exe.clone();
@@ -390,25 +452,23 @@ pub async fn build(
         tokio::task::spawn_blocking(move || {
             crate::scratch::export_to_erofs(&exe, &scratch, &out, &excluded)
         })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-        let size = std::fs::metadata(&image).map_err(|e| e.to_string())?.len();
+        .await??;
+        let size = std::fs::metadata(&image).map_err(image_io(&image))?.len();
         if size > config.max_image_mib.saturating_mul(1024 * 1024) {
             let _ = std::fs::remove_file(&image);
-            return Err(format!("the warm image has {size} bytes, above the limit"));
+            return Err(WarmError::TooLarge(size));
         }
-        let digest = blake3_file(&image)?;
+        let digest = blake3_file(&image).map_err(image_io(&image))?;
         let named = work.join(format!(
             "warm-{}.erofs",
             digest.get(..16).unwrap_or_default()
         ));
-        std::fs::rename(&image, &named).map_err(|e| e.to_string())?;
+        std::fs::rename(&image, &named).map_err(image_io(&image))?;
         if let Err(error) = promotion_check(backend, slot, setup, blobs, plan, &named).await {
             let _ = std::fs::remove_file(&named);
-            return Err(format!("promotion check failed: {error}"));
+            return Err(error.into());
         }
-        Ok(Some(named))
+        Ok::<_, WarmError>(Some(named))
     }
     .await;
     for file in [&files.payload, &files.scratch, &files.network] {
@@ -431,9 +491,9 @@ async fn promotion_check(
     blobs: &BlobStore,
     plan: &Plan,
     image: &Path,
-) -> Result<(), String> {
+) -> Result<(), CheckError> {
     let (Some(first), Some(stub)) = (plan.probes.first(), plan.stubs.first()) else {
-        return Err("no probe to check with".into());
+        return Err(CheckError::NoProbe);
     };
     let spec = PayloadSpec {
         name: first.name.clone(),
@@ -458,7 +518,7 @@ async fn promotion_check(
     for file in [&files.payload, &files.scratch, &files.network] {
         let _ = std::fs::remove_file(file);
     }
-    let report = result.map_err(|f| format!("{f:?}"))?;
+    let report = result?;
     let compiled = report
         .scratch
         .as_ref()
@@ -469,29 +529,25 @@ async fn promotion_check(
         compiled,
         "warm build cache promotion check"
     );
-    if report.outcome != crateward_core::job::BuildOutcome::Succeeded {
-        return Err(format!(
-            "the check build ended {:?}: {}",
-            report.outcome,
-            crate::trace::render(report.stderr_tail.as_bytes())
-        ));
+    if report.outcome != BuildOutcome::Succeeded {
+        return Err(CheckError::Ended {
+            outcome: report.outcome,
+            stderr: crate::trace::render(report.stderr_tail.as_bytes()),
+        });
     }
     if compiled > PROMOTION_MAX_UNITS {
-        return Err(format!("the check build compiled {compiled} units itself"));
+        return Err(CheckError::Compiled(compiled));
     }
     // Everything but the unit count applies as for the warm build.
-    if let Some(why) = rejection(&report).filter(|w| !w.contains("compiled nothing")) {
-        return Err(why);
+    match rejection(&report).filter(|w| !w.contains("compiled nothing")) {
+        Some(why) => Err(CheckError::Rejected(why)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
-fn blake3_file(path: &Path) -> Result<String, String> {
+fn blake3_file(path: &Path) -> std::io::Result<String> {
     let mut hasher = blake3::Hasher::new();
-    let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    hasher
-        .update_reader(file)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+    hasher.update_reader(std::fs::File::open(path)?)?;
     Ok(hasher.finalize().to_hex().to_string())
 }
 
@@ -566,6 +622,14 @@ mod tests {
         let all: HashSet<String> = blobs.keys().cloned().collect();
         let plan = plan(&samples, &all, &blobs, 2, 10);
         assert_eq!(plan.stubs, ["a-1.0.0"]);
+    }
+
+    #[test]
+    fn an_image_that_cannot_be_read_names_its_path() {
+        let path = Path::new("/nonexistent/warm.erofs");
+        let error = blake3_file(path).map_err(image_io(path)).unwrap_err();
+        assert!(matches!(error, WarmError::Image { .. }));
+        assert!(error.to_string().starts_with("/nonexistent/warm.erofs: "));
     }
 
     #[test]

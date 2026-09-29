@@ -24,7 +24,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitCode, Stdio};
 
-use crateward_core::blobs::BlobStore;
+use crateward_core::blobs::{BlobError, BlobStore};
 use crateward_core::child::{self, Child, ChildError};
 use crateward_core::cratesio::probe_manifest;
 use crateward_core::name::CrateName;
@@ -70,7 +70,7 @@ offline = true\n";
 /// failures.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadError {
-    /// Reading a blob or writing the tar failed.
+    /// Reading a crate's archive or writing the tar failed.
     #[error("{context}: {source}")]
     Io {
         /// What was being done.
@@ -78,9 +78,25 @@ pub enum PayloadError {
         /// The underlying error.
         source: std::io::Error,
     },
+    /// A blob could not be read.
+    #[error("reading the blob of {package}: {source}")]
+    Blob {
+        /// The package directory, `<name>-<version>`.
+        package: String,
+        /// Why the blob store refused.
+        source: BlobError,
+    },
     /// A blob does not hold the crate it should.
     #[error("blob of {0} does not match its crate")]
     Mismatch(String),
+    /// A manifest could not be reduced to a stub.
+    #[error("the manifest of {package}: {source}")]
+    Manifest {
+        /// The package directory, `<name>-<version>`.
+        package: String,
+        /// What is wrong with it.
+        source: ManifestError,
+    },
     /// The image builder failed.
     #[error(transparent)]
     Child(#[from] ChildError),
@@ -173,6 +189,20 @@ fn append<W: Write>(
     Ok(())
 }
 
+/// Why a manifest could not be reduced to a stub.
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestError {
+    /// The manifest is not UTF-8.
+    #[error(transparent)]
+    Utf8(#[from] std::str::Utf8Error),
+    /// The manifest is not valid TOML.
+    #[error(transparent)]
+    Parse(#[from] toml::de::Error),
+    /// The stub did not serialize.
+    #[error(transparent)]
+    Write(#[from] toml::ser::Error),
+}
+
 /// A published manifest reduced to its dependencies and features: no build
 /// script, no `links`, one empty library (keeping its crate type), no other
 /// targets. Cargo then resolves dependencies and features exactly as for
@@ -181,9 +211,8 @@ fn append<W: Write>(
 /// # Errors
 ///
 /// Fails if the manifest is not valid TOML.
-pub fn stub_manifest(original: &[u8]) -> Result<String, String> {
-    let text = std::str::from_utf8(original).map_err(|e| e.to_string())?;
-    let mut manifest: toml::Table = text.parse().map_err(|e| format!("{e}"))?;
+pub fn stub_manifest(original: &[u8]) -> Result<String, ManifestError> {
+    let mut manifest: toml::Table = std::str::from_utf8(original)?.parse()?;
     if let Some(package) = manifest
         .get_mut("package")
         .and_then(toml::Value::as_table_mut)
@@ -208,7 +237,7 @@ pub fn stub_manifest(original: &[u8]) -> Result<String, String> {
     }
     lib.insert("path".into(), toml::Value::String("src/lib.rs".into()));
     manifest.insert("lib".into(), toml::Value::Table(lib));
-    toml::to_string(&manifest).map_err(|e| e.to_string())
+    Ok(toml::to_string(&manifest)?)
 }
 
 /// Writes the payload as a tar stream.
@@ -260,9 +289,9 @@ pub fn write_tar<W: Write>(
         let stub = spec.stubs.contains(&dir);
         let tar = blobs
             .get(&package.blake3, MAX_BLOB_BYTES)
-            .map_err(|e| PayloadError::Io {
-                context: format!("reading the blob of {dir}"),
-                source: std::io::Error::other(e),
+            .map_err(|source| PayloadError::Blob {
+                package: dir.clone(),
+                source,
             })?;
         let mut archive = tar::Archive::new(tar.as_slice());
         for entry in archive.entries().map_err(io(format!("reading {dir}")))? {
@@ -292,8 +321,10 @@ pub fn write_tar<W: Write>(
                 .map_err(io(format!("reading {path}")))?;
             let mode = if executable { 0o755 } else { 0o644 };
             if stub {
-                let manifest = stub_manifest(&data)
-                    .map_err(|e| PayloadError::Mismatch(format!("{dir}: {e}")))?;
+                let manifest = stub_manifest(&data).map_err(|source| PayloadError::Manifest {
+                    package: dir.clone(),
+                    source,
+                })?;
                 append(
                     &mut builder,
                     &format!("vendor/{path}"),
@@ -416,8 +447,11 @@ mod tests {
     }
 
     fn setup(files: &[(&str, &[u8], u32)]) -> (PathBuf, BlobStore, PayloadSpec) {
-        let dir =
-            std::env::temp_dir().join(format!("cw-payload-{}-{}", std::process::id(), files.len()));
+        let dir = std::env::temp_dir().join(format!(
+            "cw-payload-{}-{}",
+            std::process::id(),
+            rand::random::<u32>()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         let blobs = BlobStore::open(&dir.join("cas")).unwrap();
         let blob = blobs.put(&blob_tar(files)).unwrap();
@@ -531,6 +565,42 @@ std = []
                 .is_some()
         );
         assert!(stub.get("features").is_some());
-        assert!(stub_manifest(b"not [toml").is_err());
+        assert!(matches!(
+            stub_manifest(b"not [toml"),
+            Err(ManifestError::Parse(_))
+        ));
+        assert!(matches!(
+            stub_manifest(b"\xff"),
+            Err(ManifestError::Utf8(_))
+        ));
+    }
+
+    #[test]
+    fn a_stub_of_a_broken_manifest_names_its_package() {
+        let (dir, blobs, mut spec) = setup(&[("demo-1.0.0/Cargo.toml", b"not [toml", 0o644)]);
+        spec.stubs = vec!["demo-1.0.0".into()];
+        let error = write_tar(&spec, &blobs, Vec::new()).unwrap_err();
+        assert!(
+            matches!(&error, PayloadError::Manifest { package, .. } if package == "demo-1.0.0"),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .starts_with("the manifest of demo-1.0.0: ")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_blob_that_is_not_stored_names_its_package() {
+        let (dir, blobs, mut spec) = setup(&[("demo-1.0.0/Cargo.toml", b"[package]", 0o644)]);
+        spec.packages[0].blake3 = "0".repeat(64);
+        let error = write_tar(&spec, &blobs, Vec::new()).unwrap_err();
+        assert!(
+            matches!(&error, PayloadError::Blob { package, .. } if package == "demo-1.0.0"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

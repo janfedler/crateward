@@ -23,7 +23,7 @@ use std::process::{ExitCode, Stdio};
 
 use crateward_core::child::{self, Child, ChildError};
 use crateward_core::sandbox::{self, FsAccess, Limits};
-use ext4_view::{Ext4, FileType, PathBuf as ExtPath};
+use ext4_view::{Ext4, Ext4Error, FileType, Metadata, PathBuf as ExtPath};
 use serde::{Deserialize, Serialize};
 
 use crate::payload::spawn_mkfs;
@@ -183,7 +183,7 @@ struct Scanner<'a> {
 impl Scanner<'_> {
     /// Reads the start of a file and searches it for honeytokens. Returns
     /// whether it starts with an ELF header.
-    fn search(&mut self, path: &ExtPath, guest: &str) -> Result<bool, ext4_view::Ext4Error> {
+    fn search(&mut self, path: &ExtPath, guest: &str) -> Result<bool, Ext4Error> {
         let mut file = self.fs.open(path.as_path())?;
         let longest = self.spec.tokens.iter().map(String::len).max().unwrap_or(0);
         let mut window: Vec<u8> = Vec::new();
@@ -226,7 +226,7 @@ impl Scanner<'_> {
         Ok(elf)
     }
 
-    fn visit(&mut self, path: &ExtPath, depth: usize) -> Result<(), ext4_view::Ext4Error> {
+    fn visit(&mut self, path: &ExtPath, depth: usize) -> Result<(), Ext4Error> {
         if depth > MAX_DEPTH {
             self.report.incomplete = true;
             return Ok(());
@@ -404,6 +404,51 @@ pub fn unit_owner(parent: &str, name: &str) -> Option<String> {
     }
 }
 
+/// Why the target directory could not be exported.
+#[derive(Debug, thiserror::Error)]
+pub enum ExportError {
+    /// The filesystem could not be read.
+    #[error(transparent)]
+    Fs(#[from] Ext4Error),
+    /// A file could not be read or the tar could not be written.
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    /// A path is not UTF-8.
+    #[error("a path is not UTF-8")]
+    Path,
+    /// The directories nest deeper than the bound.
+    #[error("the target directory is nested too deeply")]
+    TooDeep,
+    /// The target directory holds more entries than the bound.
+    #[error("too many entries")]
+    TooManyEntries,
+    /// The files hold more bytes than the bound.
+    #[error("the target directory is too large")]
+    TooLarge,
+    /// A file holds fewer bytes than its size says.
+    #[error("{0} is shorter than its size")]
+    Short(String),
+}
+
+/// The path of the tar entry for `path`: without the leading slash.
+fn tar_name(path: &ExtPath) -> Result<String, ExportError> {
+    let bytes = path.as_ref().get(1..).unwrap_or_default().to_vec();
+    String::from_utf8(bytes).map_err(|_| ExportError::Path)
+}
+
+/// A tar header with Crateward's own fields: owners kept, no set ID bits,
+/// time zero.
+fn tar_header(kind: tar::EntryType, meta: &Metadata, size: u64) -> tar::Header {
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(kind);
+    header.set_size(size);
+    header.set_mode(u32::from(meta.mode() & 0o777));
+    header.set_uid(u64::from(meta.uid()));
+    header.set_gid(u64::from(meta.gid()));
+    header.set_mtime(0);
+    header
+}
+
 /// Writes the directories and regular files below `/target` of `fs` as a
 /// tar with Crateward's own headers: paths `target/…`, modes without set ID
 /// bits, owners kept, time zero. Links, devices, FIFOs and sockets are left
@@ -413,81 +458,56 @@ pub fn unit_owner(parent: &str, name: &str) -> Option<String> {
 /// # Errors
 ///
 /// Fails on a read or write error, or when the bounds are exceeded.
-pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, u64), String> {
+pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, u64), ExportError> {
     let excluded: HashSet<String> = excluded.iter().map(|n| n.replace('-', "_")).collect();
     let mut builder = tar::Builder::new(out);
     let mut stack = vec![(ExtPath::new("/target"), 0_usize)];
     let (mut entries, mut bytes) = (0_u64, 0_u64);
     while let Some((dir, depth)) = stack.pop() {
         if depth > MAX_DEPTH {
-            return Err("the target directory is nested too deeply".into());
+            return Err(ExportError::TooDeep);
         }
-        let meta = fs.metadata(dir.as_path()).map_err(|e| e.to_string())?;
-        let name = String::from_utf8(dir.as_ref().get(1..).unwrap_or_default().to_vec())
-            .map_err(|_| "a path is not UTF-8".to_owned())?;
-        let mut header = tar::Header::new_gnu();
-        header.set_entry_type(tar::EntryType::Directory);
-        header.set_size(0);
-        header.set_mode(u32::from(meta.mode() & 0o777));
-        header.set_uid(u64::from(meta.uid()));
-        header.set_gid(u64::from(meta.gid()));
-        header.set_mtime(0);
-        builder
-            .append_data(&mut header, format!("{name}/"), io::empty())
-            .map_err(|e| e.to_string())?;
-        for entry in fs.read_dir(dir.as_path()).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        let name = tar_name(&dir)?;
+        let mut header = tar_header(tar::EntryType::Directory, &fs.metadata(dir.as_path())?, 0);
+        builder.append_data(&mut header, format!("{name}/"), io::empty())?;
+        for entry in fs.read_dir(dir.as_path())? {
+            let entry = entry?;
             if matches!(entry.file_name().as_ref(), b"." | b"..") {
                 continue;
             }
             entries += 1;
             if entries > MAX_EXPORT_ENTRIES {
-                return Err("too many entries".into());
+                return Err(ExportError::TooManyEntries);
             }
             let path = entry.path();
             let file_name = render(entry.file_name().as_ref());
             if unit_owner(&name, &file_name).is_some_and(|owner| excluded.contains(&owner)) {
                 continue;
             }
-            let meta = entry.metadata().map_err(|e| e.to_string())?;
+            let meta = entry.metadata()?;
             match meta.file_type() {
                 FileType::Directory => stack.push((path, depth + 1)),
                 FileType::Regular => {
-                    let name =
-                        String::from_utf8(path.as_ref().get(1..).unwrap_or_default().to_vec())
-                            .map_err(|_| "a path is not UTF-8".to_owned())?;
+                    let name = tar_name(&path)?;
                     bytes = bytes.saturating_add(meta.len());
                     if bytes > MAX_EXPORT_BYTES {
-                        return Err("the target directory is too large".into());
+                        return Err(ExportError::TooLarge);
                     }
-                    let mut header = tar::Header::new_gnu();
-                    header.set_entry_type(tar::EntryType::Regular);
-                    header.set_size(meta.len());
-                    header.set_mode(u32::from(meta.mode() & 0o777));
-                    header.set_uid(u64::from(meta.uid()));
-                    header.set_gid(u64::from(meta.gid()));
-                    header.set_mtime(0);
-                    let file = fs.open(path.as_path()).map_err(|e| e.to_string())?;
+                    let mut header = tar_header(tar::EntryType::Regular, &meta, meta.len());
                     // A reader that yields exactly the announced size.
                     let mut data = Vec::new();
-                    file.take(meta.len())
-                        .read_to_end(&mut data)
-                        .map_err(|e| e.to_string())?;
+                    let file = fs.open(path.as_path())?;
+                    file.take(meta.len()).read_to_end(&mut data)?;
                     if data.len() as u64 != meta.len() {
-                        return Err(format!("{name} is shorter than its size"));
+                        return Err(ExportError::Short(name));
                     }
-                    builder
-                        .append_data(&mut header, &name, data.as_slice())
-                        .map_err(|e| e.to_string())?;
+                    builder.append_data(&mut header, &name, data.as_slice())?;
                 }
                 _ => {}
             }
         }
     }
-    builder
-        .into_inner()
-        .and_then(|mut w| w.flush())
-        .map_err(|e| e.to_string())?;
+    builder.into_inner()?.flush()?;
     Ok((entries, bytes))
 }
 
@@ -517,6 +537,25 @@ pub fn export_to_erofs(
     builder.finish(None)
 }
 
+/// Why the geometry a superblock claims is impossible.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum GeometryError {
+    /// The superblock is shorter than the fields read from it.
+    #[error("the superblock is truncated")]
+    Truncated,
+    /// The block size or the blocks per group make no sense.
+    #[error("impossible block geometry")]
+    Impossible,
+    /// The superblock counts more than the image holds.
+    #[error("the superblock claims {blocks} blocks in {groups} groups, more than the image holds")]
+    TooLarge {
+        /// The blocks the superblock counts.
+        blocks: u64,
+        /// The block groups that follow from it.
+        groups: u64,
+    },
+}
+
 /// Checks that the geometry a superblock claims fits in the image.
 /// `ext4-view` reserves memory for every block group descriptor the
 /// superblock counts before it reads one, so a crafted count asks for
@@ -527,13 +566,13 @@ pub fn export_to_erofs(
 /// # Errors
 ///
 /// Returns why the geometry is impossible.
-pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), String> {
+pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), GeometryError> {
     let u32_at = |offset: usize| {
         superblock
             .get(offset..offset + 4)
             .and_then(|b| b.try_into().ok())
             .map(u32::from_le_bytes)
-            .ok_or("the superblock is truncated")
+            .ok_or(GeometryError::Truncated)
     };
     let blocks = u64::from(u32_at(0x150)?) << 32 | u64::from(u32_at(0x4)?);
     let first_data_block = u64::from(u32_at(0x14)?);
@@ -542,7 +581,7 @@ pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), String> {
     let incompat = u32_at(0x60)?;
     let desc_size = u32_at(0xfc)? >> 16;
     if log_block_size > 6 || blocks_per_group == 0 {
-        return Err("impossible block geometry".into());
+        return Err(GeometryError::Impossible);
     }
     let block_size = 1024_u64 << log_block_size;
     let desc_size = if incompat & 0x80 == 0 {
@@ -555,23 +594,29 @@ pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), String> {
         .div_ceil(blocks_per_group);
     if blocks.saturating_mul(block_size) > image_len || groups.saturating_mul(desc_size) > image_len
     {
-        return Err(format!(
-            "the superblock claims {blocks} blocks in {groups} groups, more than the image holds"
-        ));
+        return Err(GeometryError::TooLarge { blocks, groups });
     }
     Ok(())
 }
 
+/// Why a scratch image could not be loaded.
+#[derive(Debug, thiserror::Error)]
+enum ImageError {
+    #[error("reading the image: {0}")]
+    Read(#[from] io::Error),
+    #[error(transparent)]
+    Geometry(#[from] GeometryError),
+    #[error(transparent)]
+    Ext4(#[from] Ext4Error),
+}
+
 /// Loads a scratch image after [`check_geometry`].
-fn load(image: File) -> Result<Ext4, String> {
+fn load(image: File) -> Result<Ext4, ImageError> {
     use std::os::unix::fs::FileExt as _;
-    let len = image.metadata().map_err(|e| e.to_string())?.len();
     let mut superblock = [0_u8; 1024];
-    image
-        .read_exact_at(&mut superblock, 1024)
-        .map_err(|e| format!("reading the superblock: {e}"))?;
-    check_geometry(&superblock, len)?;
-    Ext4::load(Box::new(image)).map_err(|e| e.to_string())
+    image.read_exact_at(&mut superblock, 1024)?;
+    check_geometry(&superblock, image.metadata()?.len())?;
+    Ok(Ext4::load(Box::new(image))?)
 }
 
 /// Enters the sandbox for reading a scratch image from stdin, and returns
@@ -812,16 +857,44 @@ mod tests {
         let mut sb = vec![0_u8; 1024];
         sb[0x4..0x8].copy_from_slice(&u32::MAX.to_le_bytes());
         sb[0x20..0x24].copy_from_slice(&1_u32.to_le_bytes());
-        assert!(check_geometry(&sb, 1 << 20).is_err());
+        assert!(matches!(
+            check_geometry(&sb, 1 << 20),
+            Err(GeometryError::TooLarge { .. })
+        ));
         sb[0x4..0x8].copy_from_slice(&1024_u32.to_le_bytes());
-        assert!(check_geometry(&sb, 1 << 20).is_ok());
+        assert_eq!(check_geometry(&sb, 1 << 20), Ok(()));
         sb[0x150..0x154].copy_from_slice(&1_u32.to_le_bytes());
-        assert!(check_geometry(&sb, 1 << 20).is_err());
-        assert!(check_geometry(&sb[..100], 1 << 20).is_err());
+        assert!(matches!(
+            check_geometry(&sb, 1 << 20),
+            Err(GeometryError::TooLarge { .. })
+        ));
         let Some(data) = image(&[("/target/debug/x", b"x", 0o644)]) else {
             return;
         };
-        assert!(check_geometry(&data[1024..2048], data.len() as u64).is_ok());
+        assert_eq!(check_geometry(&data[1024..2048], data.len() as u64), Ok(()));
+    }
+
+    #[test]
+    fn a_superblock_that_cannot_be_read_or_makes_no_sense_is_named() {
+        let sb = vec![0_u8; 1024];
+        assert_eq!(
+            check_geometry(&sb[..100], 1 << 20),
+            Err(GeometryError::Truncated)
+        );
+        assert_eq!(check_geometry(&sb, 1 << 20), Err(GeometryError::Impossible));
+    }
+
+    #[test]
+    fn a_target_directory_nested_too_deeply_is_refused() {
+        let deep = format!("/target{}/x", "/d".repeat(MAX_DEPTH + 2));
+        let Some(data) = image(&[(deep.as_str(), b"x", 0o644)]) else {
+            return;
+        };
+        let fs = Ext4::load(Box::new(data)).unwrap();
+        assert!(matches!(
+            export(&fs, io::sink(), &[]),
+            Err(ExportError::TooDeep)
+        ));
     }
 
     #[test]

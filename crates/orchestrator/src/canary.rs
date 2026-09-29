@@ -14,9 +14,9 @@
 //! on a schedule and after every warm build; `cargo xtask canary` runs them
 //! as a test.
 
-use crateward_core::blobs::BlobStore;
+use crateward_core::blobs::{BlobError, BlobStore};
 use crateward_core::job::BuildOutcome;
-use crateward_core::name::CrateName;
+use crateward_core::name::{CrateName, CrateNameError};
 
 use crate::payload::{Package, PayloadSpec};
 use crate::trace::Role;
@@ -33,6 +33,20 @@ pub struct Canary {
 }
 
 const VERSION: &str = "0.1.0";
+
+/// Why a canary's payload could not be prepared.
+#[derive(Debug, thiserror::Error)]
+pub enum CanaryError {
+    /// The fixture could not be packed.
+    #[error("packing the fixture: {0}")]
+    Pack(#[from] std::io::Error),
+    /// The blob store refused the fixture.
+    #[error(transparent)]
+    Blob(#[from] BlobError),
+    /// The fixture's name is not a crate name.
+    #[error(transparent)]
+    Name(#[from] CrateNameError),
+}
 
 /// The host the known bad canary posts to.
 pub const EXFIL_HOST: &str = "exfil.crateward-canary.invalid";
@@ -99,7 +113,7 @@ pub const KNOWN_GOOD: Canary = Canary {
 pub const ALL: [Canary; 2] = [KNOWN_BAD, KNOWN_GOOD];
 
 impl Canary {
-    fn tar(&self) -> Result<Vec<u8>, String> {
+    fn tar(&self) -> std::io::Result<Vec<u8>> {
         let mut builder = tar::Builder::new(Vec::new());
         for (path, data) in [
             ("Cargo.toml", self.manifest),
@@ -110,15 +124,13 @@ impl Canary {
             header.set_size(data.len() as u64);
             header.set_mode(0o644);
             header.set_cksum();
-            builder
-                .append_data(
-                    &mut header,
-                    format!("{}-{VERSION}/{path}", self.name),
-                    data.as_bytes(),
-                )
-                .map_err(|e| e.to_string())?;
+            builder.append_data(
+                &mut header,
+                format!("{}-{VERSION}/{path}", self.name),
+                data.as_bytes(),
+            )?;
         }
-        builder.into_inner().map_err(|e| e.to_string())
+        builder.into_inner()
     }
 
     /// Stores the fixture and returns the payload of a job for it.
@@ -126,8 +138,8 @@ impl Canary {
     /// # Errors
     ///
     /// Fails if the blob store cannot store it.
-    pub fn payload(&self, blobs: &BlobStore) -> Result<PayloadSpec, String> {
-        let blob = blobs.put(&self.tar()?).map_err(|e| e.to_string())?;
+    pub fn payload(&self, blobs: &BlobStore) -> Result<PayloadSpec, CanaryError> {
+        let blob = blobs.put(&self.tar()?)?;
         // Any 64 hex digits do: the lockfile and the vendored checksum file
         // only have to agree.
         let checksum = blob.blake3.clone();
@@ -141,7 +153,7 @@ impl Canary {
             name = self.name
         );
         Ok(PayloadSpec {
-            name: CrateName::parse(self.name).map_err(|e| e.to_string())?,
+            name: CrateName::parse(self.name)?,
             version: semver::Version::new(0, 1, 0),
             lockfile,
             packages: vec![Package {
@@ -318,5 +330,37 @@ mod tests {
             assert!(names.contains(&format!("{}-0.1.0/build.rs", canary.name)));
             assert!(canary.manifest.contains(canary.name));
         }
+    }
+
+    fn store(test: &str) -> (std::path::PathBuf, BlobStore) {
+        let root = std::env::temp_dir().join(format!("cw-canary-{}-{test}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let blobs = BlobStore::open(&root).unwrap();
+        (root, blobs)
+    }
+
+    #[test]
+    fn a_payload_vendors_the_stored_fixture() {
+        let (root, blobs) = store("stored");
+        for canary in ALL {
+            let spec = canary.payload(&blobs).unwrap();
+            assert_eq!(spec.packages[0].name, canary.name);
+            assert!(blobs.contains(&spec.packages[0].blake3));
+            assert!(spec.lockfile.contains(&spec.packages[0].checksum));
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_blob_store_that_cannot_write_fails_the_payload() {
+        let (root, blobs) = store("broken");
+        std::fs::remove_dir_all(root.join("blobs")).unwrap();
+        std::fs::write(root.join("blobs"), b"in the way").unwrap();
+        let error = KNOWN_GOOD.payload(&blobs).unwrap_err();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            matches!(error, CanaryError::Blob(BlobError::Io { .. })),
+            "{error}"
+        );
     }
 }
