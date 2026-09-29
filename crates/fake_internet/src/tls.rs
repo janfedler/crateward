@@ -51,6 +51,17 @@ pub fn generate_ca() -> Result<(String, String), rcgen::Error> {
     Ok((cert.pem(), key.serialize_pem()))
 }
 
+/// Why an authority could not be built from PEM text.
+#[derive(Debug, thiserror::Error)]
+pub enum AuthorityError {
+    /// The private key does not parse.
+    #[error(transparent)]
+    Key(#[from] rcgen::Error),
+    /// The certificate is not PEM.
+    #[error("the certificate is not PEM")]
+    NotPem,
+}
+
 /// Issues leaf certificates for server names, signed by the authority.
 pub struct Authority {
     issuer: Issuer<'static, KeyPair>,
@@ -71,9 +82,9 @@ impl Authority {
     /// # Errors
     ///
     /// Fails if the key or certificate does not parse.
-    pub fn from_pem(cert_pem: &str, key_pem: &str) -> Result<Self, String> {
-        let key = KeyPair::from_pem(key_pem).map_err(|e| e.to_string())?;
-        let ca = pem_der(cert_pem).ok_or("the certificate is not PEM")?;
+    pub fn from_pem(cert_pem: &str, key_pem: &str) -> Result<Self, AuthorityError> {
+        let key = KeyPair::from_pem(key_pem)?;
+        let ca = pem_der(cert_pem).ok_or(AuthorityError::NotPem)?;
         Ok(Self {
             issuer: Issuer::new(ca_params(), key),
             ca,
@@ -117,7 +128,7 @@ impl ResolvesServerCert for Authority {
     }
 }
 
-/// Decodes the first PEM block of a text.
+/// Decodes the first PEM block of a text. A block without a body is none.
 fn pem_der(pem: &str) -> Option<CertificateDer<'static>> {
     let body: String = pem
         .lines()
@@ -125,7 +136,8 @@ fn pem_der(pem: &str) -> Option<CertificateDer<'static>> {
         .skip(1)
         .take_while(|l| !l.starts_with("-----END"))
         .collect();
-    base64_decode(&body).map(CertificateDer::from)
+    let der = base64_decode(&body).filter(|der| !der.is_empty())?;
+    Some(CertificateDer::from(der))
 }
 
 fn base64_decode(text: &str) -> Option<Vec<u8>> {
@@ -218,5 +230,23 @@ mod tests {
         assert_eq!(a.cert.len(), 2);
         assert!(authority.leaf("not a valid name").is_some());
         server_config(Arc::new(authority)).unwrap();
+    }
+
+    #[test]
+    fn text_that_is_no_authority_is_refused() {
+        let (cert, key) = generate_ca().unwrap();
+        assert!(matches!(
+            Authority::from_pem(&cert, "not a key"),
+            Err(AuthorityError::Key(_))
+        ));
+        for text in [
+            "not a certificate",
+            "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
+        ] {
+            assert!(matches!(
+                Authority::from_pem(text, &key),
+                Err(AuthorityError::NotPem)
+            ));
+        }
     }
 }

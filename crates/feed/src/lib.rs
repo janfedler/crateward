@@ -90,7 +90,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
             let started = tokio::time::Instant::now();
             let result = match Store::connect(&database).await {
                 Ok(store) => dump::refresh(&client, &url, &store).await,
-                Err(error) => Err(error.to_string()),
+                Err(error) => Err(error.into()),
             };
             match result {
                 Ok(crates) => tracing::info!(

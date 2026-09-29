@@ -13,6 +13,7 @@ crateward_core = { workspace = true, features = ["app", "store", "integrity"] }
 reqwest.workspace = true
 rustix = { workspace = true, features = ["fs"] }
 secrecy.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
 

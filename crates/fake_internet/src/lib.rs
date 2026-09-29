@@ -36,9 +36,16 @@ pub mod server;
 pub mod sniff;
 pub mod tls;
 
+use std::error::Error;
+use std::io::{self, Read};
+use std::process::ExitCode;
+use std::sync::Arc;
+
 use crateward_core::app::ComponentError;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
+use crateward_core::sandbox::{self, FsAccess, Limits};
+use rustix::process::{Gid, Uid};
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::FakeInternet;
@@ -63,74 +70,68 @@ pub fn run(_config: &Config) -> Result<(), ComponentError> {
 /// packet socket, switches to `uid`, enters its sandbox, then serves until
 /// killed, logging to stdout.
 #[must_use]
-pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
-    use crateward_core::sandbox::{self, FsAccess, Limits};
+pub fn dispatch(args: &[String]) -> Option<ExitCode> {
     if args.get(1).map(String::as_str) != Some(SLOT) {
         return None;
     }
-    let fail = |message: &str| {
-        eprintln!("crateward fake internet: {message}");
-        std::process::ExitCode::FAILURE
-    };
-    // The launcher writes the authority's certificate and key to stdin
-    // and closes it; an empty stdin means no TLS termination.
-    let mut pem = String::new();
-    if let Err(error) = std::io::Read::read_to_string(
-        &mut std::io::Read::take(std::io::stdin().lock(), 64 * 1024),
-        &mut pem,
-    ) {
-        return Some(fail(&format!("reading the authority: {error}")));
-    }
-    let tls = if pem.trim().is_empty() {
-        None
-    } else {
-        let authority = tls::split_pem(&pem)
-            .ok_or_else(|| "the authority is not a certificate and a key".to_owned())
-            .and_then(|(cert, key)| tls::Authority::from_pem(&cert, &key))
-            .and_then(|a| tls::server_config(std::sync::Arc::new(a)).map_err(|e| e.to_string()));
-        match authority {
-            Ok(config) => Some(config),
-            Err(error) => return Some(fail(&error)),
+    Some(match serve_slot(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("crateward fake internet: {error}");
+            ExitCode::FAILURE
         }
-    };
+    })
+}
+
+/// The TLS configuration for the authority text the launcher wrote to
+/// stdin. Empty text means no TLS termination.
+fn tls_config(pem: &str) -> Result<Option<Arc<rustls::ServerConfig>>, Box<dyn Error>> {
+    if pem.trim().is_empty() {
+        return Ok(None);
+    }
+    let (cert, key) = tls::split_pem(pem).ok_or("the authority is not a certificate and a key")?;
+    let authority = tls::Authority::from_pem(&cert, &key)?;
+    Ok(Some(tls::server_config(Arc::new(authority))?))
+}
+
+/// Moves the thread's real, effective and saved IDs to `id`, group first.
+fn become_user(id: u32) -> rustix::io::Result<()> {
+    let gid = Gid::from_raw(id);
+    rustix::thread::set_thread_res_gid(gid, gid, gid)?;
+    let uid = Uid::from_raw(id);
+    rustix::thread::set_thread_res_uid(uid, uid, uid)
+}
+
+fn serve_slot(args: &[String]) -> Result<(), Box<dyn Error>> {
+    // The launcher writes the authority's certificate and key to stdin
+    // and closes it.
+    let mut pem = String::new();
+    io::stdin()
+        .lock()
+        .take(64 * 1024)
+        .read_to_string(&mut pem)
+        .map_err(|e| format!("reading the authority: {e}"))?;
+    let tls = tls_config(&pem)?;
     drop(pem);
-    let Some(uid) = args.get(2).and_then(|a| a.parse::<u32>().ok()) else {
-        return Some(fail("usage: slot <uid>"));
-    };
-    let capture = match capture::open() {
-        Ok(socket) => socket,
-        Err(error) => return Some(fail(&format!("opening the packet socket: {error}"))),
-    };
+    let uid: u32 = args
+        .get(2)
+        .and_then(|a| a.parse().ok())
+        .ok_or("usage: slot <uid>")?;
+    let capture = capture::open().map_err(|e| format!("opening the packet socket: {e}"))?;
     // Still single threaded, so the switch covers every thread started
     // later. Moving every UID away from 0 clears all capabilities.
-    let switched = rustix::thread::set_thread_res_gid(
-        rustix::process::Gid::from_raw(uid),
-        rustix::process::Gid::from_raw(uid),
-        rustix::process::Gid::from_raw(uid),
-    )
-    .and_then(|()| {
-        let id = rustix::process::Uid::from_raw(uid);
-        rustix::thread::set_thread_res_uid(id, id, id)
-    });
-    if let Err(error) = switched {
-        return Some(fail(&format!("switching to user {uid}: {error}")));
-    }
+    become_user(uid).map_err(|e| format!("switching to user {uid}: {e}"))?;
     if rustix::process::getuid().as_raw() == 0 {
-        return Some(fail("still root after switching users"));
+        return Err("still root after switching users".into());
     }
-    let entered = sandbox::limit(Limits {
+    sandbox::limit(Limits {
         address_space: 1 << 30,
         cpu_seconds: 3_600,
         file_size: 64 * 1024 * 1024,
         open_files: 128,
-    })
-    .and_then(|()| sandbox::restrict_fs(&FsAccess::default()));
-    if let Err(error) = entered {
-        return Some(fail(&error.to_string()));
-    }
-    let out = Box::new(std::io::stdout());
-    match server::serve(server::SlotConfig::default(), out, tls, Some(capture)) {
-        Ok(()) => Some(std::process::ExitCode::SUCCESS),
-        Err(error) => Some(fail(&error.to_string())),
-    }
+    })?;
+    sandbox::restrict_fs(&FsAccess::default())?;
+    let out = Box::new(io::stdout());
+    server::serve(server::SlotConfig::default(), out, tls, Some(capture))?;
+    Ok(())
 }

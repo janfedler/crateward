@@ -15,6 +15,9 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
+use crateward_core::http::{HttpError, PoliteClient};
+use crateward_core::store::{Store, StoreError};
+
 /// Statistics of one crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CrateStat {
@@ -44,6 +47,18 @@ pub enum DumpError {
     /// A required file was not in the dump.
     #[error("the dump has no {0}")]
     Missing(&'static str),
+    /// The download failed.
+    #[error(transparent)]
+    Http(#[from] HttpError),
+    /// The server has no dump.
+    #[error("the dump is missing")]
+    NotFound,
+    /// The parser task panicked or was cancelled.
+    #[error(transparent)]
+    Task(#[from] tokio::task::JoinError),
+    /// Storing the statistics failed.
+    #[error(transparent)]
+    Store(#[from] StoreError),
 }
 
 fn column(headers: &csv::StringRecord, file: &'static str, name: &str) -> Result<usize, DumpError> {
@@ -220,16 +235,8 @@ impl Read for ChannelReader {
 /// # Errors
 ///
 /// Fails if the download, the parse or the store fails.
-pub async fn refresh(
-    client: &crateward_core::http::PoliteClient,
-    url: &str,
-    store: &crateward_core::store::Store,
-) -> Result<u64, String> {
-    let response = client
-        .stream(url)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("the dump is missing")?;
+pub async fn refresh(client: &PoliteClient, url: &str, store: &Store) -> Result<u64, DumpError> {
+    let mut response = client.stream(url).await?.ok_or(DumpError::NotFound)?;
     let (tx, rx) = tokio::sync::mpsc::channel(64);
     let parser = tokio::task::spawn_blocking(move || {
         parse(ChannelReader {
@@ -237,26 +244,19 @@ pub async fn refresh(
             current: bytes::Bytes::new(),
         })
     });
-    let mut response = response;
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+    while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
         // The parser stops reading after the four files it needs.
         if tx.send(chunk).await.is_err() {
             break;
         }
     }
     drop(tx);
-    let stats = parser
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let stats = parser.await??;
     let rows: Vec<(String, i64, i64)> = stats
         .into_iter()
         .map(|s| (s.name, s.downloads, s.reverse_dependencies))
         .collect();
-    store
-        .upsert_crate_stats(&rows)
-        .await
-        .map_err(|e| e.to_string())
+    Ok(store.upsert_crate_stats(&rows).await?)
 }
 
 #[cfg(test)]

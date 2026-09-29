@@ -52,6 +52,24 @@ pub fn message(escalation: &HumanEscalation) -> (String, String, u8) {
     )
 }
 
+/// Why an alert was not delivered.
+#[derive(Debug, thiserror::Error)]
+pub enum NotifyError {
+    /// The request failed.
+    #[error(transparent)]
+    Request(reqwest::Error),
+    /// The server did not accept the alert.
+    #[error("ntfy answered {0}")]
+    Refused(reqwest::StatusCode),
+}
+
+/// The request URL holds the secret topic, so it never stays in an error.
+impl From<reqwest::Error> for NotifyError {
+    fn from(error: reqwest::Error) -> Self {
+        Self::Request(error.without_url())
+    }
+}
+
 /// Sends alerts where the configuration says.
 #[derive(Debug)]
 pub enum Notifier {
@@ -68,12 +86,9 @@ pub enum Notifier {
 
 impl Notifier {
     /// The notifier of a configuration.
-    ///
-    /// # Errors
-    ///
-    /// Fails if the HTTP client cannot be built.
-    pub fn new(config: &NotifierConfig, client: &reqwest::Client) -> Result<Self, String> {
-        Ok(match config {
+    #[must_use]
+    pub fn new(config: &NotifierConfig, client: &reqwest::Client) -> Self {
+        match config {
             NotifierConfig::Log => Self::Log,
             NotifierConfig::Ntfy { server_url, topic } => Self::Ntfy {
                 client: client.clone(),
@@ -83,7 +98,7 @@ impl Notifier {
                     topic.expose_secret()
                 ),
             },
-        })
+        }
     }
 
     /// Delivers one alert.
@@ -91,29 +106,24 @@ impl Notifier {
     /// # Errors
     ///
     /// Fails if the server does not accept it.
-    pub async fn send(&self, escalation: &HumanEscalation) -> Result<(), String> {
+    pub async fn send(&self, escalation: &HumanEscalation) -> Result<(), NotifyError> {
         let (title, body, priority) = message(escalation);
-        match self {
-            Self::Log => {
-                tracing::warn!(%title, %body, priority, "alert (log only)");
-                Ok(())
-            }
-            Self::Ntfy { client, url } => {
-                let response = client
-                    .post(url)
-                    .header("Title", title)
-                    .header("Priority", priority.to_string())
-                    .body(body)
-                    .send()
-                    .await
-                    .map_err(|e| e.without_url().to_string())?;
-                if response.status().is_success() {
-                    Ok(())
-                } else {
-                    Err(format!("ntfy answered {}", response.status()))
-                }
-            }
+        let Self::Ntfy { client, url } = self else {
+            tracing::warn!(%title, %body, priority, "alert (log only)");
+            return Ok(());
+        };
+        let response = client
+            .post(url)
+            .header("Title", title)
+            .header("Priority", priority.to_string())
+            .body(body)
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(NotifyError::Refused(status));
         }
+        Ok(())
     }
 }
 
@@ -138,5 +148,22 @@ mod tests {
         });
         assert!(stage.0.contains("fetch"));
         assert_eq!(stage.2, 3);
+    }
+
+    #[tokio::test]
+    async fn a_failed_request_does_not_reveal_the_topic() {
+        let notifier = Notifier::Ntfy {
+            client: reqwest::Client::new(),
+            url: "https://127.0.0.1:1/secret-topic".to_owned(),
+        };
+        let error = notifier.send(&HumanEscalation::KvmError).await.unwrap_err();
+        assert!(matches!(error, NotifyError::Request(_)), "{error}");
+        assert!(!format!("{error:?} {error}").contains("secret-topic"));
+    }
+
+    #[tokio::test]
+    async fn a_log_notifier_always_delivers() {
+        let notifier = Notifier::new(&NotifierConfig::Log, &reqwest::Client::new());
+        notifier.send(&HumanEscalation::KvmError).await.unwrap();
     }
 }

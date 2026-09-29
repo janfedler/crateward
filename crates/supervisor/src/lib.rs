@@ -220,7 +220,7 @@ impl Supervisor<'_> {
                     Ok(()) => AlertOutcome::Sent,
                     Err(error) => {
                         tracing::warn!(%error, key = %alert.dedup_key, "alert not delivered");
-                        AlertOutcome::Failed(error)
+                        AlertOutcome::Failed(error.to_string())
                     }
                 }
             } else {
@@ -304,7 +304,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             config,
             store,
             policies: Policies::from_config(&config.stages).map_err(fatal)?,
-            notifier: Notifier::new(&config.notifier, &client).map_err(fatal)?,
+            notifier: Notifier::new(&config.notifier, &client),
             integrity: integrity::Integrity::new(
                 &config.instance.data_dir,
                 Duration::from_secs(
