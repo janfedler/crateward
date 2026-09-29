@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, evidence};
 use crate::manifest::{self, ManifestFacts};
-use crate::rust::{self, FileScan};
+use crate::rust::{self, Include};
 use crate::yara::Rules;
 
 /// Version of the analysis. A stored report from an older version is
@@ -147,22 +147,15 @@ fn crate_finding(kind: FindingKind, severity: Severity, file: &str, text: &str) 
     }
 }
 
-/// Analyzes an unpacked crate tar.
-///
-/// # Errors
-///
-/// Fails if the tar cannot be read or has no manifest.
-pub fn analyze(
-    tar: &[u8],
-    rules: &Rules,
-    limits: &AnalyzeLimits,
-) -> Result<StaticReport, AnalyzeError> {
-    // Read everything first: contexts depend on the manifest, which may come
-    // after the sources in the tar.
-    let mut contents: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+/// The files of a crate by their path in it.
+type Files = BTreeMap<String, Vec<u8>>;
+
+/// Reads every regular file of the tar by its path in the crate. A file over
+/// the scan limit is listed as skipped instead.
+fn read_files(tar: &[u8], limits: &AnalyzeLimits) -> Result<(Files, Vec<Skipped>), AnalyzeError> {
+    let mut contents = BTreeMap::new();
     let mut skipped = Vec::new();
-    let mut archive = tar::Archive::new(tar);
-    for entry in archive.entries()? {
+    for entry in tar::Archive::new(tar).entries()? {
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
             continue;
@@ -184,18 +177,23 @@ pub fn analyze(
         entry.read_to_end(&mut data)?;
         contents.insert(rel, data);
     }
-    let manifest_text = contents.get("Cargo.toml").ok_or(AnalyzeError::NoManifest)?;
-    let names: BTreeSet<String> = contents.keys().cloned().collect();
-    let facts = manifest::parse(&String::from_utf8_lossy(manifest_text), &names);
+    Ok((contents, skipped))
+}
 
-    let mut findings = Vec::new();
-    let mut rust_files = 0_u32;
+/// Runs the rules over every file and parses the Rust sources, adding to
+/// the report. Returns the `include_bytes!` and `include_str!` targets, with
+/// the file and context they were found in.
+fn scan_files(
+    contents: &Files,
+    rules: &Rules,
+    limits: &AnalyzeLimits,
+    report: &mut StaticReport,
+) -> Vec<(String, CodeContext, Include)> {
     let mut rust_bytes = 0_u64;
-    let mut library_platform = Platform::Any;
     let mut includes = Vec::new();
-    for (file, data) in &contents {
-        let context = facts.context_of(file);
-        findings.extend(rules.scan(file, data, context));
+    for (file, data) in contents {
+        let context = report.manifest.context_of(file);
+        report.findings.extend(rules.scan(file, data, context));
         if !std::path::Path::new(file)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("rs"))
@@ -204,28 +202,36 @@ pub fn analyze(
         }
         let size = data.len() as u64;
         if size > limits.max_rust_file_bytes || rust_bytes + size > limits.max_rust_bytes {
-            skipped.push(Skipped {
+            report.skipped.push(Skipped {
                 file: file.clone(),
                 reason: format!("{size} bytes of Rust not parsed, over the parse limit"),
             });
             continue;
         }
         rust_bytes += size;
-        rust_files += 1;
-        let FileScan {
-            findings: found,
-            includes: included,
-            file_cfg,
-        } = rust::scan_file(file, &String::from_utf8_lossy(data), context);
-        findings.extend(found);
+        report.rust_files += 1;
+        let scan = rust::scan_file(file, &String::from_utf8_lossy(data), context);
+        report.findings.extend(scan.findings);
         if file == "src/lib.rs"
-            && let Some(cfg) = file_cfg
+            && let Some(cfg) = scan.file_cfg
         {
-            library_platform = Platform::from_cfg(&cfg);
+            report.library_platform = Platform::from_cfg(&cfg);
         }
-        includes.extend(included.into_iter().map(|i| (file.clone(), context, i)));
+        includes.extend(
+            scan.includes
+                .into_iter()
+                .map(|i| (file.clone(), context, i)),
+        );
     }
+    includes
+}
 
+/// A finding for every included file that holds binary content.
+fn included_binaries(
+    contents: &Files,
+    includes: Vec<(String, CodeContext, Include)>,
+) -> Vec<Finding> {
+    let mut found = Vec::new();
     for (file, context, include) in includes {
         let Some(target) = include_target(&file, &include.target) else {
             continue;
@@ -233,75 +239,73 @@ pub fn analyze(
         let Some(data) = contents.get(&target) else {
             continue;
         };
-        if looks_binary(data) {
-            let base = Severity::Medium;
-            findings.push(Finding {
-                kind: FindingKind::IncludedBinary,
-                severity: if context.runs_at_build_time() {
-                    base.raised()
-                } else {
-                    base
-                },
-                file,
-                line: Some(include.line),
-                context,
-                cfg: include.cfg.clone(),
-                platform: include
-                    .cfg
-                    .as_deref()
-                    .map_or(Platform::Any, Platform::from_cfg),
-                evidence: evidence(&format!("{target} ({} bytes)", data.len())),
-            });
+        if !looks_binary(data) {
+            continue;
         }
-    }
-
-    // A build time file set that reaches the network and also runs programs
-    // or writes shell commands has the shape of a downloader.
-    let build_time = |k: fn(&FindingKind) -> bool| {
-        findings
-            .iter()
-            .find(|f| f.context.runs_at_build_time() && k(&f.kind))
-            .cloned()
-    };
-    // A URL counts only as a bare literal: URLs inside prose (error
-    // messages pointing at documentation) are not downloads.
-    let network = findings
-        .iter()
-        .find(|f| {
-            f.context.runs_at_build_time()
-                && (f.kind == FindingKind::NetworkAccess
-                    || (f.kind == FindingKind::UrlLiteral && !f.evidence.contains([' ', '\\'])))
-        })
-        .cloned();
-    let execution = build_time(|k| {
-        matches!(
-            k,
-            FindingKind::ProcessSpawn | FindingKind::ShellCommand | FindingKind::IncludedBinary
-        )
-    });
-    if let (Some(network), Some(execution)) = (network, execution) {
-        findings.push(Finding {
-            kind: FindingKind::DownloaderPattern,
-            severity: Severity::High,
-            file: network.file.clone(),
-            line: network.line,
-            context: network.context,
-            cfg: network.cfg.clone(),
-            platform: network.platform,
-            evidence: evidence(&format!(
-                "{} at {}:{} with {} at {}:{}",
-                network.evidence,
-                network.file,
-                network.line.unwrap_or(0),
-                execution.evidence,
-                execution.file,
-                execution.line.unwrap_or(0)
-            )),
+        let base = Severity::Medium;
+        found.push(Finding {
+            kind: FindingKind::IncludedBinary,
+            severity: if context.runs_at_build_time() {
+                base.raised()
+            } else {
+                base
+            },
+            file,
+            line: Some(include.line),
+            context,
+            platform: include
+                .cfg
+                .as_deref()
+                .map_or(Platform::Any, Platform::from_cfg),
+            cfg: include.cfg,
+            evidence: evidence(&format!("{target} ({} bytes)", data.len())),
         });
     }
+    found
+}
 
+/// A build time file set that reaches the network and also runs programs
+/// or writes shell commands has the shape of a downloader.
+fn downloader_pattern(findings: &[Finding]) -> Option<Finding> {
+    let at_build_time = || findings.iter().filter(|f| f.context.runs_at_build_time());
+    // A URL counts only as a bare literal: URLs inside prose (error
+    // messages pointing at documentation) are not downloads.
+    let network = at_build_time().find(|f| {
+        f.kind == FindingKind::NetworkAccess
+            || (f.kind == FindingKind::UrlLiteral && !f.evidence.contains([' ', '\\']))
+    })?;
+    let execution = at_build_time().find(|f| {
+        matches!(
+            f.kind,
+            FindingKind::ProcessSpawn | FindingKind::ShellCommand | FindingKind::IncludedBinary
+        )
+    })?;
+    Some(Finding {
+        kind: FindingKind::DownloaderPattern,
+        severity: Severity::High,
+        file: network.file.clone(),
+        line: network.line,
+        context: network.context,
+        cfg: network.cfg.clone(),
+        platform: network.platform,
+        evidence: evidence(&format!(
+            "{} at {}:{} with {} at {}:{}",
+            network.evidence,
+            network.file,
+            network.line.unwrap_or(0),
+            execution.evidence,
+            execution.file,
+            execution.line.unwrap_or(0)
+        )),
+    })
+}
+
+/// Findings about the crate as a whole: the build script, a proc macro and
+/// a native library.
+fn manifest_findings(facts: &ManifestFacts) -> Vec<Finding> {
+    let mut found = Vec::new();
     if let Some(script) = &facts.build_script {
-        findings.push(crate_finding(
+        found.push(crate_finding(
             FindingKind::BuildScript,
             Severity::Low,
             script,
@@ -309,7 +313,7 @@ pub fn analyze(
         ));
     }
     if facts.proc_macro {
-        findings.push(crate_finding(
+        found.push(crate_finding(
             FindingKind::ProcMacro,
             Severity::Low,
             "Cargo.toml",
@@ -317,42 +321,72 @@ pub fn analyze(
         ));
     }
     if let Some(links) = &facts.links {
-        findings.push(crate_finding(
+        found.push(crate_finding(
             FindingKind::NativeLink,
             Severity::Info,
             "Cargo.toml",
             &format!("links = \"{links}\""),
         ));
     }
+    found
+}
 
+/// Findings per platform, leaving out those that apply everywhere.
+fn platform_counts(findings: &[Finding]) -> BTreeMap<String, u32> {
     let mut platforms = BTreeMap::new();
-    for f in &findings {
-        if f.platform != Platform::Any {
-            *platforms
-                .entry(format!("{:?}", f.platform).to_lowercase())
-                .or_insert(0) += 1;
-        }
+    for f in findings.iter().filter(|f| f.platform != Platform::Any) {
+        *platforms
+            .entry(format!("{:?}", f.platform).to_lowercase())
+            .or_insert(0) += 1;
     }
-    findings.sort_by(|a, b| {
+    platforms
+}
+
+/// Analyzes an unpacked crate tar.
+///
+/// # Errors
+///
+/// Fails if the tar cannot be read or has no manifest.
+pub fn analyze(
+    tar: &[u8],
+    rules: &Rules,
+    limits: &AnalyzeLimits,
+) -> Result<StaticReport, AnalyzeError> {
+    // Read everything first: contexts depend on the manifest, which may come
+    // after the sources in the tar.
+    let (contents, skipped) = read_files(tar, limits)?;
+    let manifest_text = contents.get("Cargo.toml").ok_or(AnalyzeError::NoManifest)?;
+    let names: BTreeSet<String> = contents.keys().cloned().collect();
+    let mut report = StaticReport {
+        analyzer_version: ANALYZER_VERSION,
+        manifest: manifest::parse(&String::from_utf8_lossy(manifest_text), &names),
+        files: u32::try_from(contents.len()).unwrap_or(u32::MAX),
+        rust_files: 0,
+        skipped,
+        findings: Vec::new(),
+        findings_dropped: 0,
+        library_platform: Platform::Any,
+        platforms: BTreeMap::new(),
+    };
+    // The order of the findings decides which ones the downloader pattern
+    // is built from and how equal ones sort.
+    let includes = scan_files(&contents, rules, limits, &mut report);
+    report
+        .findings
+        .extend(included_binaries(&contents, includes));
+    report.findings.extend(downloader_pattern(&report.findings));
+    report.findings.extend(manifest_findings(&report.manifest));
+    report.platforms = platform_counts(&report.findings);
+    report.findings.sort_by(|a, b| {
         b.severity
             .cmp(&a.severity)
             .then_with(|| a.file.cmp(&b.file))
             .then_with(|| a.line.cmp(&b.line))
     });
-    let dropped = findings.len().saturating_sub(limits.max_findings);
-    findings.truncate(limits.max_findings);
-
-    Ok(StaticReport {
-        analyzer_version: ANALYZER_VERSION,
-        manifest: facts,
-        files: u32::try_from(contents.len()).unwrap_or(u32::MAX),
-        rust_files,
-        skipped,
-        findings,
-        findings_dropped: u32::try_from(dropped).unwrap_or(u32::MAX),
-        library_platform,
-        platforms,
-    })
+    let dropped = report.findings.len().saturating_sub(limits.max_findings);
+    report.findings.truncate(limits.max_findings);
+    report.findings_dropped = u32::try_from(dropped).unwrap_or(u32::MAX);
+    Ok(report)
 }
 
 #[cfg(test)]
@@ -465,5 +499,52 @@ mod tests {
             Some("data/x")
         );
         assert_eq!(include_target("src/lib.rs", "../../../etc/passwd"), None);
+    }
+
+    #[test]
+    fn limits_skip_files_and_drop_findings() {
+        let big = "// padding padding padding\n".repeat(8);
+        let tar = fixture(&[
+            (
+                "Cargo.toml",
+                b"[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n\
+                  [lib]\nproc-macro = true\n",
+            ),
+            ("build.rs", b"fn main() {}\n"),
+            ("src/lib.rs", b"pub fn f() {}\n"),
+            (
+                "src/mac.rs",
+                b"#[cfg(target_os = \"macos\")]\nfn m() { std::process::Command::new(\"open\").status().ok(); }\n",
+            ),
+            ("src/big.rs", big.as_bytes()),
+            ("data/huge.bin", &[b'x'; 400]),
+        ]);
+        let limits = AnalyzeLimits {
+            max_rust_file_bytes: 150,
+            max_rust_bytes: 1_000,
+            max_yara_file_bytes: 300,
+            max_findings: 1,
+        };
+        let report = analyze(&tar, &Rules::builtin().unwrap(), &limits).unwrap();
+        assert_eq!((report.files, report.rust_files), (5, 3));
+        let skipped: Vec<_> = report
+            .skipped
+            .iter()
+            .map(|s| (s.file.as_str(), s.reason.as_str()))
+            .collect();
+        assert_eq!(
+            skipped,
+            [
+                ("data/huge.bin", "400 bytes, larger than the scan limit"),
+                (
+                    "src/big.rs",
+                    "216 bytes of Rust not parsed, over the parse limit"
+                ),
+            ]
+        );
+        // The strongest finding stays; the platform counts include the rest.
+        assert_eq!(kinds(&report), ["process_spawn"]);
+        assert_eq!(report.findings_dropped, 2);
+        assert_eq!(report.platforms, BTreeMap::from([("apple".to_owned(), 1)]));
     }
 }

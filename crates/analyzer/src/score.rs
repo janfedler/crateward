@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crateward_core::job::BuildOutcome;
 use crateward_core::verdict::{Coverage, Evidence, EvidenceSource, RiskLevel, Verdict};
-use crateward_orchestrator::trace::{Process, Role, TraceSummary};
+use crateward_orchestrator::trace::{Process, Role};
 use crateward_orchestrator::worker::RunReport;
 use crateward_static_analysis::analyze::StaticReport;
 use crateward_static_analysis::diff::VersionDiff;
@@ -50,6 +50,9 @@ pub struct Inputs<'a> {
     /// The previous analyzed version's behavior profile.
     pub previous_profile: Option<&'a [String]>,
 }
+
+/// The processes of a run by pid.
+type Processes<'a> = HashMap<u32, &'a Process>;
 
 /// Points per group, and each group's cap.
 struct Groups {
@@ -118,7 +121,7 @@ impl Groups {
 
 /// The package whose code a process ran, following the process tree up to
 /// a build script or to `rustc` compiling a crate.
-fn package_of(pid: u32, processes: &HashMap<u32, &Process>) -> Option<String> {
+fn package_of(pid: u32, processes: &Processes<'_>) -> Option<String> {
     let mut current = processes.get(&pid).copied();
     for _ in 0..64 {
         let p = current?;
@@ -346,10 +349,17 @@ fn score_diff(inputs: &Inputs<'_>, groups: &mut Groups) {
 }
 
 fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
-    let t: &TraceSummary = &run.trace;
-    let processes: HashMap<u32, &Process> = t.processes.iter().map(|p| (p.pid, p)).collect();
-    let pkg = |pid: u32| package_of(pid, &processes);
+    let processes: Processes<'_> = run.trace.processes.iter().map(|p| (p.pid, p)).collect();
+    score_theft(run, groups, profile);
+    score_integrity(run, &processes, groups, profile);
+    score_files(run, &processes, groups, profile);
+    score_disk(run, groups, profile);
+    score_network(run, &processes, groups, profile);
+    score_execution(run, &processes, groups, profile);
+}
 
+/// Honeytokens that left the VM, and honeytokens copied inside it.
+fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     for leak in &run.leaked {
         profile.insert(format!("leak:{}", leak.kind));
         groups.add(
@@ -378,7 +388,17 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
             },
         );
     }
-    for p in t.processes.iter().filter(|p| p.became_root) {
+}
+
+/// A process that became root, tampering with the tracing, and a guest that
+/// stopped itself.
+fn score_integrity(
+    run: &RunReport,
+    processes: &Processes<'_>,
+    groups: &mut Groups,
+    profile: &mut BTreeSet<String>,
+) {
+    for p in run.trace.processes.iter().filter(|p| p.became_root) {
         profile.insert("root".into());
         groups.add(
             Group::Integrity,
@@ -390,12 +410,12 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
                     "{} ran as root although the build runs unprivileged.",
                     p.exe
                 ),
-                package: pkg(p.pid),
+                package: package_of(p.pid, processes),
                 location: Some(format!("pid {}", p.pid)),
             },
         );
     }
-    for x in &t.tamper {
+    for x in &run.trace.tamper {
         profile.insert(format!(
             "tamper:{}",
             x.what.split(' ').next().unwrap_or("?")
@@ -407,7 +427,7 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
                 points: 60,
                 source: EvidenceSource::Trace,
                 summary: format!("Tamper attempt: {}.", x.what),
-                package: pkg(x.pid),
+                package: package_of(x.pid, processes),
                 location: Some(format!("pid {}", x.pid)),
             },
         );
@@ -426,7 +446,17 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
             },
         );
     }
-    for f in &t.sensitive_opens {
+}
+
+/// Credentials the build opened, and files it wrote outside its work
+/// directory.
+fn score_files(
+    run: &RunReport,
+    processes: &Processes<'_>,
+    groups: &mut Groups,
+    profile: &mut BTreeSet<String>,
+) {
+    for f in &run.trace.sensitive_opens {
         let exe = f.exe.rsplit('/').next().unwrap_or(&f.exe);
         if exe == "cargo" {
             continue;
@@ -441,107 +471,105 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
                 points,
                 source: EvidenceSource::Trace,
                 summary: format!("{} opened {}.", f.exe, f.path),
-                package: pkg(f.pid),
+                package: package_of(f.pid, processes),
                 location: Some(f.path.clone()),
             },
         );
     }
-    for f in &t.writes_outside_work {
-        let persistent = persistence(&f.path);
-        profile.insert(
-            if persistent {
-                "write:persistence"
-            } else {
-                "write:outside"
-            }
-            .into(),
-        );
+    for f in &run.trace.writes_outside_work {
+        let (behavior, signal, points) = if persistence(&f.path) {
+            ("write:persistence", "write_persistence", 40)
+        } else {
+            ("write:outside", "write_outside_build", 15)
+        };
+        profile.insert(behavior.into());
         groups.add(
             Group::Persistence,
             Evidence {
-                signal: if persistent {
-                    "write_persistence"
-                } else {
-                    "write_outside_build"
-                }
-                .into(),
-                points: if persistent { 40 } else { 15 },
+                signal: signal.into(),
+                points,
                 source: EvidenceSource::Trace,
                 summary: format!("{} wrote {}.", f.exe, f.path),
-                package: pkg(f.pid),
+                package: package_of(f.pid, processes),
                 location: Some(f.path.clone()),
             },
         );
     }
-    if let Some(s) = &run.scratch {
-        for e in &s.outside_build {
-            let persistent = persistence(&e.path);
-            profile.insert(
-                if persistent {
-                    "disk:persistence"
-                } else {
-                    "disk:outside"
-                }
-                .into(),
-            );
-            groups.add(
-                Group::Persistence,
-                Evidence {
-                    signal: if persistent {
-                        "disk_persistence"
-                    } else {
-                        "disk_outside_build"
-                    }
-                    .into(),
-                    points: if persistent { 40 } else { 10 },
-                    source: EvidenceSource::Disk,
-                    summary: format!("The build left {} ({}).", e.path, e.kind),
-                    package: None,
-                    location: Some(e.path.clone()),
-                },
-            );
-        }
-        for e in &s.executables_outside_target {
-            profile.insert("disk:executable".into());
-            groups.add(
-                Group::Persistence,
-                Evidence {
-                    signal: "disk_executable".into(),
-                    points: 20,
-                    source: EvidenceSource::Disk,
-                    summary: format!("The build left an executable at {}.", e.path),
-                    package: None,
-                    location: Some(e.path.clone()),
-                },
-            );
-        }
-        for e in &s.setid {
-            profile.insert("disk:setid".into());
-            groups.add(
-                Group::Integrity,
-                Evidence {
-                    signal: "disk_setid".into(),
-                    points: 40,
-                    source: EvidenceSource::Disk,
-                    summary: format!("The build left a set ID file at {}.", e.path),
-                    package: None,
-                    location: Some(e.path.clone()),
-                },
-            );
-        }
+}
+
+/// What the build left on its scratch disk.
+fn score_disk(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
+    let Some(scratch) = &run.scratch else { return };
+    for e in &scratch.outside_build {
+        let (behavior, signal, points) = if persistence(&e.path) {
+            ("disk:persistence", "disk_persistence", 40)
+        } else {
+            ("disk:outside", "disk_outside_build", 10)
+        };
+        profile.insert(behavior.into());
+        groups.add(
+            Group::Persistence,
+            Evidence {
+                signal: signal.into(),
+                points,
+                source: EvidenceSource::Disk,
+                summary: format!("The build left {} ({}).", e.path, e.kind),
+                package: None,
+                location: Some(e.path.clone()),
+            },
+        );
     }
-    // The network, from the host's side: names the build looked up and
-    // what it sent. Loopback and the guest's own name service socket are
-    // no evidence.
-    let senders: BTreeSet<String> = t
+    for e in &scratch.executables_outside_target {
+        profile.insert("disk:executable".into());
+        groups.add(
+            Group::Persistence,
+            Evidence {
+                signal: "disk_executable".into(),
+                points: 20,
+                source: EvidenceSource::Disk,
+                summary: format!("The build left an executable at {}.", e.path),
+                package: None,
+                location: Some(e.path.clone()),
+            },
+        );
+    }
+    for e in &scratch.setid {
+        profile.insert("disk:setid".into());
+        groups.add(
+            Group::Integrity,
+            Evidence {
+                signal: "disk_setid".into(),
+                points: 40,
+                source: EvidenceSource::Disk,
+                summary: format!("The build left a set ID file at {}.", e.path),
+                package: None,
+                location: Some(e.path.clone()),
+            },
+        );
+    }
+}
+
+/// The network, from the host's side: names the build looked up and what
+/// it sent. Loopback and the guest's own name service socket are no
+/// evidence.
+fn score_network(
+    run: &RunReport,
+    processes: &Processes<'_>,
+    groups: &mut Groups,
+    profile: &mut BTreeSet<String>,
+) {
+    let senders: BTreeSet<String> = run
+        .trace
         .sockets
         .iter()
         .filter(|s| !s.address.starts_with("unix:"))
-        .filter_map(|s| pkg(s.pid))
+        .filter_map(|s| package_of(s.pid, processes))
         .collect();
-    let sender = (senders.len() == 1)
-        .then(|| senders.iter().next().cloned())
-        .flatten();
+    let sender = if senders.len() == 1 {
+        senders.into_iter().next()
+    } else {
+        None
+    };
     for name in &run.network.dns {
         profile.insert(format!("net:{name}"));
         groups.add(
@@ -565,7 +593,7 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
                 points: 20,
                 source: EvidenceSource::Network,
                 summary: "The build connected to an address without a name lookup.".into(),
-                package: sender.clone(),
+                package: sender,
                 location: None,
             },
         );
@@ -584,14 +612,24 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
             },
         );
     }
-    // Programs that build scripts ran, directly or through children.
-    let mut seen: BTreeMap<(String, &'static str), u32> = BTreeMap::new();
-    for p in &t.processes {
+}
+
+/// Programs that build scripts ran, directly or through children.
+fn score_execution(
+    run: &RunReport,
+    processes: &Processes<'_>,
+    groups: &mut Groups,
+    profile: &mut BTreeSet<String>,
+) {
+    let mut seen = BTreeSet::new();
+    for p in &run.trace.processes {
         let Some((kind, points)) = notable_program(&p.exe) else {
             continue;
         };
-        let Some(package) = pkg(p.pid) else { continue };
-        if seen.insert((package.clone(), kind), points).is_none() {
+        let Some(package) = package_of(p.pid, processes) else {
+            continue;
+        };
+        if seen.insert((package.clone(), kind)) {
             profile.insert(format!("exec:{kind}"));
             groups.add(
                 Group::Execution,
@@ -671,6 +709,7 @@ pub fn score(inputs: &Inputs<'_>) -> Verdict {
 
 #[cfg(test)]
 mod tests {
+    use crateward_orchestrator::trace::TraceSummary;
     use serde_json::json;
 
     use super::*;
@@ -858,5 +897,231 @@ mod tests {
         .unwrap();
         let map: HashMap<u32, &Process> = [(9, &rustc)].into();
         assert_eq!(package_of(9, &map).as_deref(), Some("my-macro"));
+    }
+
+    /// Something for every group in one run, and a second run that adds one
+    /// signal and repeats another.
+    #[test]
+    fn a_run_is_scored_group_by_group() {
+        let entry =
+            |path: &str| json!({"path": path, "kind": "file", "size": 1, "mode": 420, "uid": 1000});
+        let file = |pid: u32, exe: &str, path: &str| json!({"pid": pid, "exe": exe, "path": path, "flags": 0, "ms": 3});
+        let other = "/work/target/debug/build/other-0123456789abcdef/build-script-build";
+        let mut first = run(json!({
+            "outcome": "guest_stopped",
+            "leaked": [{"kind": "cargo_registry_token", "via": "http://exfil.example"}],
+            "tokens_in_trace": [{"kind": "aws_key",
+                "via": "/work/target/debug/build/dep-0123456789abcdef/out/k"}],
+            "network": {"dns": ["a.example"], "connections": [], "udp_datagrams": 0,
+                        "refused": 0, "truncated": false, "packets": ["icmp echo"]},
+            "scratch": {"files": 0, "directories": 0, "bytes": 0, "incomplete": false,
+                "outside_build": [entry("/home/u/.config/autostart/a.desktop"),
+                                  entry("/tmp/left")],
+                "executables_outside_target": [entry("/work/src/tool")],
+                "setid": [entry("/work/su")], "special": [], "links_outside": [],
+                "planted_changed": [], "tokens_found": [], "omitted": 0},
+        }));
+        let t = &mut first.trace;
+        for (pid, ppid, exe, role, root) in [
+            (4, 2, "/usr/bin/sudo", "other", true),
+            (5, 1, other, "build_script", false),
+        ] {
+            t.processes.push(
+                serde_json::from_value(json!({
+                    "pid": pid, "ppid": ppid, "exe": exe, "argv": [exe], "role": role,
+                    "started_ms": 3, "became_root": root
+                }))
+                .unwrap(),
+            );
+        }
+        t.tamper.push(
+            serde_json::from_value(json!({"pid": 2, "what": "ptrace attach", "ms": 5})).unwrap(),
+        );
+        for (pid, exe, path) in [
+            (
+                1,
+                "/usr/local/bin/cargo",
+                "/work/home/.cargo/credentials.toml",
+            ),
+            (2, SCRIPT, "/work/home/.ssh/id_ed25519"),
+            (3, "/usr/bin/curl", "/proc/1/environ"),
+        ] {
+            t.sensitive_opens
+                .push(serde_json::from_value(file(pid, exe, path)).unwrap());
+        }
+        for (pid, exe, path) in [
+            (2, SCRIPT, "/work/home/.bashrc"),
+            (3, "/usr/bin/curl", "/tmp/x"),
+        ] {
+            t.writes_outside_work
+                .push(serde_json::from_value(file(pid, exe, path)).unwrap());
+        }
+        // The name service socket is no evidence, even from another package.
+        for (pid, exe, address) in [
+            (3, "/usr/bin/curl", "1.2.3.4:443"),
+            (5, other, "unix:/run/nscd/socket"),
+        ] {
+            t.sockets.push(
+                serde_json::from_value(json!({
+                    "pid": pid, "exe": exe, "how": "connect", "address": address,
+                    "sock_type": 1, "ms": 3
+                }))
+                .unwrap(),
+            );
+        }
+        let second = run(json!({
+            "network": {"dns": [], "connections": [{"dst": "1.2.3.4:443",
+                "protocol": "unknown", "bytes": 10}], "udp_datagrams": 0, "refused": 0,
+                "truncated": false},
+        }));
+        let mut groups = Groups { items: Vec::new() };
+        let mut profile = BTreeSet::new();
+        for r in [&first, &second] {
+            score_run(r, &mut groups, &mut profile);
+        }
+        let items: Vec<_> = groups
+            .items
+            .iter()
+            .map(|(group, e)| {
+                (
+                    *group,
+                    e.signal.as_str(),
+                    e.points,
+                    e.package.as_deref(),
+                    e.location.as_deref(),
+                )
+            })
+            .collect();
+        let dep_key = "/work/target/debug/build/dep-0123456789abcdef/out/k";
+        assert_eq!(
+            items,
+            [
+                (
+                    Group::Theft,
+                    "honeytoken_left_vm",
+                    100,
+                    None,
+                    Some("http://exfil.example")
+                ),
+                (
+                    Group::Theft,
+                    "honeytoken_copied",
+                    60,
+                    Some("dep"),
+                    Some(dep_key)
+                ),
+                (
+                    Group::Integrity,
+                    "became_root",
+                    80,
+                    Some("evil"),
+                    Some("pid 4")
+                ),
+                (
+                    Group::Integrity,
+                    "tamper_attempt",
+                    60,
+                    Some("evil"),
+                    Some("pid 2")
+                ),
+                (Group::Integrity, "guest_stopped", 50, None, None),
+                (
+                    Group::Credentials,
+                    "read_ssh",
+                    50,
+                    Some("evil"),
+                    Some("/work/home/.ssh/id_ed25519")
+                ),
+                (
+                    Group::Credentials,
+                    "read_other_process",
+                    30,
+                    Some("evil"),
+                    Some("/proc/1/environ")
+                ),
+                (
+                    Group::Persistence,
+                    "write_persistence",
+                    40,
+                    Some("evil"),
+                    Some("/work/home/.bashrc")
+                ),
+                (
+                    Group::Persistence,
+                    "write_outside_build",
+                    15,
+                    Some("evil"),
+                    Some("/tmp/x")
+                ),
+                (
+                    Group::Persistence,
+                    "disk_persistence",
+                    40,
+                    None,
+                    Some("/home/u/.config/autostart/a.desktop")
+                ),
+                (
+                    Group::Persistence,
+                    "disk_outside_build",
+                    10,
+                    None,
+                    Some("/tmp/left")
+                ),
+                (
+                    Group::Persistence,
+                    "disk_executable",
+                    20,
+                    None,
+                    Some("/work/src/tool")
+                ),
+                (Group::Integrity, "disk_setid", 40, None, Some("/work/su")),
+                (
+                    Group::Network,
+                    "network_lookup",
+                    10,
+                    Some("evil"),
+                    Some("a.example")
+                ),
+                (Group::Network, "network_raw", 30, None, Some("icmp echo")),
+                (
+                    Group::Execution,
+                    "exec_downloader",
+                    5,
+                    Some("evil"),
+                    Some("/usr/bin/curl")
+                ),
+                (
+                    Group::Execution,
+                    "exec_privilege",
+                    15,
+                    Some("evil"),
+                    Some("/usr/bin/sudo")
+                ),
+                (Group::Network, "network_direct", 20, None, None),
+            ]
+        );
+        assert_eq!(
+            profile.into_iter().collect::<Vec<_>>(),
+            [
+                "copy:aws_key",
+                "disk:executable",
+                "disk:outside",
+                "disk:persistence",
+                "disk:setid",
+                "exec:downloader",
+                "exec:privilege",
+                "guest-stopped",
+                "leak:cargo_registry_token",
+                "net:a.example",
+                "net:direct",
+                "net:raw",
+                "read:other-process",
+                "read:ssh",
+                "root",
+                "tamper:ptrace",
+                "write:outside",
+                "write:persistence",
+            ]
+        );
     }
 }
