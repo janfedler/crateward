@@ -29,6 +29,7 @@ pub mod resolve;
 pub mod sandboxed;
 pub mod worker;
 
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -39,6 +40,7 @@ use crateward_core::config::Config;
 use crateward_core::http::{ClientConfig, Fetched, PoliteClient};
 use crateward_core::store::{Policies, Store};
 use secrecy::ExposeSecret;
+use serde::Deserialize;
 
 use crate::worker::{Fetcher, FetcherSetup};
 use crateward_core::blobs::BlobStore;
@@ -53,7 +55,24 @@ fn fatal(reason: impl std::fmt::Display) -> ComponentError {
     }
 }
 
-async fn start(config: &Config) -> Result<Fetcher, String> {
+/// The index's `config.json`, as far as the fetcher reads it.
+#[derive(Deserialize)]
+struct IndexConfig {
+    dl: String,
+}
+
+/// The download template from the index's `config.json`.
+async fn download_template(index: &PoliteClient, root: &str) -> Result<String, Box<dyn Error>> {
+    let url = format!("{root}config.json");
+    let Fetched::Body { body, .. } = index.get(&url, None, 64 * 1024).await? else {
+        return Err("index config.json is not available".into());
+    };
+    let config: IndexConfig =
+        serde_json::from_slice(&body).map_err(|e| format!("index config.json: {e}"))?;
+    Ok(config.dl)
+}
+
+async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
     let c = &config.crates_io;
     let client = |rate| ClientConfig {
         user_agent: c.user_agent.clone(),
@@ -61,35 +80,23 @@ async fn start(config: &Config) -> Result<Fetcher, String> {
         timeout: Duration::from_secs(120),
         allow_plain_http: false,
     };
-    let downloads =
-        PoliteClient::new(&client(c.static_requests_per_second)).map_err(|e| e.to_string())?;
-    let index =
-        PoliteClient::new(&client(c.index_requests_per_second)).map_err(|e| e.to_string())?;
+    let downloads = PoliteClient::new(&client(c.static_requests_per_second))?;
+    let index = PoliteClient::new(&client(c.index_requests_per_second))?;
     let mut index_root = c.index_url.to_string();
     if !index_root.ends_with('/') {
         index_root.push('/');
     }
-    let dl = match index
-        .get(&format!("{index_root}config.json"), None, 64 * 1024)
-        .await
-        .map_err(|e| e.to_string())?
-    {
-        Fetched::Body { body, .. } => serde_json::from_slice::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v.get("dl")?.as_str().map(str::to_owned))
-            .ok_or("index config.json has no dl")?,
-        _ => return Err("index config.json is not available".into()),
-    };
+    let dl = download_template(&index, &index_root).await?;
     let url = config.database.url.expose_secret();
-    let mut store = Store::connect(url).await.map_err(|e| e.to_string())?;
-    store.migrate().await.map_err(|e| e.to_string())?;
-    let heartbeats = Store::connect(url).await.map_err(|e| e.to_string())?;
+    let mut store = Store::connect(url).await?;
+    store.migrate().await?;
+    let heartbeats = Store::connect(url).await?;
     let data = &config.instance.data_dir;
-    let blobs = BlobStore::open(&data.join("cas")).map_err(|e| e.to_string())?;
+    let blobs = BlobStore::open(&data.join("cas"))?;
     let work_root = config.instance.run_dir.join("fetch");
     std::fs::create_dir_all(&work_root).map_err(|e| format!("{}: {e}", work_root.display()))?;
     let setup = FetcherSetup {
-        exe: std::env::current_exe().map_err(|e| e.to_string())?,
+        exe: std::env::current_exe()?,
         cargo: config.fetcher.cargo_bin.clone(),
         work_root,
         originals: config
@@ -99,7 +106,7 @@ async fn start(config: &Config) -> Result<Fetcher, String> {
         dl,
         index_root,
     };
-    let policies = Policies::from_config(&config.stages).map_err(|e| e.to_string())?;
+    let policies = Policies::from_config(&config.stages)?;
     let worker = format!("fetcher-{}", std::process::id());
     let lease = Duration::from_secs(config.stages.fetch.lease_secs);
     Ok(Fetcher::new(

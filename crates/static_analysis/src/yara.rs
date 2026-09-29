@@ -5,6 +5,8 @@
 //! that no Rust parser looks at. Each rule's `severity` metadata becomes the
 //! finding's severity; code that runs at build time raises it one level.
 
+use yara_x::errors::CompileError;
+
 use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, evidence};
 
 /// The built in rule source.
@@ -55,10 +57,8 @@ impl Rules {
     /// # Errors
     ///
     /// Fails if the rules do not compile; a unit test guarantees they do.
-    pub fn builtin() -> Result<Self, String> {
-        yara_x::compile(BUILTIN_RULES)
-            .map(Self)
-            .map_err(|e| e.to_string())
+    pub fn builtin() -> Result<Self, CompileError> {
+        yara_x::compile(BUILTIN_RULES).map(Self)
     }
 
     /// Scans one file and returns a finding per matching rule.

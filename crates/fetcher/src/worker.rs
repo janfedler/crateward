@@ -234,7 +234,7 @@ impl Fetcher {
         let (lockfile, mut error, packages) = match &resolution {
             Resolution::Locked(lock) => match locked_packages(lock) {
                 Ok(packages) => (Some(lock.as_str()), None, packages),
-                Err(e) => (Some(lock.as_str()), Some(e), Vec::new()),
+                Err(e) => (Some(lock.as_str()), Some(e.to_string()), Vec::new()),
             },
             Resolution::Failed(message) => (None, Some(message.clone()), Vec::new()),
         };

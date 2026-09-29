@@ -30,6 +30,7 @@ pub mod triage;
 pub mod worker;
 pub mod yara;
 
+use std::error::Error;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -53,19 +54,18 @@ fn fatal(reason: impl std::fmt::Display) -> ComponentError {
     }
 }
 
-async fn start(config: &Config) -> Result<Analyzer, String> {
+async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
     let url = config.database.url.expose_secret();
-    let mut store = Store::connect(url).await.map_err(|e| e.to_string())?;
-    store.migrate().await.map_err(|e| e.to_string())?;
-    let heartbeats = Store::connect(url).await.map_err(|e| e.to_string())?;
-    let blobs =
-        BlobStore::open(&config.instance.data_dir.join("cas")).map_err(|e| e.to_string())?;
-    let policies = Policies::from_config(&config.stages).map_err(|e| e.to_string())?;
+    let mut store = Store::connect(url).await?;
+    store.migrate().await?;
+    let heartbeats = Store::connect(url).await?;
+    let blobs = BlobStore::open(&config.instance.data_dir.join("cas"))?;
+    let policies = Policies::from_config(&config.stages)?;
     Ok(Analyzer::new(
         store,
         heartbeats,
         blobs,
-        std::env::current_exe().map_err(|e| e.to_string())?,
+        std::env::current_exe()?,
         (
             i64::from(config.triage.popular_min_reverse_dependencies),
             i64::try_from(config.triage.popular_min_downloads).unwrap_or(i64::MAX),

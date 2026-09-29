@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::process::Stdio;
 
+use crateward_core::child::ChildError;
 use crateward_core::cratesio::probe_manifest;
 use crateward_core::http::PoliteClient;
 use crateward_core::name::CrateName;
@@ -20,11 +21,14 @@ use tokio::process::Command;
 use crate::proxy::{self, IndexCache, Target};
 use crate::sandboxed::{RESOLVE, ResolveOutcome};
 
+/// The resolution child in error messages.
+const CHILD: &str = "resolution child";
+
 /// Why resolution could not be attempted. A crate whose dependencies do
 /// not resolve is not an error; see [`Resolution::Failed`].
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
-    /// Preparing the work directory or running the child failed.
+    /// Preparing the work directory or reading the lockfile failed.
     #[error("{context}: {source}")]
     Io {
         /// What was being done.
@@ -32,9 +36,9 @@ pub enum ResolveError {
         /// The underlying error.
         source: std::io::Error,
     },
-    /// The child's output did not parse.
-    #[error("resolution child: {0}")]
-    Child(String),
+    /// The child did not run, failed or gave a bad answer.
+    #[error(transparent)]
+    Child(#[from] ChildError),
 }
 
 fn io(context: &'static str) -> impl FnOnce(std::io::Error) -> ResolveError {
@@ -75,6 +79,25 @@ struct LockEntry {
     checksum: Option<String>,
 }
 
+/// Why a lockfile is not accepted.
+#[derive(Debug, thiserror::Error)]
+pub enum LockfileError {
+    /// The text is not a lockfile.
+    #[error(transparent)]
+    Parse(#[from] toml::de::Error),
+    /// A package comes from another source than the crates.io registry.
+    #[error("{package} comes from {origin}")]
+    ForeignSource {
+        /// The package, as `name version`.
+        package: String,
+        /// Where the lockfile takes it from.
+        origin: String,
+    },
+    /// A registry package has no checksum. The payload is `name version`.
+    #[error("{0} has no checksum")]
+    NoChecksum(String),
+}
+
 /// The registry packages of a lockfile. Packages without a source (the
 /// probe itself) are skipped; a package from anywhere but the crates.io
 /// registry is returned as an error, since crates.io does not allow them.
@@ -82,20 +105,16 @@ struct LockEntry {
 /// # Errors
 ///
 /// Fails if the lockfile does not parse or names another source.
-pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, String> {
-    let parsed: Lockfile = toml::from_str(lockfile).map_err(|e| e.to_string())?;
+pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, LockfileError> {
+    let parsed: Lockfile = toml::from_str(lockfile)?;
     let mut packages = Vec::new();
     for entry in parsed.package {
-        let Some(source) = entry.source else { continue };
-        if source != "registry+https://github.com/rust-lang/crates.io-index" {
-            return Err(format!(
-                "{} {} comes from {source}",
-                entry.name, entry.version
-            ));
+        let Some(origin) = entry.source else { continue };
+        let package = format!("{} {}", entry.name, entry.version);
+        if origin != "registry+https://github.com/rust-lang/crates.io-index" {
+            return Err(LockfileError::ForeignSource { package, origin });
         }
-        let checksum = entry
-            .checksum
-            .ok_or_else(|| format!("{} {} has no checksum", entry.name, entry.version))?;
+        let checksum = entry.checksum.ok_or(LockfileError::NoChecksum(package))?;
         packages.push(LockedPackage {
             name: entry.name,
             version: entry.version,
@@ -153,14 +172,17 @@ pub async fn resolve(
         .await;
     server.abort();
     let result = (|| {
-        let output = output.map_err(io("running the resolution child"))?;
+        let output = output.map_err(ChildError::io(CHILD, "running"))?;
         if !output.status.success() {
-            return Err(ResolveError::Child(
-                String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            ));
+            return Err(ChildError::Failed {
+                child: CHILD,
+                status: output.status,
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            }
+            .into());
         }
-        let outcome: ResolveOutcome = serde_json::from_slice(&output.stdout)
-            .map_err(|e| ResolveError::Child(e.to_string()))?;
+        let outcome: ResolveOutcome =
+            serde_json::from_slice(&output.stdout).map_err(|e| ChildError::answer(CHILD, e))?;
         if outcome.ok {
             std::fs::read_to_string(probe.join("Cargo.lock"))
                 .map(Resolution::Locked)
@@ -201,7 +223,28 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
     #[test]
     fn foreign_sources_are_rejected() {
         let lock = "[[package]]\nname = \"x\"\nversion = \"1.0.0\"\nsource = \"git+https://example.com/x\"\n";
-        assert!(locked_packages(lock).is_err());
+        assert!(matches!(
+            locked_packages(lock),
+            Err(LockfileError::ForeignSource { package, origin })
+                if package == "x 1.0.0" && origin == "git+https://example.com/x"
+        ));
+    }
+
+    #[test]
+    fn a_registry_package_needs_a_checksum() {
+        let lock = "[[package]]\nname = \"x\"\nversion = \"1.0.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n";
+        assert!(matches!(
+            locked_packages(lock),
+            Err(LockfileError::NoChecksum(package)) if package == "x 1.0.0"
+        ));
+    }
+
+    #[test]
+    fn text_that_is_no_lockfile_is_refused() {
+        assert!(matches!(
+            locked_packages("package = 3"),
+            Err(LockfileError::Parse(_))
+        ));
     }
 
     #[test]

@@ -20,10 +20,15 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 
 use crateward_core::child::ChildError;
+use crateward_core::http::{ClientConfig, PoliteClient};
+use crateward_core::name::CrateName;
 use crateward_core::sandbox;
 use crateward_fetcher::archive::{ArchiveFinding, ArchiveReport};
+use crateward_fetcher::proxy::IndexCache;
+use crateward_fetcher::resolve::{ResolveError, resolve as resolve_in_sandbox};
 use crateward_fetcher::sandboxed::{RESOLVE, ResolveOutcome, validate_in_sandbox};
 
 const FETCHER: &str = env!("CARGO_BIN_EXE_crateward_fetcher");
@@ -117,6 +122,40 @@ fn a_child_that_does_not_exist_is_an_error() {
             .starts_with("validation child: starting: "),
         "{error}"
     );
+}
+
+#[test]
+fn a_resolution_child_that_does_not_exist_is_an_error() {
+    let client = PoliteClient::new(&ClientConfig {
+        user_agent: "crateward/0.1 (+https://crateward.com/about; security@crateward.com)".into(),
+        requests_per_second: 1.0,
+        timeout: Duration::from_secs(1),
+        allow_plain_http: false,
+    })
+    .unwrap();
+    let work = Path::new(env!("CARGO_TARGET_TMPDIR")).join("resolve-no-child");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let error = runtime
+        .block_on(resolve_in_sandbox(
+            Path::new("/nonexistent/fetcher"),
+            Path::new("/nonexistent/cargo"),
+            &work,
+            client,
+            "https://index.invalid/",
+            IndexCache::default(),
+            &CrateName::parse("demo").unwrap(),
+            &semver::Version::new(1, 0, 0),
+        ))
+        .unwrap_err();
+    assert!(
+        matches!(&error, ResolveError::Child(ChildError::Io { child, step, .. })
+            if *child == "resolution child" && *step == "running"),
+        "{error}"
+    );
+    assert!(!work.exists());
 }
 
 /// Runs the resolution child with a fake `cargo` that runs `script`. Returns
