@@ -18,6 +18,39 @@ use crateward_core::store::{PublicStats, PublishedFinding, Store, StoreError};
 /// The site's domain, written to `CNAME` for GitHub Pages.
 pub const DOMAIN: &str = "crateward.com";
 
+/// Why the site could not be built or pushed.
+#[derive(Debug, thiserror::Error)]
+pub enum ExportError {
+    /// The database failed.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// A template did not render.
+    #[error(transparent)]
+    Template(#[from] askama::Error),
+    /// The statistics did not serialize.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    /// The site's files could not be written.
+    #[error("cannot write the site files: {0}")]
+    Files(#[from] std::io::Error),
+    /// A git step could not start.
+    #[error("git {step}: {source}")]
+    GitStart {
+        /// The git subcommand.
+        step: String,
+        /// Why it could not start.
+        source: std::io::Error,
+    },
+    /// A git step failed.
+    #[error("git {step} failed: {stderr}")]
+    GitFailed {
+        /// The git subcommand.
+        step: String,
+        /// What git said.
+        stderr: String,
+    },
+}
+
 #[derive(Template)]
 #[template(path = "site.html")]
 struct SitePage {
@@ -66,7 +99,7 @@ pub fn render(
     canaries: &[(String, bool, i64)],
     findings: &[PublishedFinding],
     generated: &str,
-) -> Result<Vec<(String, Vec<u8>)>, String> {
+) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
     let total = stats.finished.max(1);
     let canary_text = if canaries.is_empty() {
         "No canary results yet.".to_owned()
@@ -117,18 +150,9 @@ pub fn render(
         })).collect::<Vec<_>>(),
     });
     Ok(vec![
-        (
-            "index.html".into(),
-            page.render().map_err(|e| e.to_string())?.into_bytes(),
-        ),
-        (
-            "about/index.html".into(),
-            AboutPage.render().map_err(|e| e.to_string())?.into_bytes(),
-        ),
-        (
-            "stats.json".into(),
-            serde_json::to_vec_pretty(&json).map_err(|e| e.to_string())?,
-        ),
+        ("index.html".into(), page.render()?.into_bytes()),
+        ("about/index.html".into(), AboutPage.render()?.into_bytes()),
+        ("stats.json".into(), serde_json::to_vec_pretty(&json)?),
         (
             "site.css".into(),
             include_bytes!("../static/site.css").to_vec(),
@@ -156,28 +180,33 @@ pub fn write(dir: &Path, files: &[(String, Vec<u8>)]) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, String> {
+/// Runs one git command as Crateward, over SSH with the deploy key only.
+async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportError> {
+    let step = args.first().copied().unwrap_or_default();
     let ssh = format!(
         "ssh -i {} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes",
         key.display()
     );
     let output = tokio::process::Command::new("git")
+        .args(["-c", "user.name=Crateward"])
+        .args(["-c", "user.email=security@crateward.com"])
         .args(args)
         .current_dir(dir)
         .env("GIT_SSH_COMMAND", ssh)
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .await
-        .map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(format!(
-            "git {} failed: {}",
-            args.first().unwrap_or(&""),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
+        .map_err(|source| ExportError::GitStart {
+            step: step.to_owned(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(ExportError::GitFailed {
+            step: step.to_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
     }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Pushes the files to the site repository: a fresh shallow clone, the
@@ -190,52 +219,35 @@ pub async fn publish(
     config: &ExportConfig,
     work: &Path,
     files: &[(String, Vec<u8>)],
-) -> Result<bool, String> {
+) -> Result<bool, ExportError> {
     let checkout = work.join("checkout");
     let _ = std::fs::remove_dir_all(&checkout);
-    std::fs::create_dir_all(work).map_err(|e| e.to_string())?;
-    let target = checkout.to_string_lossy().into_owned();
+    std::fs::create_dir_all(work)?;
+    let (key, branch) = (&config.deploy_key, &config.branch);
+    let target = checkout.to_string_lossy();
+    let clone = ["clone", "--depth", "1", "--branch", branch];
     git(
         work,
-        &config.deploy_key,
-        &[
-            "clone",
-            "--depth",
-            "1",
-            "--branch",
-            &config.branch,
-            &config.repository,
-            &target,
-        ],
+        key,
+        &[&clone[..], &[&config.repository, &target]].concat(),
     )
     .await?;
-    write(&checkout, files).map_err(|e| e.to_string())?;
-    git(&checkout, &config.deploy_key, &["add", "--all"]).await?;
-    let status = git(&checkout, &config.deploy_key, &["status", "--porcelain"]).await?;
-    if status.trim().is_empty() {
+    write(&checkout, files)?;
+    git(&checkout, key, &["add", "--all"]).await?;
+    if git(&checkout, key, &["status", "--porcelain"])
+        .await?
+        .trim()
+        .is_empty()
+    {
         return Ok(false);
     }
     git(
         &checkout,
-        &config.deploy_key,
-        &[
-            "-c",
-            "user.name=Crateward",
-            "-c",
-            "user.email=security@crateward.com",
-            "commit",
-            "--quiet",
-            "--message",
-            "Update statistics",
-        ],
+        key,
+        &["commit", "--quiet", "--message", "Update statistics"],
     )
     .await?;
-    git(
-        &checkout,
-        &config.deploy_key,
-        &["push", "--quiet", "origin", &config.branch],
-    )
-    .await?;
+    git(&checkout, key, &["push", "--quiet", "origin", branch]).await?;
     Ok(true)
 }
 
@@ -244,17 +256,11 @@ pub async fn publish(
 /// # Errors
 ///
 /// Fails on database or template errors.
-pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, String> {
-    let stats = store
-        .public_stats()
-        .await
-        .map_err(|e: StoreError| e.to_string())?;
-    let canaries = store.latest_canaries().await.map_err(|e| e.to_string())?;
-    let findings = store
-        .published_findings()
-        .await
-        .map_err(|e| e.to_string())?;
-    let now = store.now_epoch().await.map_err(|e| e.to_string())?;
+pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
+    let stats = store.public_stats().await?;
+    let canaries = store.latest_canaries().await?;
+    let findings = store.published_findings().await?;
+    let now = store.now_epoch().await?;
     render(&stats, &canaries, &findings, &format_utc(now))
 }
 
@@ -307,6 +313,114 @@ pub async fn run(store: &Store, dir: PathBuf, config: Option<&ExportConfig>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("crateward-export-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?}: {output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// A bare repository with one commit on `main`, and a config that
+    /// clones it over `file://`, so no SSH is involved.
+    fn site_repository(root: &Path) -> ExportConfig {
+        git_in(
+            root,
+            &[
+                "init",
+                "--quiet",
+                "--bare",
+                "--initial-branch=main",
+                "site.git",
+            ],
+        );
+        git_in(root, &["init", "--quiet", "--initial-branch=main", "seed"]);
+        let seed = root.join("seed");
+        std::fs::write(seed.join("README"), "seed\n").unwrap();
+        git_in(&seed, &["add", "--all"]);
+        git_in(
+            &seed,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--quiet",
+                "--message",
+                "Seed",
+            ],
+        );
+        let bare = root.join("site.git");
+        git_in(&seed, &["push", "--quiet", &bare.to_string_lossy(), "main"]);
+        ExportConfig {
+            repository: format!("file://{}", bare.display()),
+            branch: "main".into(),
+            deploy_key: root.join("no-key"),
+            interval_hours: 24,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_site_is_pushed_as_crateward_and_only_when_it_changed() {
+        let root = scratch("publish");
+        let config = site_repository(&root);
+        let work = root.join("work");
+        let files = vec![("index.html".to_owned(), b"<p>hello</p>".to_vec())];
+        assert!(publish(&config, &work, &files).await.unwrap());
+        assert!(!publish(&config, &work, &files).await.unwrap());
+        let bare = root.join("site.git");
+        let last = git_in(&bare, &["log", "-1", "--format=%an <%ae>: %s", "main"]);
+        assert_eq!(
+            last.trim(),
+            "Crateward <security@crateward.com>: Update statistics"
+        );
+        assert_eq!(git_in(&bare, &["rev-list", "--count", "main"]).trim(), "2");
+        let page = git_in(&bare, &["show", "main:index.html"]);
+        assert_eq!(page, "<p>hello</p>");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_repository_that_is_not_there_is_a_failed_clone() {
+        let root = scratch("no-repository");
+        let config = ExportConfig {
+            repository: format!("file://{}", root.join("missing.git").display()),
+            branch: "main".into(),
+            deploy_key: root.join("no-key"),
+            interval_hours: 24,
+        };
+        let error = publish(&config, &root.join("work"), &[]).await.unwrap_err();
+        assert!(
+            matches!(&error, ExportError::GitFailed { step, stderr }
+                if step == "clone" && !stderr.is_empty()),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_git_that_cannot_start_is_named_by_its_step() {
+        let error = git(Path::new("/nonexistent/dir"), Path::new("key"), &["status"])
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, ExportError::GitStart { step, .. } if step == "status"),
+            "{error}"
+        );
+        assert!(error.to_string().starts_with("git status: "), "{error}");
+    }
 
     #[test]
     fn dates_are_formatted_in_utc() {
