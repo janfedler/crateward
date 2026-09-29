@@ -8,8 +8,12 @@
 //! `Documentation/bpf/btf.rst` and `include/uapi/linux/btf.h`.
 
 use std::collections::HashMap;
+use std::io;
 
 const MAGIC: u16 = 0xeb9f;
+
+/// Where the kernel exposes its BTF.
+const KERNEL_BTF: &str = "/sys/kernel/btf/vmlinux";
 
 const KIND_INT: u32 = 1;
 const KIND_PTR: u32 = 2;
@@ -51,6 +55,39 @@ struct Type {
     members: Vec<Member>,
 }
 
+/// Why the kernel's BTF could not be used.
+#[derive(Debug, thiserror::Error)]
+pub enum BtfError {
+    /// The kernel's BTF file cannot be read.
+    #[error("{}: {}", KERNEL_BTF, .0)]
+    Read(io::Error),
+    /// The data does not start with the magic of little endian BTF.
+    #[error("not little endian BTF")]
+    NotBtf,
+    /// The data ends before a field does, at this byte.
+    #[error("BTF ends at byte {0}")]
+    Truncated(usize),
+    /// A section lies outside the data.
+    #[error("BTF section out of bounds")]
+    SectionOutOfBounds,
+    /// A type record has a kind this decoder does not know.
+    #[error("unknown BTF kind {0}")]
+    UnknownKind(u32),
+    /// The type section ends inside a type record.
+    #[error("BTF type section ends inside a type")]
+    RaggedTypes,
+    /// The kernel has no struct of this name.
+    #[error("no struct {0} in the kernel BTF")]
+    NoStruct(String),
+    /// The struct (first) has no member of this name (second).
+    #[error("no member {1} in struct {0}")]
+    NoMember(String, String),
+    /// The member (second) of the struct (first) is a bitfield that does
+    /// not start on a byte.
+    #[error("{0}.{1} is not byte aligned")]
+    Unaligned(String, String),
+}
+
 /// Parsed BTF: types by ID and the string table.
 #[derive(Debug)]
 pub struct Btf {
@@ -59,11 +96,11 @@ pub struct Btf {
     structs: HashMap<String, u32>,
 }
 
-fn u32_at(data: &[u8], at: usize) -> Result<u32, String> {
+fn u32_at(data: &[u8], at: usize) -> Result<u32, BtfError> {
     data.get(at..at + 4)
         .and_then(|b| b.try_into().ok())
         .map(u32::from_le_bytes)
-        .ok_or_else(|| format!("BTF ends at byte {at}"))
+        .ok_or(BtfError::Truncated(at))
 }
 
 fn usize_of(value: u32) -> usize {
@@ -76,13 +113,13 @@ impl Btf {
     /// # Errors
     ///
     /// Fails on a bad magic, truncated data or an unknown type kind.
-    pub fn parse(data: &[u8]) -> Result<Self, String> {
+    pub fn parse(data: &[u8]) -> Result<Self, BtfError> {
         let magic = data
             .get(..2)
             .and_then(|b| b.try_into().ok())
             .map(u16::from_le_bytes);
         if magic != Some(MAGIC) {
-            return Err("not little endian BTF".into());
+            return Err(BtfError::NotBtf);
         }
         let header_len = usize_of(u32_at(data, 4)?);
         let type_off = usize_of(u32_at(data, 8)?);
@@ -94,7 +131,7 @@ impl Btf {
                 .checked_add(off)
                 .and_then(|start| Some((start, start.checked_add(len)?)))
                 .and_then(|(start, end)| data.get(start..end))
-                .ok_or_else(|| "BTF section out of bounds".to_owned())
+                .ok_or(BtfError::SectionOutOfBounds)
         };
         let type_data = section(type_off, type_len)?;
         let strings = section(str_off, str_len)?.to_vec();
@@ -141,7 +178,7 @@ impl Btf {
                     }
                     vlen * 12
                 }
-                other => return Err(format!("unknown BTF kind {other}")),
+                other => return Err(BtfError::UnknownKind(other)),
             };
             at += extra;
             types.push(Type {
@@ -152,7 +189,7 @@ impl Btf {
             });
         }
         if at != type_data.len() {
-            return Err("BTF type section ends inside a type".into());
+            return Err(BtfError::RaggedTypes);
         }
         let mut btf = Self {
             types,
@@ -178,10 +215,8 @@ impl Btf {
     /// # Errors
     ///
     /// Fails if the file cannot be read or parsed.
-    pub fn from_kernel() -> Result<Self, String> {
-        let path = "/sys/kernel/btf/vmlinux";
-        let data = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-        Self::parse(&data)
+    pub fn from_kernel() -> Result<Self, BtfError> {
+        Self::parse(&std::fs::read(KERNEL_BTF).map_err(BtfError::Read)?)
     }
 
     fn name(&self, offset: u32) -> Option<&str> {
@@ -237,19 +272,19 @@ impl Btf {
     ///
     /// Fails if the struct or member does not exist or the member is a
     /// bitfield that does not start on a byte.
-    pub fn offset(&self, name: &str, member: &str) -> Result<u32, String> {
+    pub fn offset(&self, name: &str, member: &str) -> Result<u32, BtfError> {
         let ty = self
             .structs
             .get(name)
             .and_then(|&id| self.get(id))
-            .ok_or_else(|| format!("no struct {name} in the kernel BTF"))?;
+            .ok_or_else(|| BtfError::NoStruct(name.into()))?;
         let bits = self
             .find(ty, member, 0)
-            .ok_or_else(|| format!("no member {member} in struct {name}"))?;
+            .ok_or_else(|| BtfError::NoMember(name.into(), member.into()))?;
         if bits % 8 == 0 {
             Ok(bits / 8)
         } else {
-            Err(format!("{name}.{member} is not byte aligned"))
+            Err(BtfError::Unaligned(name.into(), member.into()))
         }
     }
 }
@@ -306,21 +341,44 @@ mod tests {
         assert_eq!(btf.offset("outer", "a").unwrap(), 0);
         assert_eq!(btf.offset("outer", "pad").unwrap(), 8);
         assert_eq!(btf.offset("outer", "b").unwrap(), 16);
-        assert!(
-            btf.offset("outer", "c")
-                .unwrap_err()
-                .contains("byte aligned")
-        );
-        assert!(btf.offset("outer", "missing").is_err());
-        assert!(btf.offset("inner", "a").is_err());
+        assert!(matches!(
+            btf.offset("outer", "c"),
+            Err(BtfError::Unaligned(..))
+        ));
+        assert!(matches!(
+            btf.offset("outer", "missing"),
+            Err(BtfError::NoMember(..))
+        ));
+        assert!(matches!(
+            btf.offset("inner", "a"),
+            Err(BtfError::NoStruct(_))
+        ));
     }
 
     #[test]
     fn rejects_truncated_or_foreign_data() {
         let data = sample();
-        assert!(Btf::parse(&data[..data.len() - 30]).is_err());
-        assert!(Btf::parse(&data[1..]).is_err());
-        assert!(Btf::parse(&[]).is_err());
+        assert!(matches!(
+            Btf::parse(&data[..data.len() - 30]),
+            Err(BtfError::SectionOutOfBounds)
+        ));
+        assert!(matches!(Btf::parse(&data[1..]), Err(BtfError::NotBtf)));
+        assert!(matches!(Btf::parse(&[]), Err(BtfError::NotBtf)));
+        assert!(matches!(
+            Btf::parse(&MAGIC.to_le_bytes()),
+            Err(BtfError::Truncated(4))
+        ));
+    }
+
+    #[test]
+    fn rejects_a_type_of_an_unknown_kind() {
+        let mut data = sample();
+        // The kind is in the top byte of the info word of the first type.
+        data[24 + 7] = 0x1f;
+        assert!(matches!(
+            Btf::parse(&data),
+            Err(BtfError::UnknownKind(0x1f))
+        ));
     }
 
     /// The host kernel's BTF, when readable, has every member the eBPF

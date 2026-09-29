@@ -15,7 +15,7 @@ use crateward_core::protocol::{
 use vsock::{VMADDR_CID_ANY, VsockListener};
 
 use crate::runner::{RunOptions, run_job};
-use crate::trace::Tracer;
+use crate::trace::{TraceError, Tracer};
 use crate::{AgentError, BUILDER_GID, BUILDER_UID};
 
 /// What the agent does after a conversation ends.
@@ -47,7 +47,7 @@ fn set_clock(spec: &JobSpec) {
 pub fn converse<S: Read + Write>(
     stream: &mut S,
     options: RunOptions,
-    tracer: &mut Result<Tracer, String>,
+    tracer: &mut Result<Tracer, TraceError>,
 ) -> Result<Next, AgentError> {
     match read_message::<_, HostMessage>(stream, MAX_FRAME_LEN)? {
         Some(HostMessage::Hello { version }) if version == PROTOCOL_VERSION => {}
@@ -71,7 +71,7 @@ pub fn converse<S: Read + Write>(
             agent_version: env!("CARGO_PKG_VERSION").to_owned(),
             tracing: match tracer {
                 Ok(_) => TracingStatus::Active,
-                Err(reason) => TracingStatus::Unavailable(reason.clone()),
+                Err(reason) => TracingStatus::Unavailable(reason.to_string()),
             },
         },
     )?;
@@ -88,7 +88,7 @@ pub fn converse<S: Read + Write>(
                 };
                 match result {
                     Ok(()) => write_message(stream, &GuestMessage::Prepared)?,
-                    Err(error) => write_message(stream, &GuestMessage::Error(error))?,
+                    Err(error) => write_message(stream, &GuestMessage::Error(error.to_string()))?,
                 }
             }
             Some(HostMessage::Run(spec)) => {
@@ -185,6 +185,11 @@ mod tests {
 
     const HOST: RunOptions = RunOptions { identity: None };
 
+    /// What a host test has instead of a tracer.
+    fn untraced() -> Result<Tracer, TraceError> {
+        Err(TraceError::NoProgram("host test"))
+    }
+
     #[test]
     fn ping_and_close_returns_to_accept() {
         let mut s = script(&[
@@ -194,7 +199,7 @@ mod tests {
             HostMessage::Ping,
         ]);
         assert_eq!(
-            converse(&mut s, HOST, &mut Err("host test".into())).unwrap(),
+            converse(&mut s, HOST, &mut untraced()).unwrap(),
             Next::Accept
         );
         let r = replies(&s.output);
@@ -207,7 +212,7 @@ mod tests {
     #[test]
     fn wrong_version_is_refused() {
         let mut s = script(&[HostMessage::Hello { version: 99 }]);
-        assert!(converse(&mut s, HOST, &mut Err("host test".into())).is_err());
+        assert!(converse(&mut s, HOST, &mut untraced()).is_err());
         assert!(matches!(
             replies(&s.output).as_slice(),
             [GuestMessage::Error(_)]
@@ -233,7 +238,7 @@ mod tests {
             HostMessage::Shutdown,
         ]);
         assert_eq!(
-            converse(&mut s, HOST, &mut Err("host test".into())).unwrap(),
+            converse(&mut s, HOST, &mut untraced()).unwrap(),
             Next::ShutDown
         );
         let r = replies(&s.output);

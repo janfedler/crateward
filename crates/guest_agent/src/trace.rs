@@ -13,12 +13,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use aya::maps::{MapData, PerCpuArray, RingBuf};
-use aya::programs::{BtfTracePoint, Lsm};
-use aya::{Btf as AyaBtf, Ebpf, EbpfLoader};
+use aya::maps::{Map, MapData, MapError, PerCpuArray, RingBuf};
+use aya::programs::{BtfTracePoint, Lsm, Program, ProgramError};
+use aya::{Btf as AyaBtf, BtfError as AyaBtfError, Ebpf, EbpfError, EbpfLoader};
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
 
-use crate::btf::Btf;
+use crate::btf::{Btf, BtfError};
 
 /// Where the root filesystem keeps the compiled programs.
 pub const OBJECT_PATH: &str = "/usr/lib/crateward/guest-ebpf.o";
@@ -291,6 +291,92 @@ pub struct Tracer {
     dropped: PerCpuArray<MapData, u64>,
 }
 
+/// Why the programs could not be loaded and attached.
+#[derive(Debug, thiserror::Error)]
+pub enum TraceError {
+    /// The compiled programs cannot be read.
+    #[error("{}: {}", OBJECT_PATH, .0)]
+    Object(std::io::Error),
+    /// The kernel structure offsets are unavailable.
+    #[error(transparent)]
+    Btf(#[from] BtfError),
+    /// The loader refused the programs.
+    #[error("load: {}", chain(.0))]
+    Load(#[from] EbpfError),
+    /// The loader cannot read the kernel's BTF.
+    #[error("BTF: {0}")]
+    KernelBtf(#[from] AyaBtfError),
+    /// The object has no program of this name.
+    #[error("no program {0}")]
+    NoProgram(&'static str),
+    /// The object has no map of this name.
+    #[error("no map {0}")]
+    NoMap(&'static str),
+    /// A program could not be prepared, loaded or attached.
+    #[error("{name}: {}", chain(.source))]
+    Program {
+        /// The program.
+        name: &'static str,
+        /// The underlying error.
+        source: ProgramError,
+    },
+    /// A map cannot be used.
+    #[error("{name}: {source}")]
+    Map {
+        /// The map.
+        name: &'static str,
+        /// The underlying error.
+        source: MapError,
+    },
+}
+
+impl TraceError {
+    /// For `map_err`: a [`TraceError::Program`] of `name`.
+    fn program(name: &'static str) -> impl FnOnce(ProgramError) -> Self {
+        move |source| Self::Program { name, source }
+    }
+}
+
+/// Loads the object with the kernel offsets and the ids of the agent and
+/// the builder filled in.
+fn load(object: &[u8], builder_uid: u32) -> Result<Ebpf, TraceError> {
+    let btf = Btf::from_kernel()?;
+    let mut values = Vec::with_capacity(OFFSETS.len());
+    for (global, name, member) in OFFSETS {
+        values.push((global, btf.offset(name, member)?));
+    }
+    let agent = rustix::process::getpid()
+        .as_raw_nonzero()
+        .get()
+        .cast_unsigned();
+    let mut loader = EbpfLoader::new();
+    loader
+        .override_global("BUILDER_UID", &builder_uid, true)
+        .override_global("AGENT_TGID", &agent, true);
+    for (global, value) in &values {
+        loader.override_global(global, value, true);
+    }
+    Ok(loader.load(object)?)
+}
+
+/// The program `name` of a loaded object, as the type its kind needs.
+fn program<'a, P>(ebpf: &'a mut Ebpf, name: &'static str) -> Result<P, TraceError>
+where
+    P: TryFrom<&'a mut Program, Error = ProgramError>,
+{
+    let program = ebpf.program_mut(name).ok_or(TraceError::NoProgram(name))?;
+    program.try_into().map_err(TraceError::program(name))
+}
+
+/// The map `name` of a loaded object, as the type it is used as.
+fn map<M: TryFrom<Map, Error = MapError>>(
+    ebpf: &mut Ebpf,
+    name: &'static str,
+) -> Result<M, TraceError> {
+    let map = ebpf.take_map(name).ok_or(TraceError::NoMap(name))?;
+    M::try_from(map).map_err(|source| TraceError::Map { name, source })
+}
+
 impl std::fmt::Debug for Tracer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Tracer")
@@ -304,56 +390,26 @@ impl Tracer {
     /// # Errors
     ///
     /// Describes the step that failed.
-    pub fn start(builder_uid: u32) -> Result<Self, String> {
-        let object = std::fs::read(OBJECT_PATH).map_err(|e| format!("{OBJECT_PATH}: {e}"))?;
-        let btf = Btf::from_kernel()?;
-        let mut values = Vec::with_capacity(OFFSETS.len());
-        for (global, name, member) in OFFSETS {
-            values.push((global, btf.offset(name, member)?));
-        }
-        let agent = rustix::process::getpid().as_raw_nonzero().get();
-        let agent = u32::try_from(agent).map_err(|e| e.to_string())?;
-        let mut loader = EbpfLoader::new();
-        loader
-            .override_global("BUILDER_UID", &builder_uid, true)
-            .override_global("AGENT_TGID", &agent, true);
-        for (global, value) in &values {
-            loader.override_global(global, value, true);
-        }
-        let mut ebpf = loader
-            .load(&object)
-            .map_err(|e| format!("load: {}", chain(&e)))?;
-        let kernel_btf = AyaBtf::from_sys_fs().map_err(|e| format!("BTF: {e}"))?;
+    pub fn start(builder_uid: u32) -> Result<Self, TraceError> {
+        let object = std::fs::read(OBJECT_PATH).map_err(TraceError::Object)?;
+        let mut ebpf = load(&object, builder_uid)?;
+        let kernel_btf = AyaBtf::from_sys_fs()?;
         for name in TRACEPOINTS {
-            let program: &mut BtfTracePoint = ebpf
-                .program_mut(name)
-                .ok_or_else(|| format!("no program {name}"))?
-                .try_into()
-                .map_err(|e| format!("{name}: {}", chain(&e)))?;
+            let program: &mut BtfTracePoint = program(&mut ebpf, name)?;
             program
                 .load(name, &kernel_btf)
-                .map_err(|e| format!("{name}: {}", chain(&e)))?;
-            program
-                .attach()
-                .map_err(|e| format!("{name}: {}", chain(&e)))?;
+                .map_err(TraceError::program(name))?;
+            program.attach().map_err(TraceError::program(name))?;
         }
         for name in LSM_HOOKS {
-            let program: &mut Lsm = ebpf
-                .program_mut(name)
-                .ok_or_else(|| format!("no program {name}"))?
-                .try_into()
-                .map_err(|e| format!("{name}: {}", chain(&e)))?;
+            let program: &mut Lsm = program(&mut ebpf, name)?;
             program
                 .load(name, &kernel_btf)
-                .map_err(|e| format!("{name}: {}", chain(&e)))?;
-            program
-                .attach()
-                .map_err(|e| format!("{name}: {}", chain(&e)))?;
+                .map_err(TraceError::program(name))?;
+            program.attach().map_err(TraceError::program(name))?;
         }
-        let ring = RingBuf::try_from(ebpf.take_map("EVENTS").ok_or("no map EVENTS")?)
-            .map_err(|e| format!("EVENTS: {e}"))?;
-        let dropped = PerCpuArray::try_from(ebpf.take_map("DROPPED").ok_or("no map DROPPED")?)
-            .map_err(|e| format!("DROPPED: {e}"))?;
+        let ring = map(&mut ebpf, "EVENTS")?;
+        let dropped = map(&mut ebpf, "DROPPED")?;
         Ok(Self {
             _ebpf: ebpf,
             ring,
