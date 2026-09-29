@@ -14,14 +14,19 @@
 //! is bounded in entries, depth and bytes read.
 
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::error::Error;
+use std::fs::File;
+use std::io::{self, Read, Write};
 use std::os::fd::AsFd as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{ExitCode, Stdio};
 
+use crateward_core::child::{self, Child, ChildError};
 use crateward_core::sandbox::{self, FsAccess, Limits};
 use ext4_view::{Ext4, FileType, PathBuf as ExtPath};
 use serde::{Deserialize, Serialize};
+
+use crate::payload::spawn_mkfs;
 
 /// First argument of the sandboxed child.
 pub const SCAN: &str = "sandbox-scratch";
@@ -46,6 +51,18 @@ const MAX_FILE_SEARCH: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_SEARCH: u64 = 1024 * 1024 * 1024;
 /// Largest report read back from the child.
 const MAX_REPORT: u64 = 16 * 1024 * 1024;
+
+/// The children in error messages.
+const SCAN_NAME: &str = "scratch scanner";
+const EXPORT_NAME: &str = "scratch export";
+
+/// What the children that read the image may use.
+const LIMITS: Limits = Limits {
+    address_space: 2 << 30,
+    cpu_seconds: 600,
+    file_size: 0,
+    open_files: 16,
+};
 
 /// Paths below which writes are part of a normal `cargo check`, relative to
 /// the scratch root.
@@ -349,37 +366,22 @@ pub fn scan(fs: &Ext4, spec: &ScanSpec) -> ScratchReport {
 /// # Errors
 ///
 /// Fails if the child cannot run or its report does not parse.
-pub fn scan_in_sandbox(exe: &Path, image: &Path, spec: &ScanSpec) -> Result<ScratchReport, String> {
-    let input = std::fs::File::open(image).map_err(|e| format!("{}: {e}", image.display()))?;
-    let spec = serde_json::to_string(spec).map_err(|e| e.to_string())?;
-    let mut child = Command::new(exe)
+pub fn scan_in_sandbox(
+    exe: &Path,
+    image: &Path,
+    spec: &ScanSpec,
+) -> Result<ScratchReport, ChildError> {
+    let input = File::open(image).map_err(ChildError::io(SCAN_NAME, "opening the image"))?;
+    let spec =
+        serde_json::to_string(spec).map_err(ChildError::io(SCAN_NAME, "encoding the spec"))?;
+    let mut command = child::command(exe);
+    command
         .arg(SCAN)
         .arg(spec)
-        .env_clear()
         .stdin(input)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("starting the scanner: {e}"))?;
-    let mut stderr = child.stderr.take().ok_or("no stderr")?;
-    let errors = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = (&mut stderr).take(64 * 1024).read_to_string(&mut text);
-        text
-    });
-    let mut out = Vec::new();
-    if let Some(stdout) = child.stdout.take() {
-        stdout
-            .take(MAX_REPORT)
-            .read_to_end(&mut out)
-            .map_err(|e| format!("reading the report: {e}"))?;
-    }
-    let status = child.wait().map_err(|e| format!("waiting: {e}"))?;
-    let errors = errors.join().unwrap_or_default();
-    if !status.success() {
-        return Err(format!("scanner {status}: {}", errors.trim()));
-    }
-    serde_json::from_slice(&out).map_err(|e| format!("scanner report: {e}"))
+        .stdout(Stdio::piped());
+    let report = Child::spawn(SCAN_NAME, command)?.output(MAX_REPORT)?;
+    serde_json::from_slice(&report).map_err(|e| ChildError::answer(SCAN_NAME, e))
 }
 
 /// The crate a unit's file or directory in the target directory belongs to,
@@ -431,7 +433,7 @@ pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, 
         header.set_gid(u64::from(meta.gid()));
         header.set_mtime(0);
         builder
-            .append_data(&mut header, format!("{name}/"), std::io::empty())
+            .append_data(&mut header, format!("{name}/"), io::empty())
             .map_err(|e| e.to_string())?;
         for entry in fs.read_dir(dir.as_path()).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
@@ -501,45 +503,18 @@ pub fn export_to_erofs(
     image: &Path,
     out: &Path,
     excluded: &[String],
-) -> Result<(), String> {
-    let input = std::fs::File::open(image).map_err(|e| format!("{}: {e}", image.display()))?;
-    let mut exporter = Command::new(exe)
+) -> Result<(), ChildError> {
+    let input = File::open(image).map_err(ChildError::io(EXPORT_NAME, "opening the image"))?;
+    let mut command = child::command(exe);
+    command
         .arg(EXPORT)
         .args(excluded)
-        .env_clear()
         .stdin(input)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("starting the export: {e}"))?;
-    let tar = exporter.stdout.take().ok_or("no stdout")?;
-    let mut mkfs = Command::new(exe)
-        .arg(crate::payload::MKFS)
-        .arg(out)
-        .env_clear()
-        .stdin(tar)
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("starting mkfs: {e}"))?;
-    let read_errors = |child: &mut std::process::Child| {
-        let mut text = String::new();
-        if let Some(stderr) = child.stderr.take() {
-            let _ = stderr.take(64 * 1024).read_to_string(&mut text);
-        }
-        text
-    };
-    let export_errors = read_errors(&mut exporter);
-    let exported = exporter.wait().map_err(|e| e.to_string())?;
-    let mkfs_errors = read_errors(&mut mkfs);
-    let built = mkfs.wait().map_err(|e| e.to_string())?;
-    if !exported.success() {
-        return Err(format!("export {exported}: {}", export_errors.trim()));
-    }
-    if !built.success() {
-        return Err(format!("mkfs {built}: {}", mkfs_errors.trim()));
-    }
-    Ok(())
+        .stdout(Stdio::piped());
+    let mut exporter = Child::spawn(EXPORT_NAME, command)?;
+    let mut builder = spawn_mkfs(exe, out, exporter.stdout()?)?;
+    exporter.finish(None)?;
+    builder.finish(None)
 }
 
 /// Checks that the geometry a superblock claims fits in the image.
@@ -588,7 +563,7 @@ pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), String> {
 }
 
 /// Loads a scratch image after [`check_geometry`].
-fn load(image: std::fs::File) -> Result<Ext4, String> {
+fn load(image: File) -> Result<Ext4, String> {
     use std::os::unix::fs::FileExt as _;
     let len = image.metadata().map_err(|e| e.to_string())?.len();
     let mut superblock = [0_u8; 1024];
@@ -601,75 +576,42 @@ fn load(image: std::fs::File) -> Result<Ext4, String> {
 
 /// Enters the sandbox for reading a scratch image from stdin, and returns
 /// that image.
-fn enter_sandbox() -> Result<std::fs::File, String> {
-    let image = std::io::stdin()
+fn enter_sandbox() -> Result<File, Box<dyn Error>> {
+    let image = io::stdin()
         .as_fd()
         .try_clone_to_owned()
-        .map(std::fs::File::from)
+        .map(File::from)
         .map_err(|e| format!("stdin: {e}"))?;
-    sandbox::isolate_network()
-        .and_then(|()| {
-            sandbox::limit(Limits {
-                address_space: 2 << 30,
-                cpu_seconds: 600,
-                file_size: 0,
-                open_files: 16,
-            })
-        })
-        .and_then(|()| sandbox::restrict_fs(&FsAccess::default()))
-        .map_err(|e| e.to_string())?;
+    sandbox::enter(LIMITS, &FsAccess::default())?;
     Ok(image)
 }
 
 /// Runs the export child if `args` names it: stdin is the image, stdout the
 /// tar.
 #[must_use]
-pub fn dispatch_export(args: &[String]) -> Option<std::process::ExitCode> {
-    if args.get(1).map(String::as_str) != Some(EXPORT) {
-        return None;
-    }
-    let fail = |message: &str| {
-        eprintln!("crateward sandbox: {message}");
-        std::process::ExitCode::FAILURE
-    };
-    let image = match enter_sandbox() {
-        Ok(image) => image,
-        Err(error) => return Some(fail(&error)),
-    };
-    let fs = match load(image) {
-        Ok(fs) => fs,
-        Err(error) => return Some(fail(&format!("not a readable ext4 image: {error}"))),
-    };
-    let out = std::io::BufWriter::new(std::io::stdout().lock());
-    let excluded = args.get(2..).unwrap_or_default();
-    match export(&fs, out, excluded) {
-        Ok(_) => Some(std::process::ExitCode::SUCCESS),
-        Err(error) => Some(fail(&error)),
-    }
+pub fn dispatch_export(args: &[String]) -> Option<ExitCode> {
+    (args.get(1).map(String::as_str) == Some(EXPORT))
+        .then(|| child::exit(serve_export(args.get(2..).unwrap_or_default())))
+}
+
+fn serve_export(excluded: &[String]) -> Result<(), Box<dyn Error>> {
+    let fs = load(enter_sandbox()?).map_err(|e| format!("not a readable ext4 image: {e}"))?;
+    export(&fs, io::BufWriter::new(io::stdout().lock()), excluded)?;
+    Ok(())
 }
 
 /// Runs the scanning child if `args` names it: stdin is the image, the
 /// first argument the [`ScanSpec`] as JSON.
 #[must_use]
-pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
-    if args.get(1).map(String::as_str) != Some(SCAN) {
-        return None;
-    }
-    let fail = |message: &str| {
-        eprintln!("crateward sandbox: {message}");
-        std::process::ExitCode::FAILURE
-    };
-    let Some(spec) = args
-        .get(2)
-        .and_then(|s| serde_json::from_str::<ScanSpec>(s).ok())
-    else {
-        return Some(fail("usage: sandbox-scratch <spec json> < image"));
-    };
-    let image = match enter_sandbox() {
-        Ok(image) => image,
-        Err(error) => return Some(fail(&error)),
-    };
-    let report = match load(image) {
+pub fn dispatch(args: &[String]) -> Option<ExitCode> {
+    (args.get(1).map(String::as_str) == Some(SCAN)).then(|| child::exit(serve_scan(args.get(2))))
+}
+
+fn serve_scan(spec: Option<&String>) -> Result<(), Box<dyn Error>> {
+    let spec: ScanSpec = spec
+        .and_then(|json| serde_json::from_str(json).ok())
+        .ok_or("usage: sandbox-scratch <spec json> < image")?;
+    let report = match load(enter_sandbox()?) {
         Ok(fs) => scan(&fs, &spec),
         Err(error) => ScratchReport {
             error: Some(format!("not a readable ext4 image: {error}")),
@@ -677,18 +619,16 @@ pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
             ..ScratchReport::default()
         },
     };
-    let mut stdout = std::io::stdout().lock();
-    let written = serde_json::to_writer(&mut stdout, &report)
-        .map_err(|e| e.to_string())
-        .and_then(|()| stdout.flush().map_err(|e| e.to_string()));
-    match written {
-        Ok(()) => Some(std::process::ExitCode::SUCCESS),
-        Err(error) => Some(fail(&error.to_string())),
-    }
+    let mut stdout = io::stdout().lock();
+    serde_json::to_writer(&mut stdout, &report)?;
+    stdout.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
 
     /// Builds an ext4 image from a directory with `mkfs.ext4 -d`, as the

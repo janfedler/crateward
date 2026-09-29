@@ -391,7 +391,8 @@ pub async fn build(
             crate::scratch::export_to_erofs(&exe, &scratch, &out, &excluded)
         })
         .await
-        .map_err(|e| e.to_string())??;
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
         let size = std::fs::metadata(&image).map_err(|e| e.to_string())?.len();
         if size > config.max_image_mib.saturating_mul(1024 * 1024) {
             let _ = std::fs::remove_file(&image);

@@ -9,8 +9,10 @@
 //! * a Landlock ruleset that allows only the listed paths;
 //! * `no_new_privs`.
 //!
-//! The rootless jail of the orchestrator uses the same `unshare` wrapper.
-//! This module holds the project's only `unsafe` block, documented below.
+//! [`enter`] runs the whole sequence; [`crate::child`] starts the children
+//! that call it. The rootless jail of the orchestrator uses the same
+//! `unshare` wrapper. This module holds the project's only `unsafe` block,
+//! documented below.
 //!
 //! Enabled with the `sandbox` feature.
 
@@ -181,4 +183,45 @@ pub fn restrict_fs(access: &FsAccess) -> Result<(), SandboxError> {
         return Err(SandboxError::Landlock("not enforced by this kernel".into()));
     }
     Ok(())
+}
+
+/// The messages of the steps of [`enter`] that a host without unprivileged
+/// user namespaces refuses. On Ubuntu 24.04, AppArmor lets `unshare` create
+/// a user namespace without capabilities, so the `setgroups` write fails
+/// instead.
+const REFUSED_STEPS: [&str; 6] = [
+    "unsharing the user namespace",
+    "denying setgroups",
+    "writing uid_map",
+    "writing gid_map",
+    "unsharing the network namespace",
+    "landlock",
+];
+
+/// For tests of sandboxed children: whether `error` only says that this host
+/// refuses the sandbox, so the test should skip. Never true when
+/// `CRATEWARD_REQUIRE_SANDBOX` is set, which the server's own runs do.
+#[must_use]
+pub fn unavailable(error: &impl std::fmt::Display) -> bool {
+    let message = error.to_string();
+    let refused = REFUSED_STEPS.iter().any(|step| message.contains(step));
+    let required = std::env::var_os("CRATEWARD_REQUIRE_SANDBOX").is_some();
+    if refused && !required {
+        eprintln!("skipping: {message}");
+    }
+    refused && !required
+}
+
+/// Enters the sandbox of a worker child: no network, then `limits`, then
+/// Landlock with `access`. The order matters, because Landlock comes last and
+/// takes away the `/proc` writes of [`isolate_network`]. Call it before the
+/// child reads any input; nothing hostile may be parsed outside the sandbox.
+///
+/// # Errors
+///
+/// Fails at the first step the kernel refuses.
+pub fn enter(limits: Limits, access: &FsAccess) -> Result<(), SandboxError> {
+    isolate_network()?;
+    limit(limits)?;
+    restrict_fs(access)
 }

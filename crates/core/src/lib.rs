@@ -23,6 +23,8 @@ pub mod app;
 #[cfg(feature = "blobs")]
 pub mod blobs;
 pub mod breaker;
+#[cfg(feature = "sandbox")]
+pub mod child;
 pub mod component;
 pub mod config;
 #[cfg(feature = "cratesio")]

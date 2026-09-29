@@ -18,12 +18,14 @@
 //! `mkfs.erofs --tar=f`, which runs in a sandboxed child: no network,
 //! Landlock limited to the system directories and the output directory.
 
-use std::io::{Read, Write};
+use std::error::Error;
+use std::io::{BufWriter, Read, Write};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{ExitCode, Stdio};
 
 use crateward_core::blobs::BlobStore;
+use crateward_core::child::{self, Child, ChildError};
 use crateward_core::cratesio::probe_manifest;
 use crateward_core::name::CrateName;
 use crateward_core::sandbox::{self, FsAccess, Limits};
@@ -36,8 +38,23 @@ pub const PROBE_DIR: &str = "/cw/probe";
 /// First argument of the image building child.
 pub const MKFS: &str = "sandbox-mkfs";
 
+/// The image building child in error messages.
+const NAME: &str = "image builder";
+
 /// `mkfs.erofs` from Debian's `erofs-utils`.
 const MKFS_EROFS: &str = "/usr/bin/mkfs.erofs";
+
+/// What the image builder may use.
+const LIMITS: Limits = Limits {
+    address_space: 4 << 30,
+    cpu_seconds: 600,
+    // No file size limit: erofs-utils 1.8.6 writes past 1 TiB (sparse) while
+    // it builds even a one file image, measured on 2026-09-25. The image is
+    // bounded by the tar this process's parent writes, and by the tmpfs it
+    // lands on.
+    file_size: u64::MAX,
+    open_files: 64,
+};
 
 /// Largest unpacked tar read from the blob store per crate.
 const MAX_BLOB_BYTES: u64 = 1024 * 1024 * 1024;
@@ -65,8 +82,8 @@ pub enum PayloadError {
     #[error("blob of {0} does not match its crate")]
     Mismatch(String),
     /// The image builder failed.
-    #[error("mkfs.erofs: {0}")]
-    Mkfs(String),
+    #[error(transparent)]
+    Child(#[from] ChildError),
 }
 
 fn io(context: impl Into<String>) -> impl FnOnce(std::io::Error) -> PayloadError {
@@ -319,6 +336,22 @@ pub fn write_tar<W: Write>(
     Ok(stats)
 }
 
+/// Starts the image building child, which reads a tar from `stdin` and
+/// writes the image at `out`. `exe` is the orchestrator binary.
+///
+/// # Errors
+///
+/// Fails if the child cannot start.
+pub fn spawn_mkfs(exe: &Path, out: &Path, stdin: impl Into<Stdio>) -> Result<Child, ChildError> {
+    let mut command = child::command(exe);
+    command
+        .arg(MKFS)
+        .arg(out)
+        .stdin(stdin)
+        .stdout(Stdio::null());
+    Child::spawn(NAME, command)
+}
+
 /// Builds the payload image at `out` through the sandboxed child. `exe`
 /// is the orchestrator binary.
 ///
@@ -331,85 +364,39 @@ pub fn build_image(
     blobs: &BlobStore,
     out: &Path,
 ) -> Result<PayloadStats, PayloadError> {
-    let mut child = Command::new(exe)
-        .arg(MKFS)
-        .arg(out)
-        .env_clear()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(io("starting the image builder"))?;
-    let mut stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| PayloadError::Mkfs("no stderr".into()))?;
-    let errors = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = (&mut stderr).take(64 * 1024).read_to_string(&mut text);
-        text
-    });
-    let written = match child.stdin.take() {
-        Some(stdin) => write_tar(spec, blobs, std::io::BufWriter::new(stdin)),
-        None => Err(PayloadError::Mkfs("no stdin".into())),
-    };
-    let status = child.wait().map_err(io("waiting for the image builder"))?;
-    let errors = errors.join().unwrap_or_default();
-    if !status.success() {
-        return Err(PayloadError::Mkfs(format!("{status}: {}", errors.trim())));
-    }
+    let mut child = spawn_mkfs(exe, out, Stdio::piped())?;
+    let written = write_tar(spec, blobs, BufWriter::new(child.stdin()?));
+    // A child that dies breaks the pipe. Its own failure says why, so it
+    // wins over the write error.
+    child.finish(None)?;
     written
 }
 
 /// Runs the image building child if `args` names it.
 #[must_use]
-pub fn dispatch(args: &[String]) -> Option<std::process::ExitCode> {
-    if args.get(1).map(String::as_str) != Some(MKFS) {
-        return None;
-    }
-    let fail = |message: &str| {
-        eprintln!("crateward sandbox: {message}");
-        std::process::ExitCode::FAILURE
+pub fn dispatch(args: &[String]) -> Option<ExitCode> {
+    (args.get(1).map(String::as_str) == Some(MKFS)).then(|| child::exit(serve(args.get(2))))
+}
+
+/// Enters the sandbox and becomes `mkfs.erofs`, which reads the tar from
+/// the inherited stdin. Returns only when that fails.
+fn serve(out: Option<&String>) -> Result<(), Box<dyn Error>> {
+    let out = Path::new(out.ok_or("usage: sandbox-mkfs <image>")?);
+    let dir = out.parent().ok_or("the image needs a parent directory")?;
+    let access = FsAccess {
+        read: ["/usr", "/lib", "/lib64", "/etc"]
+            .iter()
+            .map(PathBuf::from)
+            .filter(|p| p.exists())
+            .collect(),
+        write: vec![dir.to_path_buf()],
     };
-    let Some(out) = args.get(2).map(PathBuf::from) else {
-        return Some(fail("usage: sandbox-mkfs <image>"));
-    };
-    let Some(dir) = out.parent().map(Path::to_path_buf) else {
-        return Some(fail("the image needs a parent directory"));
-    };
-    let entered = sandbox::isolate_network()
-        .and_then(|()| {
-            sandbox::limit(Limits {
-                address_space: 4 << 30,
-                cpu_seconds: 600,
-                // No file size limit: erofs-utils 1.8.6 writes past 1 TiB
-                // (sparse) while it builds even a one file image, measured
-                // on 2026-09-25. The image is bounded by the tar this
-                // process's parent writes, and by the tmpfs it lands on.
-                file_size: u64::MAX,
-                open_files: 64,
-            })
-        })
-        .and_then(|()| {
-            sandbox::restrict_fs(&FsAccess {
-                read: ["/usr", "/lib", "/lib64", "/etc"]
-                    .iter()
-                    .map(PathBuf::from)
-                    .filter(|p| p.exists())
-                    .collect(),
-                write: vec![dir],
-            })
-        });
-    if let Err(error) = entered {
-        return Some(fail(&error.to_string()));
-    }
-    // Replaces this process; the tar arrives on the inherited stdin.
-    let error = Command::new(MKFS_EROFS)
+    sandbox::enter(LIMITS, &access)?;
+    let error = child::command(MKFS_EROFS)
         .args(["--tar=f", "-T0", "--quiet"])
-        .arg(&out)
-        .env_clear()
+        .arg(out)
         .exec();
-    Some(fail(&format!("exec {MKFS_EROFS}: {error}")))
+    Err(format!("exec {MKFS_EROFS}: {error}").into())
 }
 
 #[cfg(test)]

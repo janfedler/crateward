@@ -58,12 +58,23 @@ standard tools of the guest image.
 
 ## Sandboxed children
 
-The fetcher's and the static analyzer's children enter their sandbox (user
-and network namespaces, rlimits, Landlock) before they read input. The test
-`crates/static_analysis/tests/sandbox.rs` runs the real child binary on
-inert fixture tars; nothing in a fixture is ever executed. A kernel or CI
-runner without unprivileged user namespaces skips it, unless
-`CRATEWARD_REQUIRE_SANDBOX` is set, which the server's own runs do.
+Six child modes of three services handle hostile input: the fetcher's
+validation and resolution children, the static analyzer's child, and the
+orchestrator's scratch scanner, export and image builder. Each child enters
+its sandbox (user and network namespaces, rlimits, Landlock) before it reads
+input, through `crateward_core::sandbox::enter`. The parents start them
+through `crateward_core::child`, which gives them an empty environment,
+keeps the start of their stderr and enforces the deadline.
+
+The tests run the real child binaries on inert fixtures; nothing in a
+fixture is ever executed. They live in `crates/fetcher/tests/sandbox.rs`,
+`crates/static_analysis/tests/sandbox.rs` and
+`crates/orchestrator/tests/sandbox.rs`. The resolution child runs a fake
+`cargo`, a shell script that the test writes. A kernel or CI runner without
+unprivileged user namespaces skips these tests, and so does a host without
+`mkfs.erofs`, unless `CRATEWARD_REQUIRE_SANDBOX` is set, which the server's
+own runs do. `crateward_core::sandbox::unavailable` decides that for all of
+them.
 
 `cargo xtask canary` runs the end to end canary on the server: a fixture
 crate whose build script reads the job's cargo token and posts it to a

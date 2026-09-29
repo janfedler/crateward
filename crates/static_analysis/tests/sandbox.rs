@@ -16,6 +16,7 @@
 
 use std::path::Path;
 
+use crateward_core::sandbox;
 use crateward_static_analysis::sandboxed::{Outcome, analyze_in_sandbox};
 
 fn fixture(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -32,29 +33,11 @@ fn fixture(files: &[(&str, &[u8])]) -> Vec<u8> {
     builder.into_inner().unwrap()
 }
 
-/// Steps of entering the sandbox that a restricted runner may refuse. On
-/// Ubuntu 24.04, AppArmor lets `unshare` create a user namespace without
-/// capabilities, so the `setgroups` write fails instead.
-const SANDBOX_STEPS: &[&str] = &[
-    "unsharing the user namespace",
-    "denying setgroups",
-    "writing uid_map",
-    "writing gid_map",
-    "unsharing the network namespace",
-    "landlock",
-];
-
 fn run(tars: Vec<Vec<u8>>) -> Option<Vec<Outcome>> {
     let exe = Path::new(env!("CARGO_BIN_EXE_crateward_static_analysis"));
     match analyze_in_sandbox(exe, tars) {
         Ok(outcomes) => Some(outcomes),
-        Err(error)
-            if std::env::var("CRATEWARD_REQUIRE_SANDBOX").is_err()
-                && SANDBOX_STEPS.iter().any(|s| error.to_string().contains(s)) =>
-        {
-            eprintln!("skipping: {error}");
-            None
-        }
+        Err(error) if sandbox::unavailable(&error) => None,
         Err(error) => panic!("{error}"),
     }
 }
