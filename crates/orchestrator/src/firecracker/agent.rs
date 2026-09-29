@@ -21,6 +21,9 @@ use tokio::time::{Instant, timeout};
 /// Longest line Firecracker sends in the vsock handshake.
 const MAX_HANDSHAKE_LINE: usize = 32;
 
+/// Bytes read from the socket per call.
+const READ_CHUNK: usize = 16 * 1024;
+
 /// Why talking to the agent failed.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -67,6 +70,9 @@ pub struct RunOutcome {
 pub struct AgentConnection {
     stream: UnixStream,
     decoder: Decoder<GuestMessage>,
+    /// On the heap: as an array in `recv` it made every future awaiting it
+    /// 16 KiB larger.
+    buffer: Box<[u8]>,
     /// Version reported by the agent.
     pub agent_version: String,
     /// Whether the agent's tracing works.
@@ -114,6 +120,7 @@ impl AgentConnection {
         let mut connection = Self {
             stream,
             decoder: Decoder::new(limits),
+            buffer: vec![0; READ_CHUNK].into_boxed_slice(),
             agent_version: String::new(),
             tracing: TracingStatus::Unavailable("no Hello yet".into()),
         };
@@ -173,16 +180,16 @@ impl AgentConnection {
     }
 
     async fn recv(&mut self) -> Result<GuestMessage, AgentError> {
-        let mut buffer = [0_u8; 16 * 1024];
         loop {
             if let Some(message) = self.decoder.next_message()? {
                 return Ok(message);
             }
-            let read = self.stream.read(&mut buffer).await?;
+            let read = self.stream.read(&mut self.buffer).await?;
             if read == 0 {
                 return Err(AgentError::Closed);
             }
-            self.decoder.push(buffer.get(..read).unwrap_or_default())?;
+            self.decoder
+                .push(self.buffer.get(..read).unwrap_or_default())?;
         }
     }
 
