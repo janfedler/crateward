@@ -26,7 +26,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crateward_core::blobs::BlobStore;
 use crateward_core::child::ChildError;
 use crateward_core::config::WarmConfig;
 use crateward_core::digest::Sha256Digest;
@@ -34,10 +33,9 @@ use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::store::Store;
 
-use crate::backend::FirecrackerBackend;
 use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
-use crate::worker::{BUILDER, Failure, JobFiles, Locked, RunPlan, RunReport, WorkerSetup, execute};
+use crate::worker::{BUILDER, Failure, JobFiles, Locked, RunPlan, RunReport, Sandbox};
 
 /// A crate version.
 type Key = (String, String);
@@ -366,18 +364,16 @@ fn image_io(path: &Path) -> impl FnOnce(std::io::Error) -> WarmError {
     move |source| WarmError::Image { path, source }
 }
 
-/// Builds the warm image in `slot` and returns its path, or `None` when
-/// there is nothing to warm. The image lands in `setup.work_dir`.
+/// Builds the warm image in the slot of `sandbox` and returns its path, or
+/// `None` when there is nothing to warm. The image lands in the work
+/// directory.
 ///
 /// # Errors
 ///
 /// Describes why no image was produced: an infrastructure failure, a
 /// rejected build, or an image above the size limit.
 pub async fn build(
-    backend: &FirecrackerBackend,
-    slot: u32,
-    setup: &WorkerSetup,
-    blobs: &BlobStore,
+    sandbox: &Sandbox,
     config: &WarmConfig,
     plan: &Plan,
 ) -> Result<Option<PathBuf>, WarmError> {
@@ -393,17 +389,16 @@ pub async fn build(
         files: vec![("warm.sh".into(), script(plan).into_bytes())],
         stubs: plan.stubs.clone(),
     };
-    let work = &setup.work_dir;
+    let work = &sandbox.setup.work_dir;
     let files = JobFiles {
         payload: work.join("warm.payload"),
         scratch: work.join("warm.scratch"),
         network: work.join("warm.network"),
         warm: None,
-        warm_placeholder: setup.warm_placeholder.clone(),
+        warm_placeholder: sandbox.setup.warm_placeholder.clone(),
     };
-    let mut warm_setup = setup.clone();
-    warm_setup.warm = None;
-    warm_setup.scratch_mib = scratch_mib(config);
+    let mut warming = sandbox.clone();
+    warming.setup.scratch_mib = scratch_mib(config);
     let run = RunPlan {
         argv: vec!["/bin/sh".into(), "/cw/warm.sh".into()],
         cwd: "/cw".into(),
@@ -411,18 +406,7 @@ pub async fn build(
     };
     let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
     let result = async {
-        let report = execute(
-            backend,
-            slot,
-            &warm_setup,
-            blobs,
-            0,
-            spec,
-            &tokens,
-            &files,
-            &run,
-        )
-        .await?;
+        let report = warming.execute(0, spec, &tokens, &files, &run).await?;
         tracing::info!(
             run_ms = report.run_ms,
             outcome = ?report.outcome,
@@ -440,7 +424,7 @@ pub async fn build(
             return Err(WarmError::Rejected(why));
         }
         let image = work.join("warm-staging.erofs");
-        let exe = setup.exe.clone();
+        let exe = sandbox.setup.exe.clone();
         let scratch = files.scratch.clone();
         let out = image.clone();
         let mut excluded: Vec<String> = plan
@@ -464,7 +448,7 @@ pub async fn build(
             digest.get(..16).unwrap_or_default()
         ));
         std::fs::rename(&image, &named).map_err(image_io(&image))?;
-        if let Err(error) = promotion_check(backend, slot, setup, blobs, plan, &named).await {
+        if let Err(error) = promotion_check(sandbox, plan, &named).await {
             let _ = std::fs::remove_file(&named);
             return Err(error.into());
         }
@@ -484,14 +468,7 @@ const PROMOTION_MAX_UNITS: usize = 5;
 /// Replays the first probe as an ordinary job with the new image mounted.
 /// The image is used only if that job is clean, succeeds and compiles
 /// almost nothing itself; a broken image would otherwise fail every job.
-async fn promotion_check(
-    backend: &FirecrackerBackend,
-    slot: u32,
-    setup: &WorkerSetup,
-    blobs: &BlobStore,
-    plan: &Plan,
-    image: &Path,
-) -> Result<(), CheckError> {
+async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result<(), CheckError> {
     let (Some(first), Some(stub)) = (plan.probes.first(), plan.stubs.first()) else {
         return Err(CheckError::NoProbe);
     };
@@ -504,17 +481,17 @@ async fn promotion_check(
         files: Vec::new(),
         stubs: vec![stub.clone()],
     };
-    let work = &setup.work_dir;
+    let setup = &sandbox.setup;
     let files = JobFiles {
-        payload: work.join("warm-check.payload"),
-        scratch: work.join("warm-check.scratch"),
-        network: work.join("warm-check.network"),
+        payload: setup.work_dir.join("warm-check.payload"),
+        scratch: setup.work_dir.join("warm-check.scratch"),
+        network: setup.work_dir.join("warm-check.network"),
         warm: Some(image.to_path_buf()),
         warm_placeholder: setup.warm_placeholder.clone(),
     };
     let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
     let run = RunPlan::check(setup.check_timeout);
-    let result = execute(backend, slot, setup, blobs, 0, spec, &tokens, &files, &run).await;
+    let result = sandbox.execute(0, spec, &tokens, &files, &run).await;
     for file in [&files.payload, &files.scratch, &files.network] {
         let _ = std::fs::remove_file(file);
     }

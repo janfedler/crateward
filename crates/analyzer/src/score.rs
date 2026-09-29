@@ -81,41 +81,20 @@ impl Group {
 }
 
 impl Groups {
-    // One call per signal reads best with the fields spelled out.
-    #[allow(clippy::too_many_arguments)]
-    fn add(
-        &mut self,
-        group: Group,
-        signal: &str,
-        points: u32,
-        source: EvidenceSource,
-        summary: String,
-        package: Option<String>,
-        location: Option<String>,
-    ) {
+    fn add(&mut self, group: Group, evidence: Evidence) {
         // The same signal at the same place counts once, whichever run saw
         // it. Cargo puts a unit's outputs in a directory named with a hash
         // of its settings, which differs between `cargo check` and `cargo
         // build`; the place is compared without it.
-        let place = location.as_deref().map(without_unit_hash);
+        let place = evidence.location.as_deref().map(without_unit_hash);
         if self.items.iter().any(|(_, e)| {
-            e.signal == signal
-                && e.package == package
+            e.signal == evidence.signal
+                && e.package == evidence.package
                 && e.location.as_deref().map(without_unit_hash) == place
         }) {
             return;
         }
-        self.items.push((
-            group,
-            Evidence {
-                signal: signal.to_owned(),
-                points,
-                source,
-                summary,
-                package,
-                location,
-            },
-        ));
+        self.items.push((group, evidence));
     }
 
     /// Applies the caps: within a group, the strongest items count first.
@@ -296,18 +275,20 @@ fn score_static(inputs: &Inputs<'_>, groups: &mut Groups, profile: &mut BTreeSet
         };
         groups.add(
             Group::Static,
-            &format!("static:{name}"),
-            points,
-            EvidenceSource::Static,
-            format!(
-                "{:?} severity {name} in {:?} code{more}: {}",
-                f.severity, f.context, f.evidence
-            ),
-            Some(inputs.name.to_owned()),
-            Some(match f.line {
-                Some(line) => format!("{}:{line}", f.file),
-                None => f.file.clone(),
-            }),
+            Evidence {
+                signal: format!("static:{name}"),
+                points,
+                source: EvidenceSource::Static,
+                summary: format!(
+                    "{:?} severity {name} in {:?} code{more}: {}",
+                    f.severity, f.context, f.evidence
+                ),
+                package: Some(inputs.name.to_owned()),
+                location: Some(match f.line {
+                    Some(line) => format!("{}:{line}", f.file),
+                    None => f.file.clone(),
+                }),
+            },
         );
     }
 }
@@ -319,23 +300,27 @@ fn score_diff(inputs: &Inputs<'_>, groups: &mut Groups) {
     if diff.build_script_added {
         groups.add(
             Group::Change,
-            "build_script_added",
-            10,
-            EvidenceSource::Diff,
-            format!("A build script was added since {since}."),
-            own.clone(),
-            None,
+            Evidence {
+                signal: "build_script_added".into(),
+                points: 10,
+                source: EvidenceSource::Diff,
+                summary: format!("A build script was added since {since}."),
+                package: own.clone(),
+                location: None,
+            },
         );
     }
     if diff.proc_macro_added {
         groups.add(
             Group::Change,
-            "proc_macro_added",
-            5,
-            EvidenceSource::Diff,
-            format!("The crate became a proc macro since {since}."),
-            own.clone(),
-            None,
+            Evidence {
+                signal: "proc_macro_added".into(),
+                points: 5,
+                source: EvidenceSource::Diff,
+                summary: format!("The crate became a proc macro since {since}."),
+                package: own.clone(),
+                location: None,
+            },
         );
     }
     for f in diff
@@ -345,15 +330,17 @@ fn score_diff(inputs: &Inputs<'_>, groups: &mut Groups) {
     {
         groups.add(
             Group::Change,
-            "new_high_finding",
-            10,
-            EvidenceSource::Diff,
-            format!("New since {since}: {}", finding_name(&f.kind)),
-            own.clone(),
-            Some(match f.line {
-                Some(line) => format!("{}:{line}", f.file),
-                None => f.file.clone(),
-            }),
+            Evidence {
+                signal: "new_high_finding".into(),
+                points: 10,
+                source: EvidenceSource::Diff,
+                summary: format!("New since {since}: {}", finding_name(&f.kind)),
+                package: own.clone(),
+                location: Some(match f.line {
+                    Some(line) => format!("{}:{line}", f.file),
+                    None => f.file.clone(),
+                }),
+            },
         );
     }
 }
@@ -367,39 +354,45 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
         profile.insert(format!("leak:{}", leak.kind));
         groups.add(
             Group::Theft,
-            "honeytoken_left_vm",
-            100,
-            EvidenceSource::Network,
-            format!("The planted {} left the VM.", leak.kind),
-            None,
-            Some(leak.via.clone()),
+            Evidence {
+                signal: "honeytoken_left_vm".into(),
+                points: 100,
+                source: EvidenceSource::Network,
+                summary: format!("The planted {} left the VM.", leak.kind),
+                package: None,
+                location: Some(leak.via.clone()),
+            },
         );
     }
     for leak in run.tokens_in_trace.iter().chain(&run.tokens_on_disk) {
         profile.insert(format!("copy:{}", leak.kind));
         groups.add(
             Group::Theft,
-            "honeytoken_copied",
-            60,
-            EvidenceSource::Disk,
-            format!("The planted {} was copied inside the VM.", leak.kind),
-            build_dir_package(&leak.via),
-            Some(leak.via.clone()),
+            Evidence {
+                signal: "honeytoken_copied".into(),
+                points: 60,
+                source: EvidenceSource::Disk,
+                summary: format!("The planted {} was copied inside the VM.", leak.kind),
+                package: build_dir_package(&leak.via),
+                location: Some(leak.via.clone()),
+            },
         );
     }
     for p in t.processes.iter().filter(|p| p.became_root) {
         profile.insert("root".into());
         groups.add(
             Group::Integrity,
-            "became_root",
-            80,
-            EvidenceSource::Trace,
-            format!(
-                "{} ran as root although the build runs unprivileged.",
-                p.exe
-            ),
-            pkg(p.pid),
-            Some(format!("pid {}", p.pid)),
+            Evidence {
+                signal: "became_root".into(),
+                points: 80,
+                source: EvidenceSource::Trace,
+                summary: format!(
+                    "{} ran as root although the build runs unprivileged.",
+                    p.exe
+                ),
+                package: pkg(p.pid),
+                location: Some(format!("pid {}", p.pid)),
+            },
         );
     }
     for x in &t.tamper {
@@ -409,24 +402,28 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
         ));
         groups.add(
             Group::Integrity,
-            "tamper_attempt",
-            60,
-            EvidenceSource::Trace,
-            format!("Tamper attempt: {}.", x.what),
-            pkg(x.pid),
-            Some(format!("pid {}", x.pid)),
+            Evidence {
+                signal: "tamper_attempt".into(),
+                points: 60,
+                source: EvidenceSource::Trace,
+                summary: format!("Tamper attempt: {}.", x.what),
+                package: pkg(x.pid),
+                location: Some(format!("pid {}", x.pid)),
+            },
         );
     }
     if run.outcome == BuildOutcome::GuestStopped {
         profile.insert("guest-stopped".into());
         groups.add(
             Group::Integrity,
-            "guest_stopped",
-            50,
-            EvidenceSource::Run,
-            "The guest stopped during the build before reporting an end.".into(),
-            None,
-            None,
+            Evidence {
+                signal: "guest_stopped".into(),
+                points: 50,
+                source: EvidenceSource::Run,
+                summary: "The guest stopped during the build before reporting an end.".into(),
+                package: None,
+                location: None,
+            },
         );
     }
     for f in &t.sensitive_opens {
@@ -439,12 +436,14 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
         let points = if class == "other-process" { 30 } else { 50 };
         groups.add(
             Group::Credentials,
-            &format!("read_{}", class.replace('-', "_")),
-            points,
-            EvidenceSource::Trace,
-            format!("{} opened {}.", f.exe, f.path),
-            pkg(f.pid),
-            Some(f.path.clone()),
+            Evidence {
+                signal: format!("read_{}", class.replace('-', "_")),
+                points,
+                source: EvidenceSource::Trace,
+                summary: format!("{} opened {}.", f.exe, f.path),
+                package: pkg(f.pid),
+                location: Some(f.path.clone()),
+            },
         );
     }
     for f in &t.writes_outside_work {
@@ -459,16 +458,19 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
         );
         groups.add(
             Group::Persistence,
-            if persistent {
-                "write_persistence"
-            } else {
-                "write_outside_build"
+            Evidence {
+                signal: if persistent {
+                    "write_persistence"
+                } else {
+                    "write_outside_build"
+                }
+                .into(),
+                points: if persistent { 40 } else { 15 },
+                source: EvidenceSource::Trace,
+                summary: format!("{} wrote {}.", f.exe, f.path),
+                package: pkg(f.pid),
+                location: Some(f.path.clone()),
             },
-            if persistent { 40 } else { 15 },
-            EvidenceSource::Trace,
-            format!("{} wrote {}.", f.exe, f.path),
-            pkg(f.pid),
-            Some(f.path.clone()),
         );
     }
     if let Some(s) = &run.scratch {
@@ -484,40 +486,47 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
             );
             groups.add(
                 Group::Persistence,
-                if persistent {
-                    "disk_persistence"
-                } else {
-                    "disk_outside_build"
+                Evidence {
+                    signal: if persistent {
+                        "disk_persistence"
+                    } else {
+                        "disk_outside_build"
+                    }
+                    .into(),
+                    points: if persistent { 40 } else { 10 },
+                    source: EvidenceSource::Disk,
+                    summary: format!("The build left {} ({}).", e.path, e.kind),
+                    package: None,
+                    location: Some(e.path.clone()),
                 },
-                if persistent { 40 } else { 10 },
-                EvidenceSource::Disk,
-                format!("The build left {} ({}).", e.path, e.kind),
-                None,
-                Some(e.path.clone()),
             );
         }
         for e in &s.executables_outside_target {
             profile.insert("disk:executable".into());
             groups.add(
                 Group::Persistence,
-                "disk_executable",
-                20,
-                EvidenceSource::Disk,
-                format!("The build left an executable at {}.", e.path),
-                None,
-                Some(e.path.clone()),
+                Evidence {
+                    signal: "disk_executable".into(),
+                    points: 20,
+                    source: EvidenceSource::Disk,
+                    summary: format!("The build left an executable at {}.", e.path),
+                    package: None,
+                    location: Some(e.path.clone()),
+                },
             );
         }
         for e in &s.setid {
             profile.insert("disk:setid".into());
             groups.add(
                 Group::Integrity,
-                "disk_setid",
-                40,
-                EvidenceSource::Disk,
-                format!("The build left a set ID file at {}.", e.path),
-                None,
-                Some(e.path.clone()),
+                Evidence {
+                    signal: "disk_setid".into(),
+                    points: 40,
+                    source: EvidenceSource::Disk,
+                    summary: format!("The build left a set ID file at {}.", e.path),
+                    package: None,
+                    location: Some(e.path.clone()),
+                },
             );
         }
     }
@@ -537,36 +546,42 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
         profile.insert(format!("net:{name}"));
         groups.add(
             Group::Network,
-            "network_lookup",
-            10,
-            EvidenceSource::Network,
-            format!("The build looked up {name}."),
-            sender.clone(),
-            Some(name.clone()),
+            Evidence {
+                signal: "network_lookup".into(),
+                points: 10,
+                source: EvidenceSource::Network,
+                summary: format!("The build looked up {name}."),
+                package: sender.clone(),
+                location: Some(name.clone()),
+            },
         );
     }
     if run.network.dns.is_empty() && !run.network.connections.is_empty() {
         profile.insert("net:direct".into());
         groups.add(
             Group::Network,
-            "network_direct",
-            20,
-            EvidenceSource::Network,
-            "The build connected to an address without a name lookup.".into(),
-            sender.clone(),
-            None,
+            Evidence {
+                signal: "network_direct".into(),
+                points: 20,
+                source: EvidenceSource::Network,
+                summary: "The build connected to an address without a name lookup.".into(),
+                package: sender.clone(),
+                location: None,
+            },
         );
     }
     for packet in &run.network.packets {
         profile.insert("net:raw".into());
         groups.add(
             Group::Network,
-            "network_raw",
-            30,
-            EvidenceSource::Network,
-            format!("The guest sent a frame no proxy handles: {packet}."),
-            None,
-            Some(packet.clone()),
+            Evidence {
+                signal: "network_raw".into(),
+                points: 30,
+                source: EvidenceSource::Network,
+                summary: format!("The guest sent a frame no proxy handles: {packet}."),
+                package: None,
+                location: Some(packet.clone()),
+            },
         );
     }
     // Programs that build scripts ran, directly or through children.
@@ -580,12 +595,14 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
             profile.insert(format!("exec:{kind}"));
             groups.add(
                 Group::Execution,
-                &format!("exec_{kind}"),
-                points,
-                EvidenceSource::Trace,
-                format!("The build ran {}.", p.exe),
-                Some(package),
-                Some(p.exe.clone()),
+                Evidence {
+                    signal: format!("exec_{kind}"),
+                    points,
+                    source: EvidenceSource::Trace,
+                    summary: format!("The build ran {}.", p.exe),
+                    package: Some(package),
+                    location: Some(p.exe.clone()),
+                },
             );
         }
     }
@@ -630,12 +647,14 @@ pub fn score(inputs: &Inputs<'_>) -> Verdict {
     for behavior in new_behavior.iter().filter(|b| !b.starts_with("static:")) {
         groups.add(
             Group::Change,
-            "new_behavior",
-            5,
-            EvidenceSource::Diff,
-            format!("New since the previous version: {behavior}."),
-            Some(inputs.name.to_owned()),
-            Some(behavior.clone()),
+            Evidence {
+                signal: "new_behavior".into(),
+                points: 5,
+                source: EvidenceSource::Diff,
+                summary: format!("New since the previous version: {behavior}."),
+                package: Some(inputs.name.to_owned()),
+                location: Some(behavior.clone()),
+            },
         );
     }
     let (score, evidence) = groups.finish();

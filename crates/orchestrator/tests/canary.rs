@@ -17,6 +17,7 @@
 )]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
@@ -25,7 +26,7 @@ use crateward_orchestrator::canary;
 use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
 use crateward_orchestrator::firecracker::vm::{BootSpec, JobDrives};
 use crateward_orchestrator::honeytokens::Honeytokens;
-use crateward_orchestrator::worker::{JobFiles, RunPlan, WorkerSetup, execute};
+use crateward_orchestrator::worker::{JobFiles, RunPlan, Sandbox, WorkerSetup};
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -102,17 +103,19 @@ async fn canaries_give_their_known_results() {
         .unwrap();
     let cgroups =
         CgroupTree::own().expect("run through `cargo xtask canary` for a delegated cgroup");
-    let backend = FirecrackerBackend::new(config, cgroups, snapshot);
-
-    let blobs = BlobStore::open(&work.join("cas")).unwrap();
-    let setup = WorkerSetup {
-        exe: PathBuf::from(env!("CARGO_BIN_EXE_crateward_orchestrator")),
-        work_dir: work.clone(),
-        scratch_mib: 2048,
-        check_timeout: Duration::from_secs(300),
-        full_timeout: Duration::from_secs(600),
-        warm: None,
-        warm_placeholder: work.join("placeholder-warm.img"),
+    let sandbox = Sandbox {
+        backend: Arc::new(FirecrackerBackend::new(config, cgroups, snapshot)),
+        slot: 0,
+        setup: WorkerSetup {
+            exe: PathBuf::from(env!("CARGO_BIN_EXE_crateward_orchestrator")),
+            work_dir: work.clone(),
+            scratch_mib: 2048,
+            check_timeout: Duration::from_secs(300),
+            full_timeout: Duration::from_secs(600),
+            warm: None,
+            warm_placeholder: work.join("placeholder-warm.img"),
+        },
+        blobs: BlobStore::open(&work.join("cas")).unwrap(),
     };
     for canary in canary::ALL {
         let files = JobFiles {
@@ -122,10 +125,11 @@ async fn canaries_give_their_known_results() {
             warm: None,
             warm_placeholder: work.join("placeholder-warm.img"),
         };
-        let spec = canary.payload(&blobs).unwrap();
+        let spec = canary.payload(&sandbox.blobs).unwrap();
         let tokens = Honeytokens::generate(&mut rand::rng(), 1000);
         let plan = RunPlan::check(Duration::from_secs(300));
-        let report = execute(&backend, 0, &setup, &blobs, 1, spec, &tokens, &files, &plan)
+        let report = sandbox
+            .execute(1, spec, &tokens, &files, &plan)
             .await
             .unwrap();
         let problems = canary.check(&report);

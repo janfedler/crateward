@@ -34,10 +34,46 @@ const CACHE_TTL: Duration = Duration::from_secs(600);
 /// crate that does not exist).
 type CacheMap = HashMap<String, (Instant, Option<Bytes>)>;
 
-/// Index files shared by all resolutions of one fetcher process.
-#[derive(Debug, Clone, Default)]
-pub struct IndexCache {
-    entries: Arc<Mutex<CacheMap>>,
+/// The sparse index: a client, its root URL and the files cached so far.
+/// Clones share the cache, so all resolutions of one fetcher process do.
+#[derive(Debug, Clone)]
+pub struct Index {
+    client: PoliteClient,
+    root: Arc<str>,
+    cache: Arc<Mutex<CacheMap>>,
+}
+
+impl Index {
+    /// The index at `root`, which ends in `/`.
+    #[must_use]
+    pub fn new(client: PoliteClient, root: &str) -> Self {
+        Self {
+            client,
+            root: Arc::from(root),
+            cache: Arc::default(),
+        }
+    }
+
+    /// One index file: `None` for a crate that does not exist, an error
+    /// status for the proxy to pass on when crates.io does not answer.
+    async fn file(&self, path: &str) -> Result<Option<Bytes>, StatusCode> {
+        if let Ok(cache) = self.cache.lock()
+            && let Some((at, body)) = cache.get(path)
+            && at.elapsed() < CACHE_TTL
+        {
+            return Ok(body.clone());
+        }
+        let url = format!("{}{path}", self.root);
+        let body = match self.client.get(&url, None, MAX_INDEX_FILE_BYTES).await {
+            Ok(Fetched::Body { body, .. }) => Some(body),
+            Ok(Fetched::Missing) => None,
+            Ok(Fetched::NotModified) | Err(_) => return Err(StatusCode::BAD_GATEWAY),
+        };
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(path.to_owned(), (Instant::now(), body.clone()));
+        }
+        Ok(body)
+    }
 }
 
 /// The version whose yanked flag the proxy clears.
@@ -68,30 +104,6 @@ fn unyank(body: &[u8], version: &str) -> Bytes {
     Bytes::from(out)
 }
 
-async fn index_file(
-    client: &PoliteClient,
-    root: &str,
-    cache: &IndexCache,
-    path: &str,
-) -> Result<Option<Bytes>, StatusCode> {
-    if let Ok(entries) = cache.entries.lock()
-        && let Some((at, body)) = entries.get(path)
-        && at.elapsed() < CACHE_TTL
-    {
-        return Ok(body.clone());
-    }
-    let url = format!("{root}{path}");
-    let body = match client.get(&url, None, MAX_INDEX_FILE_BYTES).await {
-        Ok(Fetched::Body { body, .. }) => Some(body),
-        Ok(Fetched::Missing) => None,
-        Ok(Fetched::NotModified) | Err(_) => return Err(StatusCode::BAD_GATEWAY),
-    };
-    if let Ok(mut entries) = cache.entries.lock() {
-        entries.insert(path.to_owned(), (Instant::now(), body.clone()));
-    }
-    Ok(body)
-}
-
 /// Whether a request path is a well formed index path: lowercase crate name
 /// characters and slashes only, no traversal.
 fn valid_index_path(path: &str) -> bool {
@@ -105,9 +117,7 @@ fn valid_index_path(path: &str) -> bool {
 
 async fn handle(
     req: Request<hyper::body::Incoming>,
-    client: PoliteClient,
-    root: Arc<str>,
-    cache: IndexCache,
+    index: Index,
     target: Arc<Target>,
 ) -> Result<Response<Full<Bytes>>, Infallible> {
     let respond = |status: StatusCode, body: Bytes| {
@@ -129,7 +139,7 @@ async fn handle(
     if !valid_index_path(path) {
         return Ok(respond(StatusCode::NOT_FOUND, Bytes::new()));
     }
-    Ok(match index_file(&client, &root, &cache, path).await {
+    Ok(match index.file(path).await {
         Ok(Some(body)) if path == target.index_path => {
             respond(StatusCode::OK, unyank(&body, &target.version))
         }
@@ -146,27 +156,17 @@ async fn handle(
 /// Fails if the socket cannot be bound.
 pub fn serve(
     socket: &Path,
-    client: PoliteClient,
-    index_root: &str,
-    cache: IndexCache,
+    index: Index,
     target: Target,
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
     let listener = UnixListener::bind(socket)?;
-    let root: Arc<str> = Arc::from(index_root);
     let target = Arc::new(target);
     Ok(tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
-            let (client, root, cache, target) =
-                (client.clone(), root.clone(), cache.clone(), target.clone());
+            let (index, target) = (index.clone(), Arc::clone(&target));
             tokio::spawn(async move {
                 let service = hyper::service::service_fn(move |req| {
-                    handle(
-                        req,
-                        client.clone(),
-                        root.clone(),
-                        cache.clone(),
-                        target.clone(),
-                    )
+                    handle(req, index.clone(), Arc::clone(&target))
                 });
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service)

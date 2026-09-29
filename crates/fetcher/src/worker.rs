@@ -15,7 +15,7 @@ use crateward_core::store::{CrateFile, Policies, Store, StoreError, StoredJob, h
 use sha2::Digest as _;
 
 use crate::archive::ArchiveLimits;
-use crate::proxy::IndexCache;
+use crate::proxy::Index;
 use crate::resolve::{Resolution, locked_packages, resolve};
 use crate::sandboxed::{MAX_CRATE_BYTES, validate_in_sandbox};
 use crateward_core::blobs::BlobStore;
@@ -91,8 +91,8 @@ pub struct FetcherSetup {
     pub originals: Option<PathBuf>,
     /// The index's `dl` template.
     pub dl: String,
-    /// Sparse index root, ending in `/`.
-    pub index_root: String,
+    /// Where the crate files are stored.
+    pub blobs: BlobStore,
 }
 
 /// The fetch stage worker.
@@ -102,9 +102,7 @@ pub struct Fetcher {
     /// A second connection, for heartbeats while `store` is busy.
     heartbeats: Arc<Store>,
     downloads: PoliteClient,
-    index: PoliteClient,
-    blobs: BlobStore,
-    cache: IndexCache,
+    index: Index,
     setup: FetcherSetup,
     /// Retry budgets and backoff.
     pub policies: Policies,
@@ -125,16 +123,13 @@ fn gunzip(bytes: &[u8], limit: u64) -> std::io::Result<Vec<u8>> {
 impl Fetcher {
     /// A fetcher.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Store,
         heartbeats: Store,
         downloads: PoliteClient,
-        index: PoliteClient,
-        blobs: BlobStore,
+        index: Index,
         setup: FetcherSetup,
         policies: Policies,
-        worker: String,
         lease: Duration,
     ) -> Self {
         Self {
@@ -142,11 +137,9 @@ impl Fetcher {
             heartbeats: Arc::new(heartbeats),
             downloads,
             index,
-            blobs,
-            cache: IndexCache::default(),
             setup,
             policies,
-            worker,
+            worker: format!("fetcher-{}", std::process::id()),
             lease,
         }
     }
@@ -219,13 +212,12 @@ impl Fetcher {
             return Ok(FetchResult::Unavailable);
         }
         let work = self.setup.work_root.join(format!("job-{}", job.id.0));
+        let index = self.index.clone();
         let resolution = resolve(
             &self.setup.exe,
             &self.setup.cargo,
             &work,
-            self.index.clone(),
-            &self.setup.index_root,
-            self.cache.clone(),
+            index,
             &name,
             &version,
         )
@@ -313,7 +305,7 @@ impl Fetcher {
         }
         let exe = self.setup.exe.clone();
         let (n, v) = (name.to_string(), version.to_string());
-        let blobs = self.blobs.clone();
+        let blobs = self.setup.blobs.clone();
         let (report, blob) = tokio::task::spawn_blocking(move || {
             let report = validate_in_sandbox(&exe, &bytes, &n, &v)?;
             let blob = if report.is_storable() {

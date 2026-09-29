@@ -52,7 +52,7 @@ use secrecy::ExposeSecret;
 use crate::backend::{FirecrackerBackend, FirecrackerConfig, VmBackend};
 use crate::cgroup::{CgroupTree, SlotLimits};
 use crate::firecracker::vm::{BootSpec, JobDrives};
-use crate::worker::{SandboxWorker, WorkerSetup};
+use crate::worker::{Sandbox, SandboxWorker, WorkerSetup};
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Orchestrator;
@@ -200,14 +200,19 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             flag.store(true, Ordering::SeqCst);
             let _ = stopped_tx.send(true);
         });
-        let mut setup = WorkerSetup {
-            exe: std::env::current_exe().map_err(fatal)?,
-            work_dir: work.clone(),
-            scratch_mib: sandbox.scratch_mib_per_slot,
-            check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
-            full_timeout: Duration::from_secs(sandbox.full_timeout_secs),
-            warm: None,
-            warm_placeholder: work.join("placeholder-warm.img"),
+        let mut slot0 = Sandbox {
+            backend,
+            slot: 0,
+            setup: WorkerSetup {
+                exe: std::env::current_exe().map_err(fatal)?,
+                work_dir: work.clone(),
+                scratch_mib: sandbox.scratch_mib_per_slot,
+                check_timeout: Duration::from_secs(sandbox.check_timeout_secs),
+                full_timeout: Duration::from_secs(sandbox.full_timeout_secs),
+                warm: None,
+                warm_placeholder: work.join("placeholder-warm.img"),
+            },
+            blobs,
         };
         // The warm build cache (ADR 0008). Any failure means cold builds,
         // never a failed start.
@@ -226,9 +231,9 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                     );
                     let mut stopping = stopped.clone();
                     let built = tokio::select! {
-                        built = warm::build(&backend, 0, &setup, &blobs, warm_config, &plan) => built,
+                        built = warm::build(&slot0, warm_config, &plan) => built,
                         _ = stopping.wait_for(|s| *s) => {
-                            let reconciled = backend.reconcile().await.map_err(fatal)?;
+                            let reconciled = slot0.backend.reconcile().await.map_err(fatal)?;
                             tracing::info!(?reconciled, "stopped during the warm build");
                             return Ok(());
                         }
@@ -236,7 +241,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                     match built {
                         Ok(image) => {
                             tracing::info!(image = ?image, "warm build cache ready");
-                            setup.warm = image;
+                            slot0.setup.warm = image;
                         }
                         Err(error) => tracing::warn!(%error, "no warm build cache"),
                     }
@@ -245,7 +250,6 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             }
         }
         let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
-
 
         let canary_interval = Duration::from_secs(sandbox.canary_interval_minutes * 60);
         // No slot claims a job before the first canaries ran on these guest
@@ -258,16 +262,12 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         for slot in 0..sandbox.slots {
             let store = Store::connect(url).await.map_err(fatal)?;
             let heartbeats = Store::connect(url).await.map_err(fatal)?;
-            let mut worker = SandboxWorker::new(
-                store,
-                heartbeats,
-                blobs.clone(),
-                Arc::clone(&backend),
+            let sandbox = Sandbox {
                 slot,
-                setup.clone(),
-                policies.clone(),
-                lease,
-            );
+                ..slot0.clone()
+            };
+            let mut worker =
+                SandboxWorker::new(store, heartbeats, sandbox, policies.clone(), lease);
             let stop = Arc::clone(&stop);
             let canaries_ran = Arc::clone(&canaries_ran);
             let mut canaries_ran_rx = canaries_ran_rx.clone();
@@ -276,11 +276,9 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 if slot != 0 {
                     while !*canaries_ran_rx.borrow() && !stop.load(Ordering::SeqCst) {
                         // Wakes on the signal, or every second to see a stop.
-                        let _ = tokio::time::timeout(
-                            Duration::from_secs(1),
-                            canaries_ran_rx.changed(),
-                        )
-                        .await;
+                        let _ =
+                            tokio::time::timeout(Duration::from_secs(1), canaries_ran_rx.changed())
+                                .await;
                     }
                 }
                 // Canaries run first, right after the warm build, then on

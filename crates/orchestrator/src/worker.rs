@@ -298,15 +298,25 @@ pub struct WorkerSetup {
     pub warm_placeholder: PathBuf,
 }
 
+/// One VM slot with what a job needs to run in it.
+#[derive(Debug, Clone)]
+pub struct Sandbox {
+    /// The VMM backend, shared by all slots.
+    pub backend: Arc<FirecrackerBackend>,
+    /// The slot whose VM runs the job.
+    pub slot: u32,
+    /// Paths and limits.
+    pub setup: WorkerSetup,
+    /// Where the crate files of a payload are read from.
+    pub blobs: BlobStore,
+}
+
 /// The worker of one slot.
 #[derive(Debug)]
 pub struct SandboxWorker {
     store: Store,
     heartbeats: Arc<Store>,
-    blobs: BlobStore,
-    backend: Arc<FirecrackerBackend>,
-    slot: u32,
-    setup: WorkerSetup,
+    sandbox: Sandbox,
     /// Retry budgets and backoff.
     pub policies: Policies,
     /// Lease owner name.
@@ -316,28 +326,22 @@ pub struct SandboxWorker {
 }
 
 impl SandboxWorker {
-    /// A worker for `slot`.
+    /// A worker for the slot of `sandbox`.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Store,
         heartbeats: Store,
-        blobs: BlobStore,
-        backend: Arc<FirecrackerBackend>,
-        slot: u32,
-        setup: WorkerSetup,
+        sandbox: Sandbox,
         policies: Policies,
         lease: Duration,
     ) -> Self {
+        let worker = format!("orchestrator-{}-slot{}", std::process::id(), sandbox.slot);
         Self {
             store,
             heartbeats: Arc::new(heartbeats),
-            blobs,
-            backend,
-            slot,
-            setup,
+            sandbox,
             policies,
-            worker: format!("orchestrator-{}-slot{slot}", std::process::id()),
+            worker,
             lease,
         }
     }
@@ -364,32 +368,21 @@ impl SandboxWorker {
             return Ok(());
         }
         for canary in crate::canary::ALL {
-            let work = &self.setup.work_dir;
+            let setup = &self.sandbox.setup;
             let files = JobFiles {
-                payload: work.join(format!("{}.payload", canary.name)),
-                scratch: work.join(format!("{}.scratch", canary.name)),
-                network: work.join(format!("{}.network", canary.name)),
-                warm: self.setup.warm.clone(),
-                warm_placeholder: self.setup.warm_placeholder.clone(),
+                payload: setup.work_dir.join(format!("{}.payload", canary.name)),
+                scratch: setup.work_dir.join(format!("{}.scratch", canary.name)),
+                network: setup.work_dir.join(format!("{}.network", canary.name)),
+                warm: setup.warm.clone(),
+                warm_placeholder: setup.warm_placeholder.clone(),
             };
             let result = async {
                 let spec = canary
-                    .payload(&self.blobs)
+                    .payload(&self.sandbox.blobs)
                     .map_err(Failure::infrastructure)?;
                 let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
-                let plan = RunPlan::check(self.setup.check_timeout);
-                execute(
-                    &self.backend,
-                    self.slot,
-                    &self.setup,
-                    &self.blobs,
-                    0,
-                    spec,
-                    &tokens,
-                    &files,
-                    &plan,
-                )
-                .await
+                let plan = RunPlan::check(setup.check_timeout);
+                self.sandbox.execute(0, spec, &tokens, &files, &plan).await
             }
             .await;
             for file in [&files.payload, &files.scratch, &files.network] {
@@ -451,7 +444,7 @@ impl SandboxWorker {
         let event = match result {
             Ok(report) => {
                 tracing::info!(
-                    job = job.id.0, name = %job.name, version = %job.version, slot = self.slot,
+                    job = job.id.0, name = %job.name, version = %job.version, slot = self.sandbox.slot,
                     outcome = ?report.outcome, restore_ms = report.restore_ms,
                     run_ms = report.run_ms, total_ms = started.elapsed().as_millis(),
                     "run finished"
@@ -491,18 +484,10 @@ impl SandboxWorker {
     }
 
     async fn run(&self, job: &StoredJob) -> Result<RunReport, Failure> {
-        let payload = self
-            .setup
-            .work_dir
-            .join(format!("job-{}.payload", job.id.0));
-        let scratch = self
-            .setup
-            .work_dir
-            .join(format!("job-{}.scratch", job.id.0));
-        let network = self
-            .setup
-            .work_dir
-            .join(format!("job-{}.network", job.id.0));
+        let work = &self.sandbox.setup.work_dir;
+        let payload = work.join(format!("job-{}.payload", job.id.0));
+        let scratch = work.join(format!("job-{}.scratch", job.id.0));
+        let network = work.join(format!("job-{}.network", job.id.0));
         let result = self.run_with(job, &payload, &scratch, &network).await;
         for file in [&payload, &scratch, &network] {
             if let Err(error) = std::fs::remove_file(file)
@@ -568,24 +553,18 @@ impl SandboxWorker {
             payload: payload.to_path_buf(),
             scratch: scratch.to_path_buf(),
             network: network.to_path_buf(),
-            warm: self.setup.warm.clone(),
-            warm_placeholder: self.setup.warm_placeholder.clone(),
+            warm: self.sandbox.setup.warm.clone(),
+            warm_placeholder: self.sandbox.setup.warm_placeholder.clone(),
         };
-        let mut report = execute(
-            &self.backend,
-            self.slot,
-            &self.setup,
-            &self.blobs,
-            job.id.0,
-            spec,
-            &tokens,
-            &files,
-            &match job.job.run_kind {
-                RunKind::Check => RunPlan::check(self.setup.check_timeout),
-                RunKind::Full => RunPlan::full(self.setup.full_timeout),
-            },
-        )
-        .await?;
+        let setup = &self.sandbox.setup;
+        let plan = match job.job.run_kind {
+            RunKind::Check => RunPlan::check(setup.check_timeout),
+            RunKind::Full => RunPlan::full(setup.full_timeout),
+        };
+        let mut report = self
+            .sandbox
+            .execute(job.id.0, spec, &tokens, &files, &plan)
+            .await?;
         report.missing_packages = missing;
         if !report.leaked.is_empty() {
             tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, leaked = ?report.leaked, "honeytokens left the VM");
@@ -659,203 +638,202 @@ impl RunPlan {
     }
 }
 
-/// Builds the payload and scratch disk, runs `plan` in `slot` with
-/// the given honeytokens planted, and analyzes the fake internet's log. No
-/// database access, so the canary test can call it directly.
-///
-/// # Errors
-///
-/// Fails if anything but the build itself fails.
-#[allow(clippy::too_many_arguments)]
-pub async fn execute(
-    backend: &FirecrackerBackend,
-    slot: u32,
-    setup: &WorkerSetup,
-    blobs: &BlobStore,
-    job_id: i64,
-    spec: PayloadSpec,
-    tokens: &Honeytokens,
-    files: &JobFiles,
-    plan: &RunPlan,
-) -> Result<RunReport, Failure> {
-    // The fake internet appends to its log; one left from an earlier run
-    // would mix that run's traffic into this one's.
-    match std::fs::remove_file(&files.network) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(Failure::infrastructure(error)),
-    }
-    let stats = build_payload(setup, blobs, spec, &files.payload).await?;
-    make_scratch(setup.scratch_mib, &files.scratch).await?;
-    crate::jail::acl::grant_user(&files.scratch, backend.slot_uid(slot))
-        .map_err(Failure::infrastructure)?;
+impl Sandbox {
+    /// Builds the payload and scratch disk, runs `plan` in the slot with
+    /// the given honeytokens planted, and analyzes the fake internet's log. No
+    /// database access, so the canary test can call it directly.
+    ///
+    /// # Errors
+    ///
+    /// Fails if anything but the build itself fails.
+    pub async fn execute(
+        &self,
+        job_id: i64,
+        spec: PayloadSpec,
+        tokens: &Honeytokens,
+        files: &JobFiles,
+        plan: &RunPlan,
+    ) -> Result<RunReport, Failure> {
+        // The fake internet appends to its log; one left from an earlier run
+        // would mix that run's traffic into this one's.
+        match std::fs::remove_file(&files.network) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(Failure::infrastructure(error)),
+        }
+        let stats = build_payload(&self.setup, &self.blobs, spec, &files.payload).await?;
+        make_scratch(self.setup.scratch_mib, &files.scratch).await?;
+        crate::jail::acl::grant_user(&files.scratch, self.backend.slot_uid(self.slot))
+            .map_err(Failure::infrastructure)?;
 
-    let (mounts, mut directories) = job_mounts(files.warm.is_some());
-    directories.extend(tokens.directories.clone());
-    let workspace = Workspace {
-        mounts,
-        directories: directories.clone(),
-        files: tokens.files.clone(),
-    };
-    let mut env: Vec<(String, String)> = [
-        ("PATH", "/usr/local/bin:/usr/bin:/bin"),
-        ("HOME", HOME),
-        ("USER", "builder"),
-        ("CARGO_HOME", "/work/home/.cargo"),
-        ("CARGO_TARGET_DIR", "/work/target"),
-        ("CARGO_TERM_COLOR", "never"),
-        ("LANG", "C.UTF-8"),
-    ]
-    .iter()
-    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-    .collect();
-    env.extend(tokens.env.clone());
-    let timeout = plan.timeout;
-    let input = JobInput {
-        spec: JobSpec {
-            job_id,
-            wall_clock: now(),
-            argv: plan.argv.clone(),
-            env,
-            cwd: plan.cwd.clone(),
-            timeout_secs: u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX),
-            output_limit: OUTPUT_LIMIT,
-        },
-        workspace,
-        drives: Some(JobDrives {
-            payload: files.payload.clone(),
-            scratch: files.scratch.clone(),
-            warm: files
-                .warm
-                .clone()
-                .unwrap_or_else(|| files.warm_placeholder.clone()),
-        }),
-        network_log: Some(files.network.clone()),
-        scratch_mib: setup.scratch_mib,
-    };
-    let run = backend
-        .run_job(slot, input, timeout + HOST_MARGIN)
-        .await
-        .map_err(Failure::infrastructure)?;
-    let (outcome, exit, stdout, stderr, truncated, trace) = match &run.end {
-        JobEnd::Finished(o) => {
-            let outcome = match o.exit {
-                ExitStatus::Code(0) => BuildOutcome::Succeeded,
-                ExitStatus::TimedOut => BuildOutcome::TimedOut,
-                ExitStatus::Code(_) | ExitStatus::Signal(_) => BuildOutcome::Failed,
-            };
-            (
-                outcome,
-                Some(o.exit),
-                o.stdout.as_slice(),
-                o.stderr.as_slice(),
-                o.truncated,
-                (*o.trace).clone(),
-            )
-        }
-        JobEnd::HostTimeout => (
-            BuildOutcome::TimedOut,
-            None,
-            &[][..],
-            &[][..],
-            false,
-            TraceSummary::default(),
-        ),
-        JobEnd::ResourceLimit => (
-            BuildOutcome::ResourceLimit,
-            None,
-            &[][..],
-            &[][..],
-            false,
-            TraceSummary::default(),
-        ),
-        // Only guest code stops a guest: a result, never retried, so a crate
-        // cannot trip the sandbox breaker by crashing its own VM.
-        JobEnd::GuestStopped(_) => (
-            BuildOutcome::GuestStopped,
-            None,
-            &[][..],
-            &[][..],
-            false,
-            TraceSummary::default(),
-        ),
-        JobEnd::VmmCrashed(reason) => {
-            return Err(Failure {
-                class: FailureClass::SuspectedCompromise,
-                message: format!("the VMM crashed: {reason}"),
-                escalation: None,
-            });
-        }
-        JobEnd::DecoyTouched => {
-            return Err(Failure {
-                class: FailureClass::SuspectedCompromise,
-                message: "something read the decoy in the jail root".to_owned(),
-                escalation: None,
-            });
-        }
-        JobEnd::KvmError(reason) => {
-            return Err(Failure {
-                class: FailureClass::Infrastructure,
-                message: format!("KVM error: {reason}"),
-                escalation: Some(HumanEscalation::KvmError),
-            });
-        }
-        // A VM that died without a report and without a known reason: ours.
-        JobEnd::UnexpectedExit(reason) => {
-            return Err(Failure::infrastructure(format!(
-                "the VM ended unexpectedly: {reason}"
-            )));
-        }
-    };
-    let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
-    let scratch = scan_scratch(setup, files, &directories, tokens).await;
-    let tokens_on_disk = scratch
-        .as_ref()
-        .map(|report| {
-            report
-                .tokens_found
-                .iter()
-                .filter_map(|(i, path)| {
-                    tokens.tokens.get(*i).map(|t| Leak {
-                        kind: t.kind.to_owned(),
-                        via: path.clone(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
-    let tokens_in_trace = trace
-        .find(&values)
-        .into_iter()
-        .filter_map(|(i, via)| {
-            tokens.tokens.get(i).map(|t| Leak {
-                kind: t.kind.to_owned(),
-                via,
-            })
-        })
-        .take(MAX_LISTED)
+        let (mounts, mut directories) = job_mounts(files.warm.is_some());
+        directories.extend(tokens.directories.clone());
+        let workspace = Workspace {
+            mounts,
+            directories: directories.clone(),
+            files: tokens.files.clone(),
+        };
+        let mut env: Vec<(String, String)> = [
+            ("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            ("HOME", HOME),
+            ("USER", "builder"),
+            ("CARGO_HOME", "/work/home/.cargo"),
+            ("CARGO_TARGET_DIR", "/work/target"),
+            ("CARGO_TERM_COLOR", "never"),
+            ("LANG", "C.UTF-8"),
+        ]
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .collect();
-    let report = RunReport {
-        scratch,
-        tokens_on_disk,
-        trace,
-        tokens_in_trace,
-        network,
-        leaked,
-        outcome,
-        end: format!("{:?}", run.end).chars().take(64).collect(),
-        exit,
-        restore_ms: u64::try_from(run.restore.as_millis()).unwrap_or(u64::MAX),
-        run_ms: u64::try_from(run.run.as_millis()).unwrap_or(u64::MAX),
-        stdout_tail: tail(stdout),
-        stderr_tail: tail(stderr),
-        truncated,
-        payload_files: stats.files,
-        payload_bytes: stats.bytes,
-        missing_packages: Vec::new(),
-    };
-    Ok(report)
+        env.extend(tokens.env.clone());
+        let timeout = plan.timeout;
+        let input = JobInput {
+            spec: JobSpec {
+                job_id,
+                wall_clock: now(),
+                argv: plan.argv.clone(),
+                env,
+                cwd: plan.cwd.clone(),
+                timeout_secs: u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX),
+                output_limit: OUTPUT_LIMIT,
+            },
+            workspace,
+            drives: Some(JobDrives {
+                payload: files.payload.clone(),
+                scratch: files.scratch.clone(),
+                warm: files
+                    .warm
+                    .clone()
+                    .unwrap_or_else(|| files.warm_placeholder.clone()),
+            }),
+            network_log: Some(files.network.clone()),
+            scratch_mib: self.setup.scratch_mib,
+        };
+        let run = self
+            .backend
+            .run_job(self.slot, input, timeout + HOST_MARGIN)
+            .await
+            .map_err(Failure::infrastructure)?;
+        let (outcome, exit, stdout, stderr, truncated, trace) = match &run.end {
+            JobEnd::Finished(o) => {
+                let outcome = match o.exit {
+                    ExitStatus::Code(0) => BuildOutcome::Succeeded,
+                    ExitStatus::TimedOut => BuildOutcome::TimedOut,
+                    ExitStatus::Code(_) | ExitStatus::Signal(_) => BuildOutcome::Failed,
+                };
+                (
+                    outcome,
+                    Some(o.exit),
+                    o.stdout.as_slice(),
+                    o.stderr.as_slice(),
+                    o.truncated,
+                    (*o.trace).clone(),
+                )
+            }
+            JobEnd::HostTimeout => (
+                BuildOutcome::TimedOut,
+                None,
+                &[][..],
+                &[][..],
+                false,
+                TraceSummary::default(),
+            ),
+            JobEnd::ResourceLimit => (
+                BuildOutcome::ResourceLimit,
+                None,
+                &[][..],
+                &[][..],
+                false,
+                TraceSummary::default(),
+            ),
+            // Only guest code stops a guest: a result, never retried, so a crate
+            // cannot trip the sandbox breaker by crashing its own VM.
+            JobEnd::GuestStopped(_) => (
+                BuildOutcome::GuestStopped,
+                None,
+                &[][..],
+                &[][..],
+                false,
+                TraceSummary::default(),
+            ),
+            JobEnd::VmmCrashed(reason) => {
+                return Err(Failure {
+                    class: FailureClass::SuspectedCompromise,
+                    message: format!("the VMM crashed: {reason}"),
+                    escalation: None,
+                });
+            }
+            JobEnd::DecoyTouched => {
+                return Err(Failure {
+                    class: FailureClass::SuspectedCompromise,
+                    message: "something read the decoy in the jail root".to_owned(),
+                    escalation: None,
+                });
+            }
+            JobEnd::KvmError(reason) => {
+                return Err(Failure {
+                    class: FailureClass::Infrastructure,
+                    message: format!("KVM error: {reason}"),
+                    escalation: Some(HumanEscalation::KvmError),
+                });
+            }
+            // A VM that died without a report and without a known reason: ours.
+            JobEnd::UnexpectedExit(reason) => {
+                return Err(Failure::infrastructure(format!(
+                    "the VM ended unexpectedly: {reason}"
+                )));
+            }
+        };
+        let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
+        let scratch = scan_scratch(&self.setup, files, &directories, tokens).await;
+        let tokens_on_disk = scratch
+            .as_ref()
+            .map(|report| {
+                report
+                    .tokens_found
+                    .iter()
+                    .filter_map(|(i, path)| {
+                        tokens.tokens.get(*i).map(|t| Leak {
+                            kind: t.kind.to_owned(),
+                            via: path.clone(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
+        let tokens_in_trace = trace
+            .find(&values)
+            .into_iter()
+            .filter_map(|(i, via)| {
+                tokens.tokens.get(i).map(|t| Leak {
+                    kind: t.kind.to_owned(),
+                    via,
+                })
+            })
+            .take(MAX_LISTED)
+            .collect();
+        let report = RunReport {
+            scratch,
+            tokens_on_disk,
+            trace,
+            tokens_in_trace,
+            network,
+            leaked,
+            outcome,
+            end: format!("{:?}", run.end).chars().take(64).collect(),
+            exit,
+            restore_ms: u64::try_from(run.restore.as_millis()).unwrap_or(u64::MAX),
+            run_ms: u64::try_from(run.run.as_millis()).unwrap_or(u64::MAX),
+            stdout_tail: tail(stdout),
+            stderr_tail: tail(stderr),
+            truncated,
+            payload_files: stats.files,
+            payload_bytes: stats.bytes,
+            missing_packages: Vec::new(),
+        };
+        Ok(report)
+    }
 }
 
 /// Where the warm image is mounted in the guest, and the overlay's

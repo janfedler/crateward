@@ -71,7 +71,6 @@ async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
             i64::try_from(config.triage.popular_min_downloads).unwrap_or(i64::MAX),
         ),
         policies,
-        format!("static-{}", std::process::id()),
         Duration::from_secs(config.stages.static_analysis.lease_secs),
     ))
 }

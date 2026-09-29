@@ -27,7 +27,7 @@ use crateward_core::http::{ClientConfig, PoliteClient};
 use crateward_core::name::CrateName;
 use crateward_core::sandbox;
 use crateward_fetcher::archive::{ArchiveFinding, ArchiveReport};
-use crateward_fetcher::proxy::IndexCache;
+use crateward_fetcher::proxy::Index;
 use crateward_fetcher::resolve::{ResolveError, resolve as resolve_in_sandbox};
 use crateward_fetcher::sandboxed::{RESOLVE, ResolveOutcome, validate_in_sandbox};
 
@@ -143,9 +143,7 @@ fn a_resolution_child_that_does_not_exist_is_an_error() {
             Path::new("/nonexistent/fetcher"),
             Path::new("/nonexistent/cargo"),
             &work,
-            client,
-            "https://index.invalid/",
-            IndexCache::default(),
+            Index::new(client, "https://index.invalid/"),
             &CrateName::parse("demo").unwrap(),
             &semver::Version::new(1, 0, 0),
         ))

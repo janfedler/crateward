@@ -13,12 +13,11 @@ use std::process::Stdio;
 
 use crateward_core::child::ChildError;
 use crateward_core::cratesio::probe_manifest;
-use crateward_core::http::PoliteClient;
 use crateward_core::name::CrateName;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-use crate::proxy::{self, IndexCache, Target};
+use crate::proxy::{self, Index, Target};
 use crate::sandboxed::{RESOLVE, ResolveOutcome};
 
 /// The resolution child in error messages.
@@ -131,18 +130,28 @@ pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, LockfileErr
 ///
 /// Fails if the child cannot run. Unresolvable dependencies are a
 /// [`Resolution::Failed`] result instead.
-#[allow(clippy::too_many_arguments)]
 pub async fn resolve(
     exe: &Path,
     cargo: &Path,
     work: &Path,
-    client: PoliteClient,
-    index_root: &str,
-    cache: IndexCache,
+    index: Index,
     name: &CrateName,
     version: &semver::Version,
 ) -> Result<Resolution, ResolveError> {
     let _ = tokio::fs::remove_dir_all(work).await;
+    let result = resolve_in(exe, cargo, work, index, name, version).await;
+    let _ = tokio::fs::remove_dir_all(work).await;
+    result
+}
+
+async fn resolve_in(
+    exe: &Path,
+    cargo: &Path,
+    work: &Path,
+    index: Index,
+    name: &CrateName,
+    version: &semver::Version,
+) -> Result<Resolution, ResolveError> {
     let probe = work.join("probe");
     tokio::fs::create_dir_all(&probe)
         .await
@@ -158,8 +167,7 @@ pub async fn resolve(
         index_path: name.index_path(),
         version: version.to_string(),
     };
-    let server = proxy::serve(&socket, client, index_root, cache, target)
-        .map_err(io("starting the index proxy"))?;
+    let server = proxy::serve(&socket, index, target).map_err(io("starting the index proxy"))?;
     let output = Command::new(exe)
         .arg(RESOLVE)
         .arg(&probe)
@@ -171,28 +179,24 @@ pub async fn resolve(
         .output()
         .await;
     server.abort();
-    let result = (|| {
-        let output = output.map_err(ChildError::io(CHILD, "running"))?;
-        if !output.status.success() {
-            return Err(ChildError::Failed {
-                child: CHILD,
-                status: output.status,
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            }
-            .into());
+    let output = output.map_err(ChildError::io(CHILD, "running"))?;
+    if !output.status.success() {
+        return Err(ChildError::Failed {
+            child: CHILD,
+            status: output.status,
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         }
-        let outcome: ResolveOutcome =
-            serde_json::from_slice(&output.stdout).map_err(|e| ChildError::answer(CHILD, e))?;
-        if outcome.ok {
-            std::fs::read_to_string(probe.join("Cargo.lock"))
-                .map(Resolution::Locked)
-                .map_err(io("reading the lockfile"))
-        } else {
-            Ok(Resolution::Failed(outcome.message))
-        }
-    })();
-    let _ = tokio::fs::remove_dir_all(work).await;
-    result
+        .into());
+    }
+    let outcome: ResolveOutcome =
+        serde_json::from_slice(&output.stdout).map_err(|e| ChildError::answer(CHILD, e))?;
+    if !outcome.ok {
+        return Ok(Resolution::Failed(outcome.message));
+    }
+    tokio::fs::read_to_string(probe.join("Cargo.lock"))
+        .await
+        .map(Resolution::Locked)
+        .map_err(io("reading the lockfile"))
 }
 
 #[cfg(test)]

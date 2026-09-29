@@ -90,7 +90,6 @@ impl Analyzer {
     /// An analyzer. `exe` is the binary that runs the sandboxed child;
     /// `popular` holds the reverse dependency and download thresholds.
     #[must_use]
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         store: Store,
         heartbeats: Store,
@@ -98,7 +97,6 @@ impl Analyzer {
         exe: PathBuf,
         popular: (i64, i64),
         policies: Policies,
-        worker: String,
         lease: Duration,
     ) -> Self {
         Self {
@@ -108,7 +106,7 @@ impl Analyzer {
             exe,
             popular,
             policies,
-            worker,
+            worker: format!("static-{}", std::process::id()),
             lease,
         }
     }

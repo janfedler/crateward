@@ -42,6 +42,7 @@ use crateward_core::store::{Policies, Store};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 
+use crate::proxy::Index;
 use crate::worker::{Fetcher, FetcherSetup};
 use crateward_core::blobs::BlobStore;
 
@@ -81,12 +82,13 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
         allow_plain_http: false,
     };
     let downloads = PoliteClient::new(&client(c.static_requests_per_second))?;
-    let index = PoliteClient::new(&client(c.index_requests_per_second))?;
+    let index_client = PoliteClient::new(&client(c.index_requests_per_second))?;
     let mut index_root = c.index_url.to_string();
     if !index_root.ends_with('/') {
         index_root.push('/');
     }
-    let dl = download_template(&index, &index_root).await?;
+    let dl = download_template(&index_client, &index_root).await?;
+    let index = Index::new(index_client, &index_root);
     let url = config.database.url.expose_secret();
     let mut store = Store::connect(url).await?;
     store.migrate().await?;
@@ -104,13 +106,12 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
             .keep_originals
             .then(|| data.join("originals")),
         dl,
-        index_root,
+        blobs,
     };
     let policies = Policies::from_config(&config.stages)?;
-    let worker = format!("fetcher-{}", std::process::id());
     let lease = Duration::from_secs(config.stages.fetch.lease_secs);
     Ok(Fetcher::new(
-        store, heartbeats, downloads, index, blobs, setup, policies, worker, lease,
+        store, heartbeats, downloads, index, setup, policies, lease,
     ))
 }
 
