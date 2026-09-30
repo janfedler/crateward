@@ -23,6 +23,17 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// The lowercase name, as stored with a report.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
     /// One level higher, for code that runs at build time.
     #[must_use]
     pub const fn raised(self) -> Self {
@@ -219,6 +230,19 @@ pub fn evidence(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn severity_names_are_the_serialized_names() {
+        for severity in [
+            Severity::Info,
+            Severity::Low,
+            Severity::Medium,
+            Severity::High,
+        ] {
+            let value = serde_json::to_value(severity).unwrap();
+            assert_eq!(value.as_str(), Some(severity.name()));
+        }
+    }
 
     #[test]
     fn platforms_are_classified_from_cfg_predicates() {

@@ -134,6 +134,23 @@ pub struct EvidenceView {
     pub summary: String,
 }
 
+/// The parts of a job page that come from its verdict.
+#[derive(Debug, Default)]
+pub struct VerdictView {
+    /// Score, or empty when not scored.
+    pub score: String,
+    /// Level, or empty.
+    pub level: String,
+    /// Review, or empty.
+    pub review: String,
+    /// Evidence, strongest first.
+    pub evidence: Vec<EvidenceView>,
+    /// Behavior new against the previous version.
+    pub new_behavior: Vec<String>,
+    /// Behavior profile.
+    pub profile: Vec<String>,
+}
+
 /// One static finding as shown.
 #[derive(Debug, Clone)]
 pub struct FindingView {

@@ -17,6 +17,7 @@ mod disclosures;
 mod retention;
 mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
+use autonomy::{insert_alert, insert_pause};
 pub use dashboard::{JobFilter, JobRow, Overview, PublicStats};
 pub use disclosures::{Disclosure, DisclosureKind, DisclosureRefusal, PublishedFinding};
 pub use verdicts::Review;
@@ -481,24 +482,10 @@ impl Store {
         // A suspected compromise pauses everything and alerts, in the same
         // transaction as the event, so it cannot be recorded without them.
         if let Effect::EnterQuarantine { stage } = transition.effect {
-            let stages: Vec<&str> = PauseReason::Quarantine
-                .stages()
-                .iter()
-                .map(|s| s.name())
-                .collect();
             let detail = format!("stage {} reported a suspected compromise", stage.name());
-            tx.execute(
-                "INSERT INTO pipeline_pauses (reason, stages, job_id, detail)
-                 VALUES ($1, $2, $3, $4) ON CONFLICT (reason) DO NOTHING",
-                &[&PauseReason::Quarantine.name(), &stages, &id.0, &detail],
-            )
-            .await?;
+            insert_pause(&tx, PauseReason::Quarantine, Some(id), &detail).await?;
             let alert = HumanEscalation::SandboxEscapeIndicator { job: Some(id) };
-            tx.execute(
-                "INSERT INTO alerts (dedup_key, escalation) VALUES ($1, $2)",
-                &[&alert.dedup_key(), &to_json(&alert)],
-            )
-            .await?;
+            insert_alert(&tx, &alert).await?;
         }
         tx.commit().await?;
         Ok(transition)

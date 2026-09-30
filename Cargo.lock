@@ -840,6 +840,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-postgres",
  "tracing",
 ]
 
@@ -993,6 +994,7 @@ dependencies = [
  "tar",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-postgres",
  "toml",
  "tracing",
  "yara-x",

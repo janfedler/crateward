@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use tokio_postgres::GenericClient;
 
 use super::{Policies, Store, StoreError};
 use crate::breaker::{BreakerState, Counts};
@@ -110,6 +111,42 @@ fn corrupt(reason: impl Into<String>) -> StoreError {
         id: 0,
         reason: reason.into(),
     }
+}
+
+/// Sets a pause on a connection or inside a transaction. Returns `false`
+/// if it was already set.
+pub(super) async fn insert_pause(
+    db: &(impl GenericClient + Sync),
+    reason: PauseReason,
+    job: Option<JobId>,
+    detail: &str,
+) -> Result<bool, StoreError> {
+    let stages: Vec<&str> = reason.stages().iter().map(|s| s.name()).collect();
+    let job = job.map(|j| j.0);
+    let inserted = db
+        .execute(
+            "INSERT INTO pipeline_pauses (reason, stages, job_id, detail)
+             VALUES ($1, $2, $3, $4) ON CONFLICT (reason) DO NOTHING",
+            &[&reason.name(), &stages, &job, &detail],
+        )
+        .await?;
+    Ok(inserted == 1)
+}
+
+/// Queues an alert on a connection or inside a transaction.
+pub(super) async fn insert_alert(
+    db: &(impl GenericClient + Sync),
+    escalation: &HumanEscalation,
+) -> Result<(), StoreError> {
+    db.execute(
+        "INSERT INTO alerts (dedup_key, escalation) VALUES ($1, $2)",
+        &[
+            &escalation.dedup_key(),
+            &serde_json::to_value(escalation).unwrap_or(Value::Null),
+        ],
+    )
+    .await?;
+    Ok(())
 }
 
 impl Store {
@@ -239,17 +276,7 @@ impl Store {
         job: Option<JobId>,
         detail: &str,
     ) -> Result<bool, StoreError> {
-        let stages: Vec<&str> = reason.stages().iter().map(|s| s.name()).collect();
-        let job = job.map(|j| j.0);
-        let inserted = self
-            .client
-            .execute(
-                "INSERT INTO pipeline_pauses (reason, stages, job_id, detail)
-                 VALUES ($1, $2, $3, $4) ON CONFLICT (reason) DO NOTHING",
-                &[&reason.name(), &stages, &job, &detail],
-            )
-            .await?;
-        Ok(inserted == 1)
+        insert_pause(&self.client, reason, job, detail).await
     }
 
     /// Lifts a pause. Returns `false` if it was not set.
@@ -303,16 +330,7 @@ impl Store {
     ///
     /// Fails on database errors.
     pub async fn raise_alert(&self, escalation: &HumanEscalation) -> Result<(), StoreError> {
-        self.client
-            .execute(
-                "INSERT INTO alerts (dedup_key, escalation) VALUES ($1, $2)",
-                &[
-                    &escalation.dedup_key(),
-                    &serde_json::to_value(escalation).unwrap_or(Value::Null),
-                ],
-            )
-            .await?;
-        Ok(())
+        insert_alert(&self.client, escalation).await
     }
 
     /// Alerts not yet sent or suppressed, oldest first.

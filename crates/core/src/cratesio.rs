@@ -423,17 +423,7 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
                 field = None;
                 if tag.name().as_ref() == "item" {
                     in_item = false;
-                    let version = match version.take() {
-                        None => Some(None),
-                        Some(v) => semver::Version::parse(&v).ok().map(Some),
-                    };
-                    let item = name.take().zip(version).and_then(|(n, version)| {
-                        Some(FeedItem {
-                            name: CrateName::parse(&n).ok()?,
-                            version,
-                        })
-                    });
-                    match item {
+                    match feed_item(name.take(), version.take()) {
                         Some(item) => feed.items.push(item),
                         None => feed.rejected += 1,
                     }
@@ -444,6 +434,19 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
         }
     }
     Ok(feed)
+}
+
+/// The item of a finished `item` element, or `None` if its name is missing
+/// or invalid or its version is present but invalid.
+fn feed_item(name: Option<String>, version: Option<String>) -> Option<FeedItem> {
+    let version = version
+        .map(|v| semver::Version::parse(&v))
+        .transpose()
+        .ok()?;
+    Some(FeedItem {
+        name: CrateName::parse(&name?).ok()?,
+        version,
+    })
 }
 
 /// The manifest of the consumer probe: a package that depends on exactly
@@ -557,6 +560,62 @@ mod tests {
         assert_eq!(feed.items[0].name.as_str(), "onevcs");
         assert_eq!(feed.items[1].version, None);
         assert_eq!(feed.rejected, 2);
+    }
+
+    fn feed_of(items: &str) -> Feed {
+        let xml =
+            format!("<rss xmlns:crates=\"https://crates.io/\"><channel>{items}</channel></rss>");
+        parse_feed(&xml).unwrap()
+    }
+
+    fn pairs(feed: &Feed) -> Vec<(&str, Option<String>)> {
+        let version = |i: &FeedItem| i.version.as_ref().map(ToString::to_string);
+        feed.items
+            .iter()
+            .map(|i| (i.name.as_str(), version(i)))
+            .collect()
+    }
+
+    #[test]
+    fn feed_fields_are_trimmed_and_may_come_in_any_order() {
+        let feed = feed_of(
+            "<item><crates:version> 1.2.3\n</crates:version><crates:name>\n  serde </crates:name></item>",
+        );
+        assert_eq!(pairs(&feed), [("serde", Some("1.2.3".to_owned()))]);
+        assert_eq!(feed.rejected, 0);
+    }
+
+    #[test]
+    fn feed_fields_outside_an_item_are_ignored() {
+        let feed = feed_of(
+            "<crates:name>stray</crates:name><crates:version>9.9.9</crates:version>\
+             <item><crates:name>real</crates:name></item>",
+        );
+        assert_eq!(pairs(&feed), [("real", None)]);
+        assert_eq!(feed.rejected, 0);
+    }
+
+    #[test]
+    fn feed_items_do_not_share_fields() {
+        let feed = feed_of(
+            "<item><crates:name>a</crates:name><crates:version>1.0.0</crates:version></item>\
+             <item><crates:name>b</crates:name></item>\
+             <item><crates:version>2.0.0</crates:version></item>\
+             <item></item>\
+             <item><crates:name>c</crates:name><crates:version>x</crates:version></item>",
+        );
+        assert_eq!(pairs(&feed), [("a", Some("1.0.0".to_owned())), ("b", None)]);
+        assert_eq!(feed.rejected, 3);
+    }
+
+    #[test]
+    fn feed_that_is_too_large_or_broken_is_an_error() {
+        let big = " ".repeat(MAX_FEED_BYTES + 1);
+        assert!(matches!(parse_feed(&big), Err(ParseError::TooLarge { .. })));
+        assert!(matches!(
+            parse_feed("<rss><item></rss>"),
+            Err(ParseError::Feed(_))
+        ));
     }
 
     #[test]

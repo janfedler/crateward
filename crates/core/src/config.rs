@@ -510,6 +510,34 @@ impl Issues {
     fn https(&mut self, url: &Url, key: &str) {
         self.check(url.scheme() == "https", key, "must use https");
     }
+
+    fn at_least<T: PartialOrd + fmt::Display>(&mut self, value: T, min: T, key: &str) {
+        self.check(value >= min, key, format!("must be at least {min}"));
+    }
+
+    fn at_most<T: PartialOrd + fmt::Display>(&mut self, value: T, max: T, key: &str) {
+        self.check(value <= max, key, format!("must be at most {max}"));
+    }
+
+    fn between<T: PartialOrd + fmt::Display>(&mut self, value: T, min: T, max: T, key: &str) {
+        let message = format!("must be between {min} and {max}");
+        self.check(min <= value && value <= max, key, message);
+    }
+
+    // Subordinate IDs start at 65536; a lower value is a real user or group.
+    fn subordinate_ids(&mut self, base: u32, slots: u32, key: &str, kind: &str) {
+        self.check(
+            base >= 65_536 && base.checked_add(slots).is_some(),
+            key,
+            format!("must be a subordinate {kind} range (at least 65536)"),
+        );
+    }
+}
+
+/// Branch and topic names: ASCII letters, digits, `-` and `_`.
+fn is_plain_name(name: &str) -> bool {
+    name.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 impl Config {
@@ -579,10 +607,11 @@ impl Config {
             "database.url",
             "must be a postgres:// or postgresql:// URL",
         );
-        v.check(
-            (1..=100).contains(&self.database.max_connections),
+        v.between(
+            self.database.max_connections,
+            1,
+            100,
             "database.max_connections",
-            "must be between 1 and 100",
         );
     }
 
@@ -609,10 +638,11 @@ impl Config {
             "crates_io.api_max_requests_per_second",
             "must be above 0 and at most 1 (crates.io data access policy)",
         );
-        v.check(
-            (1..=16).contains(&c.static_max_concurrent_downloads),
+        v.between(
+            c.static_max_concurrent_downloads,
+            1,
+            16,
             "crates_io.static_max_concurrent_downloads",
-            "must be between 1 and 16",
         );
         for (rate, key) in [
             (
@@ -646,31 +676,16 @@ impl Config {
         for stage in Stage::ALL {
             let s = self.stages.get(stage);
             let key = |field: &str| format!("stages.{}.{field}", stage.name());
-            v.check(
-                s.concurrency >= 1,
-                &key("concurrency"),
-                "must be at least 1",
-            );
-            v.check(
-                s.lease_secs >= 10,
-                &key("lease_secs"),
-                "must be at least 10",
-            );
+            v.at_least(s.concurrency, 1, &key("concurrency"));
+            v.at_least(s.lease_secs, 10, &key("lease_secs"));
             v.check(
                 s.heartbeat_secs >= 1 && s.heartbeat_secs.saturating_mul(2) <= s.lease_secs,
                 &key("heartbeat_secs"),
                 "must be at least 1 and at most half of lease_secs",
             );
-            v.check(
-                (1..=20).contains(&s.max_attempts),
-                &key("max_attempts"),
-                "must be between 1 and 20",
-            );
-            v.check(
-                s.max_infrastructure_retries <= 1000,
-                &key("max_infrastructure_retries"),
-                "must be at most 1000",
-            );
+            v.between(s.max_attempts, 1, 20, &key("max_attempts"));
+            let retries = s.max_infrastructure_retries;
+            v.at_most(retries, 1000, &key("max_infrastructure_retries"));
             v.check(
                 s.retry_policy().is_ok(),
                 &key("backoff_base_secs"),
@@ -682,21 +697,14 @@ impl Config {
             "stages.sandbox.concurrency",
             "must not exceed sandbox.slots",
         );
-        v.check(
-            self.triage.dynamic_deadline_hours >= 1,
-            "triage.dynamic_deadline_hours",
-            "must be at least 1",
-        );
+        let hours = self.triage.dynamic_deadline_hours;
+        v.at_least(hours, 1, "triage.dynamic_deadline_hours");
     }
 
     fn validate_sandbox(&self, v: &mut Issues) {
         let s = &self.sandbox;
-        v.check(s.slots >= 1, "sandbox.slots", "must be at least 1");
-        v.check(
-            s.vcpus_per_slot >= 1,
-            "sandbox.vcpus_per_slot",
-            "must be at least 1",
-        );
+        v.at_least(s.slots, 1, "sandbox.slots");
+        v.at_least(s.vcpus_per_slot, 1, "sandbox.vcpus_per_slot");
         v.check(
             s.host_reserved_cores >= 1 && s.host_reserved_cores < s.host_cores,
             "sandbox.host_reserved_cores",
@@ -710,16 +718,8 @@ impl Config {
                 "slots times vcpus_per_slot must not exceed host_cores minus host_reserved_cores ({vm_cores})"
             ),
         );
-        v.check(
-            s.memory_mib_per_slot >= 1024,
-            "sandbox.memory_mib_per_slot",
-            "must be at least 1024",
-        );
-        v.check(
-            s.scratch_mib_per_slot >= 512,
-            "sandbox.scratch_mib_per_slot",
-            "must be at least 512",
-        );
+        v.at_least(s.memory_mib_per_slot, 1024, "sandbox.memory_mib_per_slot");
+        v.at_least(s.scratch_mib_per_slot, 512, "sandbox.scratch_mib_per_slot");
         let needed = u64::from(s.slots)
             .saturating_mul(s.memory_mib_per_slot.saturating_add(s.scratch_mib_per_slot))
             .saturating_add(s.images_tmpfs_mib);
@@ -733,143 +733,60 @@ impl Config {
             "sandbox.check_timeout_secs",
             "must be at least 60 and not above full_timeout_secs",
         );
-        v.absolute(&s.firecracker_bin, "sandbox.firecracker_bin");
-        v.absolute(&s.vmjail_bin, "sandbox.vmjail_bin");
-        v.absolute(&s.fake_internet_bin, "sandbox.fake_internet_bin");
-        v.absolute(
-            &s.fake_internet_authority,
-            "sandbox.fake_internet_authority",
-        );
-        v.absolute(&s.kernel_image, "sandbox.kernel_image");
-        v.absolute(&s.rootfs_image, "sandbox.rootfs_image");
-        v.absolute(&s.slots_dir, "sandbox.slots_dir");
-        if let Some(w) = &s.warm {
-            v.check(
-                w.min_jobs >= 2,
-                "sandbox.warm.min_jobs",
-                "must be at least 2",
-            );
-            v.check(
-                w.max_probes >= 1 && w.max_probes <= w.sample_jobs,
-                "sandbox.warm.max_probes",
-                "must be at least 1 and not above sample_jobs",
-            );
-            v.check(
-                w.timeout_secs >= 60,
-                "sandbox.warm.timeout_secs",
-                "must be at least 60",
-            );
-            v.check(
-                w.max_image_mib <= s.images_tmpfs_mib,
-                "sandbox.warm.max_image_mib",
-                "must fit into images_tmpfs_mib",
-            );
+        for (path, key) in [
+            (&s.firecracker_bin, "sandbox.firecracker_bin"),
+            (&s.vmjail_bin, "sandbox.vmjail_bin"),
+            (&s.fake_internet_bin, "sandbox.fake_internet_bin"),
+            (
+                &s.fake_internet_authority,
+                "sandbox.fake_internet_authority",
+            ),
+            (&s.kernel_image, "sandbox.kernel_image"),
+            (&s.rootfs_image, "sandbox.rootfs_image"),
+            (&s.slots_dir, "sandbox.slots_dir"),
+        ] {
+            v.absolute(path, key);
         }
-        // Subordinate IDs are never below 65536 in practice; a low value is
-        // almost certainly a real user or group on the host.
+        self.validate_warm(v);
+        v.subordinate_ids(s.slot_uid_base, s.slots, "sandbox.slot_uid_base", "UID");
+        v.subordinate_ids(s.slot_gid_base, s.slots, "sandbox.slot_gid_base", "GID");
+    }
+
+    fn validate_warm(&self, v: &mut Issues) {
+        let Some(w) = &self.sandbox.warm else {
+            return;
+        };
+        v.at_least(w.min_jobs, 2, "sandbox.warm.min_jobs");
         v.check(
-            s.slot_uid_base >= 65_536 && s.slot_uid_base.checked_add(s.slots).is_some(),
-            "sandbox.slot_uid_base",
-            "must be a subordinate UID range (at least 65536)",
+            w.max_probes >= 1 && w.max_probes <= w.sample_jobs,
+            "sandbox.warm.max_probes",
+            "must be at least 1 and not above sample_jobs",
         );
+        v.at_least(w.timeout_secs, 60, "sandbox.warm.timeout_secs");
         v.check(
-            s.slot_gid_base >= 65_536 && s.slot_gid_base.checked_add(s.slots).is_some(),
-            "sandbox.slot_gid_base",
-            "must be a subordinate GID range (at least 65536)",
+            w.max_image_mib <= self.sandbox.images_tmpfs_mib,
+            "sandbox.warm.max_image_mib",
+            "must fit into images_tmpfs_mib",
         );
     }
 
     fn validate_operations(&self, v: &mut Issues) {
-        if let Some(export) = &self.export {
-            v.check(
-                export.repository.starts_with("git@github.com:")
-                    && export.repository.ends_with(".git"),
-                "export.repository",
-                "must be an SSH URL of a GitHub repository (git@github.com:owner/name.git)",
-            );
-            v.check(
-                !export.branch.is_empty()
-                    && export
-                        .branch
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
-                "export.branch",
-                "must be a plain branch name",
-            );
-            v.absolute(&export.deploy_key, "export.deploy_key");
-            v.check(
-                (1..=168).contains(&export.interval_hours),
-                "export.interval_hours",
-                "must be between 1 and 168",
-            );
-        }
-        v.check(
-            (50..=95).contains(&self.storage.disk_alert_percent),
+        self.validate_export(v);
+        let storage = &self.storage;
+        v.between(
+            storage.disk_alert_percent,
+            50,
+            95,
             "storage.disk_alert_percent",
-            "must be between 50 and 95",
         );
-        v.check(
-            self.storage.raw_log_retention_days >= 1,
+        v.at_least(
+            storage.raw_log_retention_days,
+            1,
             "storage.raw_log_retention_days",
-            "must be at least 1",
         );
         v.absolute(&self.fetcher.cargo_bin, "fetcher.cargo_bin");
-        let sup = &self.supervisor;
-        v.check(
-            (5..=300).contains(&sup.interval_secs),
-            "supervisor.interval_secs",
-            "must be between 5 and 300",
-        );
-        v.check(
-            sup.breaker_min_failures >= 1,
-            "supervisor.breaker_min_failures",
-            "must be at least 1",
-        );
-        v.check(
-            (1..=100).contains(&sup.breaker_failure_percent),
-            "supervisor.breaker_failure_percent",
-            "must be between 1 and 100",
-        );
-        v.check(
-            sup.breaker_window_secs >= 60,
-            "supervisor.breaker_window_secs",
-            "must be at least 60",
-        );
-        v.check(
-            sup.breaker_cooldown_secs >= 30
-                && sup.breaker_cooldown_secs <= sup.breaker_max_cooldown_secs,
-            "supervisor.breaker_cooldown_secs",
-            "must be at least 30 and not above breaker_max_cooldown_secs",
-        );
-        v.check(
-            sup.alert_repeat_hours >= 1,
-            "supervisor.alert_repeat_hours",
-            "must be at least 1",
-        );
-        v.check(
-            sup.integrity_interval_minutes >= 1,
-            "supervisor.integrity_interval_minutes",
-            "must be at least 1",
-        );
-        for decoy in &sup.decoys {
-            v.absolute(decoy, "supervisor.decoys");
-        }
-        match &self.notifier {
-            NotifierConfig::Log => {}
-            NotifierConfig::Ntfy { server_url, topic } => {
-                v.https(server_url, "notifier.server_url");
-                let topic = topic.expose_secret();
-                v.check(
-                    topic.len() >= 32
-                        && topic.len() <= 64
-                        && topic
-                            .bytes()
-                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'),
-                    "notifier.topic",
-                    "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password",
-                );
-            }
-        }
+        self.validate_supervisor(v);
+        self.validate_notifier(v);
         let ping_ok = Url::parse(self.heartbeat.ping_url.expose_secret())
             .is_ok_and(|url| url.scheme() == "https");
         v.check(
@@ -877,16 +794,83 @@ impl Config {
             "heartbeat.ping_url",
             "must be an https URL (value not shown, it is secret)",
         );
-        v.check(
-            (10..=600).contains(&self.heartbeat.interval_secs),
+        v.between(
+            self.heartbeat.interval_secs,
+            10,
+            600,
             "heartbeat.interval_secs",
-            "must be between 10 and 600",
         );
         v.check(
             self.web.listen.ip().is_loopback(),
             "web.listen",
             "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0022)",
         );
+    }
+
+    fn validate_export(&self, v: &mut Issues) {
+        let Some(export) = &self.export else {
+            return;
+        };
+        v.check(
+            export.repository.starts_with("git@github.com:") && export.repository.ends_with(".git"),
+            "export.repository",
+            "must be an SSH URL of a GitHub repository (git@github.com:owner/name.git)",
+        );
+        v.check(
+            !export.branch.is_empty() && is_plain_name(&export.branch),
+            "export.branch",
+            "must be a plain branch name",
+        );
+        v.absolute(&export.deploy_key, "export.deploy_key");
+        v.between(export.interval_hours, 1, 168, "export.interval_hours");
+    }
+
+    fn validate_supervisor(&self, v: &mut Issues) {
+        let sup = &self.supervisor;
+        v.between(sup.interval_secs, 5, 300, "supervisor.interval_secs");
+        v.at_least(
+            sup.breaker_min_failures,
+            1,
+            "supervisor.breaker_min_failures",
+        );
+        v.between(
+            sup.breaker_failure_percent,
+            1,
+            100,
+            "supervisor.breaker_failure_percent",
+        );
+        v.at_least(
+            sup.breaker_window_secs,
+            60,
+            "supervisor.breaker_window_secs",
+        );
+        v.check(
+            sup.breaker_cooldown_secs >= 30
+                && sup.breaker_cooldown_secs <= sup.breaker_max_cooldown_secs,
+            "supervisor.breaker_cooldown_secs",
+            "must be at least 30 and not above breaker_max_cooldown_secs",
+        );
+        v.at_least(sup.alert_repeat_hours, 1, "supervisor.alert_repeat_hours");
+        let minutes = sup.integrity_interval_minutes;
+        v.at_least(minutes, 1, "supervisor.integrity_interval_minutes");
+        for decoy in &sup.decoys {
+            v.absolute(decoy, "supervisor.decoys");
+        }
+    }
+
+    fn validate_notifier(&self, v: &mut Issues) {
+        match &self.notifier {
+            NotifierConfig::Log => {}
+            NotifierConfig::Ntfy { server_url, topic } => {
+                v.https(server_url, "notifier.server_url");
+                let topic = topic.expose_secret();
+                v.check(
+                    (32..=64).contains(&topic.len()) && is_plain_name(topic),
+                    "notifier.topic",
+                    "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password",
+                );
+            }
+        }
     }
 }
 
@@ -978,5 +962,777 @@ mod tests {
             }
             other => panic!("expected validation issues, got {other:?}"),
         }
+    }
+
+    const ABSOLUTE: &str = "must be an absolute path";
+    const HTTPS: &str = "must use https";
+
+    fn issues_after(edit: impl FnOnce(&mut Config)) -> Vec<(String, String)> {
+        let mut config = Config::from_toml(EXAMPLE).unwrap();
+        edit(&mut config);
+        let issues = config.validate().err().unwrap_or_default();
+        issues.into_iter().map(|i| (i.key, i.message)).collect()
+    }
+
+    fn rule(edit: impl FnOnce(&mut Config), key: &str, message: &str) {
+        let expected = [(key.to_owned(), message.to_owned())];
+        assert_eq!(issues_after(edit), expected, "{key}");
+    }
+
+    fn accepted(edit: impl FnOnce(&mut Config)) {
+        let issues = issues_after(edit);
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    /// Every value of `ok` passes; every value of `bad` breaks this rule and no other.
+    fn limits<T: Copy + fmt::Debug>(
+        set: impl Fn(&mut Config, T),
+        ok: &[T],
+        bad: &[T],
+        key: &str,
+        message: &str,
+    ) {
+        for &n in ok {
+            let issues = issues_after(|c| set(c, n));
+            assert!(issues.is_empty(), "{key} = {n:?}: {issues:?}");
+        }
+        for &n in bad {
+            let expected = [(key.to_owned(), message.to_owned())];
+            assert_eq!(issues_after(|c| set(c, n)), expected, "{key} = {n:?}");
+        }
+    }
+
+    fn stage_mut(config: &mut Config, stage: Stage) -> &mut StageConfig {
+        match stage {
+            Stage::Fetch => &mut config.stages.fetch,
+            Stage::StaticAnalysis => &mut config.stages.static_analysis,
+            Stage::Sandbox => &mut config.stages.sandbox,
+            Stage::Analysis => &mut config.stages.analysis,
+            Stage::Finalize => &mut config.stages.finalize,
+        }
+    }
+
+    fn http() -> Url {
+        Url::parse("http://example.com/").unwrap()
+    }
+
+    #[test]
+    fn instance_rules() {
+        rule(
+            |c| c.instance.name = "  ".into(),
+            "instance.name",
+            "must not be empty",
+        );
+        rule(
+            |c| c.instance.data_dir = "data".into(),
+            "instance.data_dir",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.instance.run_dir = "run".into(),
+            "instance.run_dir",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.telemetry.log_filter = " ".into(),
+            "telemetry.log_filter",
+            "must not be empty",
+        );
+        for url in ["mysql://x/y", "localhost", ""] {
+            let message = "must be a postgres:// or postgresql:// URL";
+            rule(|c| c.database.url = url.into(), "database.url", message);
+        }
+        accepted(|c| c.database.url = "postgres://x/y".into());
+        limits(
+            |c, n| c.database.max_connections = n,
+            &[1, 100],
+            &[0, 101],
+            "database.max_connections",
+            "must be between 1 and 100",
+        );
+    }
+
+    #[test]
+    fn crates_io_rules() {
+        let message =
+            "must start with 'crateward/' and include contact details (a URL or an email address)";
+        for agent in [
+            "curl/8.0",
+            "crateward/0.1",
+            "crateward/0.1 (no contact)",
+            "x crateward/0.1 (+https://x)",
+        ] {
+            rule(
+                |c| c.crates_io.user_agent = agent.into(),
+                "crates_io.user_agent",
+                message,
+            );
+        }
+        for agent in [
+            "crateward/0.1 (+https://x.example)",
+            "crateward/0.1 (me@x.example)",
+        ] {
+            accepted(|c| c.crates_io.user_agent = agent.into());
+        }
+        rule(
+            |c| c.crates_io.index_url = http(),
+            "crates_io.index_url",
+            HTTPS,
+        );
+        rule(
+            |c| c.crates_io.static_url = http(),
+            "crates_io.static_url",
+            HTTPS,
+        );
+        rule(
+            |c| c.crates_io.rss_updates_url = http(),
+            "crates_io.rss_updates_url",
+            HTTPS,
+        );
+        rule(
+            |c| c.crates_io.rss_new_crates_url = http(),
+            "crates_io.rss_new_crates_url",
+            HTTPS,
+        );
+        rule(
+            |c| c.crates_io.db_dump_url = http(),
+            "crates_io.db_dump_url",
+            HTTPS,
+        );
+        rule(|c| c.crates_io.api_url = http(), "crates_io.api_url", HTTPS);
+        limits(
+            |c, n| c.crates_io.api_max_requests_per_second = n,
+            &[0.5, 1.0],
+            &[0.0, 1.5, -1.0],
+            "crates_io.api_max_requests_per_second",
+            "must be above 0 and at most 1 (crates.io data access policy)",
+        );
+        limits(
+            |c, n| c.crates_io.static_max_concurrent_downloads = n,
+            &[1, 16],
+            &[0, 17],
+            "crates_io.static_max_concurrent_downloads",
+            "must be between 1 and 16",
+        );
+        let politeness = "must be above 0 and at most 20 (our own politeness bound)";
+        limits(
+            |c, n| c.crates_io.static_requests_per_second = n,
+            &[0.1, 20.0],
+            &[0.0, 20.5],
+            "crates_io.static_requests_per_second",
+            politeness,
+        );
+        limits(
+            |c, n| c.crates_io.index_requests_per_second = n,
+            &[0.1, 20.0],
+            &[0.0, 20.5],
+            "crates_io.index_requests_per_second",
+            politeness,
+        );
+        limits(
+            |c, n| c.crates_io.rss_poll_interval_secs = n,
+            &[60, 1800],
+            &[59, 1801],
+            "crates_io.rss_poll_interval_secs",
+            "must be between 60 and 1800 (the feeds cover the last 60 minutes)",
+        );
+        limits(
+            |c, n| c.crates_io.db_dump_refresh_hours = n,
+            &[24, 25],
+            &[23, 0],
+            "crates_io.db_dump_refresh_hours",
+            "must be at least 24 (the dump is refreshed daily)",
+        );
+    }
+
+    #[test]
+    fn stage_rules() {
+        for stage in Stage::ALL {
+            let key = |field: &str| format!("stages.{}.{field}", stage.name());
+            limits(
+                |c, n| stage_mut(c, stage).concurrency = n,
+                &[1, 3],
+                &[0],
+                &key("concurrency"),
+                "must be at least 1",
+            );
+            let lease = |c: &mut Config, n| {
+                let s = stage_mut(c, stage);
+                s.lease_secs = n;
+                s.heartbeat_secs = 1;
+            };
+            limits(
+                lease,
+                &[10, 11],
+                &[9],
+                &key("lease_secs"),
+                "must be at least 10",
+            );
+            let heartbeat = |c: &mut Config, n| {
+                let s = stage_mut(c, stage);
+                s.lease_secs = 100;
+                s.heartbeat_secs = n;
+            };
+            limits(
+                heartbeat,
+                &[1, 50],
+                &[0, 51],
+                &key("heartbeat_secs"),
+                "must be at least 1 and at most half of lease_secs",
+            );
+            limits(
+                |c, n| stage_mut(c, stage).max_attempts = n,
+                &[1, 20],
+                &[0, 21],
+                &key("max_attempts"),
+                "must be between 1 and 20",
+            );
+            limits(
+                |c, n| stage_mut(c, stage).max_infrastructure_retries = n,
+                &[0, 1000],
+                &[1001],
+                &key("max_infrastructure_retries"),
+                "must be at most 1000",
+            );
+            let backoff = |c: &mut Config, n| {
+                let s = stage_mut(c, stage);
+                s.backoff_cap_secs = 100;
+                s.backoff_base_secs = n;
+            };
+            limits(
+                backoff,
+                &[1, 100],
+                &[0, 101],
+                &key("backoff_base_secs"),
+                "must be at least 1 and not above backoff_cap_secs",
+            );
+        }
+        rule(
+            |c| c.stages.sandbox.concurrency = 4,
+            "stages.sandbox.concurrency",
+            "must not exceed sandbox.slots",
+        );
+        limits(
+            |c, n| c.triage.dynamic_deadline_hours = n,
+            &[1, 12],
+            &[0],
+            "triage.dynamic_deadline_hours",
+            "must be at least 1",
+        );
+    }
+
+    #[test]
+    fn sandbox_resource_rules() {
+        let cores =
+            "slots times vcpus_per_slot must not exceed host_cores minus host_reserved_cores";
+        let reserved = "must be at least 1 and leave at least one core for VMs";
+        // No slots leaves the sandbox stage above the slot count.
+        let expected = [
+            (
+                "stages.sandbox.concurrency",
+                "must not exceed sandbox.slots",
+            ),
+            ("sandbox.slots", "must be at least 1"),
+        ];
+        let issues = issues_after(|c| c.sandbox.slots = 0);
+        assert_eq!(issues, expected.map(|(k, m)| (k.to_owned(), m.to_owned())));
+        limits(
+            |c, n| c.sandbox.vcpus_per_slot = n,
+            &[1],
+            &[0],
+            "sandbox.vcpus_per_slot",
+            "must be at least 1",
+        );
+        limits(
+            |c, n| c.sandbox.host_reserved_cores = n,
+            &[1],
+            &[0],
+            "sandbox.host_reserved_cores",
+            reserved,
+        );
+        let issues = issues_after(|c| c.sandbox.host_reserved_cores = 4);
+        let expected = [
+            (
+                "sandbox.host_reserved_cores".to_owned(),
+                reserved.to_owned(),
+            ),
+            ("sandbox.slots".to_owned(), format!("{cores} (0)")),
+        ];
+        assert_eq!(issues, expected);
+        rule(
+            |c| c.sandbox.vcpus_per_slot = 2,
+            "sandbox.slots",
+            &format!("{cores} (3)"),
+        );
+        rule(
+            |c| c.sandbox.host_cores = 3,
+            "sandbox.slots",
+            &format!("{cores} (2)"),
+        );
+        accepted(|c| c.sandbox.host_cores = 6);
+        limits(
+            |c, n| c.sandbox.memory_mib_per_slot = n,
+            &[1024, 4096],
+            &[1023],
+            "sandbox.memory_mib_per_slot",
+            "must be at least 1024",
+        );
+        limits(
+            |c, n| c.sandbox.scratch_mib_per_slot = n,
+            &[512, 4096],
+            &[511],
+            "sandbox.scratch_mib_per_slot",
+            "must be at least 512",
+        );
+        limits(
+            |c, n| c.sandbox.host_memory_budget_mib = n,
+            &[38_912, 40_960],
+            &[38_911],
+            "sandbox.host_memory_budget_mib",
+            "slots, scratch and images need 38912 MiB, more than the budget",
+        );
+        limits(
+            |c, n| c.sandbox.check_timeout_secs = n,
+            &[60, 2700],
+            &[59, 2701],
+            "sandbox.check_timeout_secs",
+            "must be at least 60 and not above full_timeout_secs",
+        );
+    }
+
+    #[test]
+    fn sandbox_path_warm_and_id_rules() {
+        rule(
+            |c| c.sandbox.firecracker_bin = "fc".into(),
+            "sandbox.firecracker_bin",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.sandbox.vmjail_bin = "jail".into(),
+            "sandbox.vmjail_bin",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.sandbox.fake_internet_bin = "fi".into(),
+            "sandbox.fake_internet_bin",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.sandbox.fake_internet_authority = "ca".into(),
+            "sandbox.fake_internet_authority",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.sandbox.kernel_image = "k".into(),
+            "sandbox.kernel_image",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.sandbox.rootfs_image = "r".into(),
+            "sandbox.rootfs_image",
+            ABSOLUTE,
+        );
+        rule(
+            |c| c.sandbox.slots_dir = "s".into(),
+            "sandbox.slots_dir",
+            ABSOLUTE,
+        );
+        accepted(|c| c.sandbox.warm = None);
+        limits(
+            |c, n| c.sandbox.warm.as_mut().unwrap().min_jobs = n,
+            &[2, 3],
+            &[1, 0],
+            "sandbox.warm.min_jobs",
+            "must be at least 2",
+        );
+        limits(
+            |c, n| c.sandbox.warm.as_mut().unwrap().max_probes = n,
+            &[1, 400],
+            &[0, 401],
+            "sandbox.warm.max_probes",
+            "must be at least 1 and not above sample_jobs",
+        );
+        limits(
+            |c, n| c.sandbox.warm.as_mut().unwrap().timeout_secs = n,
+            &[60],
+            &[59],
+            "sandbox.warm.timeout_secs",
+            "must be at least 60",
+        );
+        limits(
+            |c, n| c.sandbox.warm.as_mut().unwrap().max_image_mib = n,
+            &[14_336],
+            &[14_337],
+            "sandbox.warm.max_image_mib",
+            "must fit into images_tmpfs_mib",
+        );
+        limits(
+            |c, n| c.sandbox.slot_uid_base = n,
+            &[65_536, 200_000, u32::MAX - 3],
+            &[65_535, 0, u32::MAX - 2],
+            "sandbox.slot_uid_base",
+            "must be a subordinate UID range (at least 65536)",
+        );
+        limits(
+            |c, n| c.sandbox.slot_gid_base = n,
+            &[65_536, 200_000, u32::MAX - 3],
+            &[65_535, 0, u32::MAX - 2],
+            "sandbox.slot_gid_base",
+            "must be a subordinate GID range (at least 65536)",
+        );
+    }
+
+    #[test]
+    fn export_rules() {
+        accepted(|c| c.export = None);
+        let message = "must be an SSH URL of a GitHub repository (git@github.com:owner/name.git)";
+        for repository in [
+            "https://github.com/a/b.git",
+            "git@github.com:a/b",
+            "git@gitlab.com:a/b.git",
+            "",
+        ] {
+            let edit = |c: &mut Config| c.export.as_mut().unwrap().repository = repository.into();
+            rule(edit, "export.repository", message);
+        }
+        accepted(|c| c.export.as_mut().unwrap().repository = "git@github.com:a/b.git".into());
+        for branch in ["", "a b", "a/b", "a.b"] {
+            let edit = |c: &mut Config| c.export.as_mut().unwrap().branch = branch.into();
+            rule(edit, "export.branch", "must be a plain branch name");
+        }
+        for branch in ["main", "gh-pages", "site_1"] {
+            accepted(|c| c.export.as_mut().unwrap().branch = branch.into());
+        }
+        rule(
+            |c| c.export.as_mut().unwrap().deploy_key = "key".into(),
+            "export.deploy_key",
+            ABSOLUTE,
+        );
+        limits(
+            |c, n| c.export.as_mut().unwrap().interval_hours = n,
+            &[1, 168],
+            &[0, 169],
+            "export.interval_hours",
+            "must be between 1 and 168",
+        );
+    }
+
+    #[test]
+    fn storage_fetcher_and_supervisor_rules() {
+        limits(
+            |c, n| c.storage.disk_alert_percent = n,
+            &[50, 95],
+            &[49, 96],
+            "storage.disk_alert_percent",
+            "must be between 50 and 95",
+        );
+        limits(
+            |c, n| c.storage.raw_log_retention_days = n,
+            &[1, 7],
+            &[0],
+            "storage.raw_log_retention_days",
+            "must be at least 1",
+        );
+        rule(
+            |c| c.fetcher.cargo_bin = "cargo".into(),
+            "fetcher.cargo_bin",
+            ABSOLUTE,
+        );
+        limits(
+            |c, n| c.supervisor.interval_secs = n,
+            &[5, 300],
+            &[4, 301],
+            "supervisor.interval_secs",
+            "must be between 5 and 300",
+        );
+        limits(
+            |c, n| c.supervisor.breaker_min_failures = n,
+            &[1],
+            &[0],
+            "supervisor.breaker_min_failures",
+            "must be at least 1",
+        );
+        limits(
+            |c, n| c.supervisor.breaker_failure_percent = n,
+            &[1, 100],
+            &[0, 101],
+            "supervisor.breaker_failure_percent",
+            "must be between 1 and 100",
+        );
+        limits(
+            |c, n| c.supervisor.breaker_window_secs = n,
+            &[60],
+            &[59],
+            "supervisor.breaker_window_secs",
+            "must be at least 60",
+        );
+        limits(
+            |c, n| c.supervisor.breaker_cooldown_secs = n,
+            &[30, 7200],
+            &[29, 7201],
+            "supervisor.breaker_cooldown_secs",
+            "must be at least 30 and not above breaker_max_cooldown_secs",
+        );
+        limits(
+            |c, n| c.supervisor.alert_repeat_hours = n,
+            &[1],
+            &[0],
+            "supervisor.alert_repeat_hours",
+            "must be at least 1",
+        );
+        limits(
+            |c, n| c.supervisor.integrity_interval_minutes = n,
+            &[1],
+            &[0],
+            "supervisor.integrity_interval_minutes",
+            "must be at least 1",
+        );
+        let issues =
+            issues_after(|c| c.supervisor.decoys = vec!["a".into(), "/b".into(), "c".into()]);
+        let one = ("supervisor.decoys".to_owned(), ABSOLUTE.to_owned());
+        assert_eq!(issues, [one.clone(), one]);
+    }
+
+    #[test]
+    fn notifier_heartbeat_and_web_rules() {
+        accepted(|c| c.notifier = NotifierConfig::Log);
+        let ntfy = |server_url: Url, topic: &str| NotifierConfig::Ntfy {
+            server_url,
+            topic: topic.into(),
+        };
+        let topic = "a".repeat(32);
+        rule(
+            |c| c.notifier = ntfy(http(), &topic),
+            "notifier.server_url",
+            HTTPS,
+        );
+        let message =
+            "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password";
+        let secure = |c: &mut Config, topic: &str| {
+            c.notifier = ntfy(Url::parse("https://ntfy.sh").unwrap(), topic);
+        };
+        for topic in [
+            "a".repeat(31),
+            "a".repeat(65),
+            format!("{}!", "a".repeat(31)),
+        ] {
+            rule(|c| secure(c, &topic), "notifier.topic", message);
+        }
+        for topic in [
+            "a".repeat(32),
+            "a".repeat(64),
+            format!("{}-_", "a".repeat(30)),
+        ] {
+            accepted(|c| secure(c, &topic));
+        }
+        for url in ["http://hc-ping.com/x", "not a url", ""] {
+            let message = "must be an https URL (value not shown, it is secret)";
+            rule(
+                |c| c.heartbeat.ping_url = url.into(),
+                "heartbeat.ping_url",
+                message,
+            );
+        }
+        limits(
+            |c, n| c.heartbeat.interval_secs = n,
+            &[10, 600],
+            &[9, 601],
+            "heartbeat.interval_secs",
+            "must be between 10 and 600",
+        );
+        for listen in ["127.0.0.1:8080", "[::1]:8080", "127.5.5.5:1"] {
+            accepted(|c| c.web.listen = listen.parse().unwrap());
+        }
+        for listen in ["0.0.0.0:8080", "10.77.0.1:8080", "[::]:8080"] {
+            let message = "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0022)";
+            rule(
+                |c| c.web.listen = listen.parse().unwrap(),
+                "web.listen",
+                message,
+            );
+        }
+    }
+
+    fn break_the_common_rules(c: &mut Config) {
+        c.instance.name.clear();
+        c.instance.data_dir = "data".into();
+        c.instance.run_dir = "run".into();
+        c.telemetry.log_filter.clear();
+        c.database.url = "mysql://x".into();
+        c.database.max_connections = 0;
+        let crates = &mut c.crates_io;
+        crates.user_agent = "curl".into();
+        crates.index_url = http();
+        crates.static_url = http();
+        crates.rss_updates_url = http();
+        crates.rss_new_crates_url = http();
+        crates.db_dump_url = http();
+        crates.api_url = http();
+        crates.api_max_requests_per_second = 2.0;
+        crates.static_max_concurrent_downloads = 0;
+        crates.static_requests_per_second = 0.0;
+        crates.index_requests_per_second = 0.0;
+        crates.rss_poll_interval_secs = 0;
+        crates.db_dump_refresh_hours = 0;
+        for stage in Stage::ALL {
+            *stage_mut(c, stage) = StageConfig {
+                concurrency: 0,
+                lease_secs: 0,
+                heartbeat_secs: 0,
+                max_attempts: 0,
+                max_infrastructure_retries: 5000,
+                backoff_base_secs: 0,
+                backoff_cap_secs: 0,
+            };
+        }
+        c.stages.sandbox.concurrency = 100;
+        c.triage.dynamic_deadline_hours = 0;
+        c.storage.disk_alert_percent = 0;
+        c.storage.raw_log_retention_days = 0;
+        c.fetcher.cargo_bin = "cargo".into();
+        let sup = &mut c.supervisor;
+        sup.interval_secs = 0;
+        sup.breaker_min_failures = 0;
+        sup.breaker_failure_percent = 0;
+        sup.breaker_window_secs = 0;
+        sup.breaker_cooldown_secs = 0;
+        sup.alert_repeat_hours = 0;
+        sup.integrity_interval_minutes = 0;
+        sup.decoys = vec!["a".into(), "b".into()];
+        c.notifier = NotifierConfig::Ntfy {
+            server_url: http(),
+            topic: "short".into(),
+        };
+        c.heartbeat.ping_url = "http://x".into();
+        c.heartbeat.interval_secs = 0;
+        c.web.listen = "0.0.0.0:1".parse().unwrap();
+        let export = c.export.as_mut().unwrap();
+        export.repository = "x".into();
+        export.branch.clear();
+        export.deploy_key = "key".into();
+        export.interval_hours = 0;
+    }
+
+    fn break_the_sandbox_paths(c: &mut Config) {
+        let s = &mut c.sandbox;
+        s.firecracker_bin = "a".into();
+        s.vmjail_bin = "b".into();
+        s.fake_internet_bin = "c".into();
+        s.fake_internet_authority = "d".into();
+        s.kernel_image = "e".into();
+        s.rootfs_image = "f".into();
+        s.slots_dir = "g".into();
+        s.check_timeout_secs = 0;
+        s.host_reserved_cores = 0;
+        s.memory_mib_per_slot = 0;
+        s.scratch_mib_per_slot = 0;
+        s.slot_uid_base = 0;
+        s.slot_gid_base = 0;
+        let warm = s.warm.as_mut().unwrap();
+        warm.min_jobs = 0;
+        warm.max_probes = 0;
+        warm.timeout_secs = 0;
+        warm.max_image_mib = u64::MAX;
+    }
+
+    fn keys(issues: Vec<(String, String)>) -> Vec<String> {
+        issues.into_iter().map(|(key, _)| key).collect()
+    }
+
+    /// The keys in the order the rules run, as words.
+    fn order(parts: &[&str]) -> Vec<String> {
+        let words = parts.iter().flat_map(|part| part.split_whitespace());
+        words.map(str::to_owned).collect()
+    }
+
+    const ORDER_BEFORE_SANDBOX: &str = concat!(
+        "instance.name instance.data_dir instance.run_dir telemetry.log_filter ",
+        "database.url database.max_connections ",
+        "crates_io.user_agent crates_io.index_url crates_io.static_url ",
+        "crates_io.rss_updates_url crates_io.rss_new_crates_url crates_io.db_dump_url ",
+        "crates_io.api_url crates_io.api_max_requests_per_second ",
+        "crates_io.static_max_concurrent_downloads crates_io.static_requests_per_second ",
+        "crates_io.index_requests_per_second crates_io.rss_poll_interval_secs ",
+        "crates_io.db_dump_refresh_hours ",
+        "stages.fetch.concurrency stages.fetch.lease_secs stages.fetch.heartbeat_secs ",
+        "stages.fetch.max_attempts stages.fetch.max_infrastructure_retries ",
+        "stages.fetch.backoff_base_secs ",
+        "stages.static_analysis.concurrency stages.static_analysis.lease_secs ",
+        "stages.static_analysis.heartbeat_secs stages.static_analysis.max_attempts ",
+        "stages.static_analysis.max_infrastructure_retries ",
+        "stages.static_analysis.backoff_base_secs ",
+        "stages.sandbox.lease_secs stages.sandbox.heartbeat_secs stages.sandbox.max_attempts ",
+        "stages.sandbox.max_infrastructure_retries stages.sandbox.backoff_base_secs ",
+        "stages.analysis.concurrency stages.analysis.lease_secs ",
+        "stages.analysis.heartbeat_secs stages.analysis.max_attempts ",
+        "stages.analysis.max_infrastructure_retries stages.analysis.backoff_base_secs ",
+        "stages.finalize.concurrency stages.finalize.lease_secs ",
+        "stages.finalize.heartbeat_secs stages.finalize.max_attempts ",
+        "stages.finalize.max_infrastructure_retries stages.finalize.backoff_base_secs ",
+        "stages.sandbox.concurrency triage.dynamic_deadline_hours",
+    );
+
+    const ORDER_AFTER_SANDBOX: &str = concat!(
+        "export.repository export.branch export.deploy_key export.interval_hours ",
+        "storage.disk_alert_percent storage.raw_log_retention_days fetcher.cargo_bin ",
+        "supervisor.interval_secs supervisor.breaker_min_failures ",
+        "supervisor.breaker_failure_percent supervisor.breaker_window_secs ",
+        "supervisor.breaker_cooldown_secs supervisor.alert_repeat_hours ",
+        "supervisor.integrity_interval_minutes supervisor.decoys supervisor.decoys ",
+        "notifier.server_url notifier.topic heartbeat.ping_url heartbeat.interval_secs ",
+        "web.listen",
+    );
+
+    const ORDER_SANDBOX_SLOTS: &str = concat!(
+        "sandbox.slots sandbox.vcpus_per_slot sandbox.host_reserved_cores ",
+        "sandbox.memory_mib_per_slot sandbox.scratch_mib_per_slot ",
+        "sandbox.check_timeout_secs sandbox.firecracker_bin sandbox.vmjail_bin ",
+        "sandbox.fake_internet_bin sandbox.fake_internet_authority sandbox.kernel_image ",
+        "sandbox.rootfs_image sandbox.slots_dir sandbox.warm.min_jobs ",
+        "sandbox.warm.max_probes sandbox.warm.timeout_secs sandbox.warm.max_image_mib ",
+        "sandbox.slot_uid_base sandbox.slot_gid_base",
+    );
+
+    const ORDER_SANDBOX_CORES: &str = concat!(
+        "sandbox.host_reserved_cores sandbox.slots sandbox.memory_mib_per_slot ",
+        "sandbox.scratch_mib_per_slot sandbox.host_memory_budget_mib ",
+        "sandbox.check_timeout_secs sandbox.firecracker_bin sandbox.vmjail_bin ",
+        "sandbox.fake_internet_bin sandbox.fake_internet_authority sandbox.kernel_image ",
+        "sandbox.rootfs_image sandbox.slots_dir sandbox.warm.min_jobs ",
+        "sandbox.warm.max_probes sandbox.warm.timeout_secs sandbox.warm.max_image_mib ",
+        "sandbox.slot_uid_base sandbox.slot_gid_base",
+    );
+
+    #[test]
+    fn issues_come_in_rule_order_when_no_slot_is_configured() {
+        let issues = issues_after(|c| {
+            break_the_common_rules(c);
+            break_the_sandbox_paths(c);
+            c.sandbox.slots = 0;
+            c.sandbox.vcpus_per_slot = 0;
+        });
+        let expected = order(&[
+            ORDER_BEFORE_SANDBOX,
+            ORDER_SANDBOX_SLOTS,
+            ORDER_AFTER_SANDBOX,
+        ]);
+        assert_eq!(keys(issues), expected);
+    }
+
+    #[test]
+    fn issues_come_in_rule_order_when_the_slots_exceed_cores_and_memory() {
+        let issues = issues_after(|c| {
+            break_the_common_rules(c);
+            break_the_sandbox_paths(c);
+            c.sandbox.slots = 9;
+            c.sandbox.vcpus_per_slot = 2;
+            c.sandbox.host_memory_budget_mib = 1;
+        });
+        let expected = order(&[
+            ORDER_BEFORE_SANDBOX,
+            ORDER_SANDBOX_CORES,
+            ORDER_AFTER_SANDBOX,
+        ]);
+        assert_eq!(keys(issues), expected);
     }
 }

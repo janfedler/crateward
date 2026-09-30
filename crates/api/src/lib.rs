@@ -24,7 +24,7 @@ pub mod security;
 pub mod views;
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use askama::Template;
 use axum::extract::{Form, Path, Query, State};
@@ -38,13 +38,14 @@ use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::job::{JobId, Stage};
-use crateward_core::store::{JobFilter, Review, Store, StoreError};
+use crateward_core::store::{Disclosure, JobFilter, Review, Store, StoreError, StoredEvent};
+use crateward_core::verdict::{Evidence, Verdict};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::views::{
     EvidenceView, FindingView, InboxPage, JobPage, JobsPage, OverviewBody, OverviewData,
-    OverviewPage, Row, ago,
+    OverviewPage, Row, VerdictView, ago,
 };
 
 /// The component this package implements.
@@ -260,6 +261,70 @@ fn findings(report: &serde_json::Value) -> Vec<FindingView> {
         .collect()
 }
 
+fn disclosure_rows(d: Disclosure) -> Vec<(String, String)> {
+    let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
+    [
+        ("Kind", d.kind.name().to_owned()),
+        (
+            "Reported",
+            format!("{} to {}", d.reported_on, d.reported_to),
+        ),
+        ("Reference", dash(d.reference)),
+        ("Resolved", dash(d.resolved_on)),
+        ("Published", dash(d.published_on)),
+        ("Page", dash(d.slug)),
+        ("Note", dash(d.note)),
+    ]
+    .into_iter()
+    .map(|(label, value)| (label.to_owned(), value))
+    .collect()
+}
+
+fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, String, String) {
+    let secs = now
+        .duration_since(e.at)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let kind = e.event.get("kind").and_then(serde_json::Value::as_str);
+    (
+        ago(secs),
+        e.from,
+        e.to,
+        kind.unwrap_or("?").to_owned(),
+        e.worker,
+    )
+}
+
+fn run_text(report: &serde_json::Value) -> String {
+    let mut text = serde_json::to_string_pretty(report).unwrap_or_default();
+    if text.len() > MAX_REPORT_TEXT {
+        text.truncate(text.floor_char_boundary(MAX_REPORT_TEXT));
+        text.push_str("\n… (cut)");
+    }
+    text
+}
+
+fn evidence_view(e: Evidence) -> EvidenceView {
+    EvidenceView {
+        points: e.points,
+        signal: e.signal,
+        source: e.source.name().to_owned(),
+        package: e.package.unwrap_or_default(),
+        location: e.location.unwrap_or_default(),
+        summary: e.summary,
+    }
+}
+
+fn verdict_view((verdict, review): (Verdict, Review)) -> VerdictView {
+    VerdictView {
+        score: verdict.score.to_string(),
+        level: verdict.level.name().to_owned(),
+        review: review.name().to_owned(),
+        evidence: verdict.evidence.into_iter().map(evidence_view).collect(),
+        profile: verdict.profile,
+        new_behavior: verdict.new_behavior,
+    }
+}
+
 async fn job(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
@@ -268,83 +333,13 @@ async fn job(
     let Some(job) = store.get(JobId(id)).await? else {
         return Ok((StatusCode::NOT_FOUND, "no such job").into_response());
     };
-    let verdict = store.verdict(job.id).await?;
+    let verdict = store.verdict(job.id).await?.map(verdict_view);
+    let verdict = verdict.unwrap_or_default();
     let static_report = store.static_report(&job.cksum).await?;
-    let disclosure = store
-        .disclosure(job.id)
-        .await?
-        .map(|d| {
-            let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-            vec![
-                ("Kind".to_owned(), d.kind.name().to_owned()),
-                (
-                    "Reported".to_owned(),
-                    format!("{} to {}", d.reported_on, d.reported_to),
-                ),
-                ("Reference".to_owned(), dash(d.reference)),
-                ("Resolved".to_owned(), dash(d.resolved_on)),
-                ("Published".to_owned(), dash(d.published_on)),
-                ("Page".to_owned(), dash(d.slug)),
-                ("Note".to_owned(), dash(d.note)),
-            ]
-        })
-        .unwrap_or_default();
-    let now = std::time::SystemTime::now();
-    let timeline = store
-        .events(job.id)
-        .await?
-        .into_iter()
-        .map(|e| {
-            let secs = now
-                .duration_since(e.at)
-                .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
-            let event = e
-                .event
-                .get("kind")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("?")
-                .to_owned();
-            (ago(secs), e.from, e.to, event, e.worker)
-        })
-        .collect();
-    let runs = store
-        .job_runs(job.id)
-        .await?
-        .into_iter()
-        .map(|(kind, report)| {
-            let mut text = serde_json::to_string_pretty(&report).unwrap_or_default();
-            if text.len() > MAX_REPORT_TEXT {
-                let mut cut = MAX_REPORT_TEXT;
-                while !text.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                text.truncate(cut);
-                text.push_str("\n… (cut)");
-            }
-            (kind, text)
-        })
-        .collect();
-    let (score, level, review, evidence, profile, new_behavior) = match verdict {
-        Some((v, review)) => (
-            v.score.to_string(),
-            v.level.name().to_owned(),
-            review.name().to_owned(),
-            v.evidence
-                .into_iter()
-                .map(|e| EvidenceView {
-                    points: e.points,
-                    signal: e.signal,
-                    source: format!("{:?}", e.source).to_lowercase(),
-                    package: e.package.unwrap_or_default(),
-                    location: e.location.unwrap_or_default(),
-                    summary: e.summary,
-                })
-                .collect(),
-            v.profile,
-            v.new_behavior,
-        ),
-        None => Default::default(),
-    };
+    let disclosure = store.disclosure(job.id).await?;
+    let events = store.events(job.id).await?;
+    let runs = store.job_runs(job.id).await?;
+    let now = SystemTime::now();
     let page = JobPage {
         id,
         name: job.name,
@@ -355,16 +350,19 @@ async fn job(
             .coverage
             .map(|c| c.label().to_owned())
             .unwrap_or_default(),
-        score,
-        level,
-        review,
-        evidence,
-        new_behavior,
-        profile,
+        score: verdict.score,
+        level: verdict.level,
+        review: verdict.review,
+        evidence: verdict.evidence,
+        new_behavior: verdict.new_behavior,
+        profile: verdict.profile,
         findings: static_report.map(|(_, r)| findings(&r)).unwrap_or_default(),
-        timeline,
-        runs,
-        disclosure,
+        timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
+        runs: runs
+            .into_iter()
+            .map(|(kind, r)| (kind, run_text(&r)))
+            .collect(),
+        disclosure: disclosure.map(disclosure_rows).unwrap_or_default(),
     };
     Ok(Html(page.render()?).into_response())
 }

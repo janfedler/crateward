@@ -23,5 +23,8 @@ syn.workspace = true
 toml.workspace = true
 yara-x.workspace = true
 
+[dev-dependencies]
+tokio-postgres.workspace = true
+
 [lints]
 workspace = true

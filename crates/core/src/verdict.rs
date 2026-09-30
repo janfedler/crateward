@@ -150,6 +150,21 @@ pub enum EvidenceSource {
     Run,
 }
 
+impl EvidenceSource {
+    /// Name for labels, the same as in the stored JSON.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Diff => "diff",
+            Self::Trace => "trace",
+            Self::Network => "network",
+            Self::Disk => "disk",
+            Self::Run => "run",
+        }
+    }
+}
+
 /// One reason behind a score.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Evidence {
@@ -212,6 +227,14 @@ mod tests {
         ];
         for coverage in all {
             assert!(!coverage.label().contains("clean"), "{coverage:?}");
+        }
+    }
+
+    #[test]
+    fn source_names_are_the_stored_names() {
+        use EvidenceSource::{Diff, Disk, Network, Run, Static, Trace};
+        for source in [Static, Diff, Trace, Network, Disk, Run] {
+            assert_eq!(serde_json::to_value(source).unwrap(), source.name());
         }
     }
 }

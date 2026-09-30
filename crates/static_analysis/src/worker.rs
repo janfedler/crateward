@@ -12,7 +12,7 @@ use std::time::Duration;
 use crateward_core::blobs::BlobStore;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::failure::FailureClass;
-use crateward_core::job::{JobEvent, Stage, Triage};
+use crateward_core::job::{JobEvent, JobId, Stage, Triage};
 use crateward_core::name::CrateName;
 use crateward_core::store::{Policies, Store, StoreError, StoredJob, heartbeat};
 use crateward_core::verdict::StaticOnlyReason;
@@ -20,11 +20,15 @@ use serde::Deserialize;
 
 use crate::analyze::{ANALYZER_VERSION, StaticReport};
 use crate::diff::{VersionDiff, diff};
+use crate::findings::Severity;
 use crate::sandboxed::{MAX_TAR_BYTES, Outcome, analyze_in_sandbox};
 use crate::triage::{Decision, Dependency, decide};
 
 /// Tar bytes handed to one child at most; more start another child.
 const BATCH_BYTES: usize = 512 * 1024 * 1024;
+
+/// Reports by the SHA-256 of their crate file.
+type Reports = BTreeMap<Sha256Digest, StaticReport>;
 
 /// Why a job's static analysis failed.
 #[derive(Debug, thiserror::Error)]
@@ -166,75 +170,84 @@ impl Analyzer {
     ///
     /// Returns the failure class for the state machine.
     pub async fn process(&self, job: &StoredJob) -> Result<Decision, Failure> {
+        let (decision, version_diff) = self.assess(job).await?;
+        self.record(job, &decision, version_diff.as_ref()).await?;
+        Ok(decision)
+    }
+
+    /// The decision for a job, and the diff to the previous version.
+    async fn assess(&self, job: &StoredJob) -> Result<(Decision, Option<VersionDiff>), Failure> {
         let name = CrateName::parse(&job.name).map_err(Failure::permanent)?;
         let version = semver::Version::parse(&job.version).map_err(Failure::permanent)?;
+        if let Some(decision) = self.early_decision(job).await? {
+            return Ok((decision, None));
+        }
+        let dependencies = self.dependencies(job).await?;
+        let fetches = self.store.other_fetches(&name, job.id).await?;
+        let history = earlier_versions(fetches, job, &version);
+
+        let mut wanted = vec![job.cksum];
+        wanted.extend(dependencies.iter().map(|(_, sha)| *sha));
+        wanted.extend(history.previous.iter().map(|p| p.cksum));
+        let reports = self.ensure_reports(&wanted).await?;
+        let report = reports
+            .get(&job.cksum)
+            .ok_or_else(|| Failure::permanent("the crate archive could not be analyzed"))?;
+
+        let facts = self
+            .dependency_facts(&dependencies, &reports, &history.seen)
+            .await?;
+        let version_diff =
+            diff_to_previous(report, &reports, history.previous.as_ref(), &dependencies);
+        Ok((decide(report, &facts), version_diff))
+    }
+
+    /// The static only decision for a job that needs no dependency
+    /// analysis: the archive was rejected, or cargo could not resolve the
+    /// dependencies.
+    async fn early_decision(&self, job: &StoredJob) -> Result<Option<Decision>, Failure> {
         let target = self
             .store
             .crate_file(&job.cksum)
             .await?
             .ok_or_else(|| Failure::infrastructure("the fetch stage stored no crate file"))?;
         if target.blake3.is_none() {
-            let decision = Decision {
-                triage: Triage::StaticOnly(StaticOnlyReason::ArchiveRejected),
-                reasons: vec!["the archive failed validation and was not unpacked".to_owned()],
-            };
-            self.record(job, &decision, None).await?;
-            return Ok(decision);
+            return Ok(Some(static_only(
+                StaticOnlyReason::ArchiveRejected,
+                "the archive failed validation and was not unpacked",
+            )));
         }
         if self.store.fetch_lockfile(job.id).await?.is_none() {
-            let decision = Decision {
-                triage: Triage::StaticOnly(StaticOnlyReason::UnresolvedDependencies),
-                reasons: vec!["cargo could not resolve the dependencies".to_owned()],
-            };
             // The crate's own report is still useful evidence.
             let _ = self.ensure_reports(&[job.cksum]).await?;
-            self.record(job, &decision, None).await?;
-            return Ok(decision);
+            return Ok(Some(static_only(
+                StaticOnlyReason::UnresolvedDependencies,
+                "cargo could not resolve the dependencies",
+            )));
         }
-        let packages = self
-            .store
-            .fetch_packages(job.id)
-            .await?
-            .map(|v| parse_locked(&v))
-            .unwrap_or_default();
-        let dependencies: Vec<(Locked, Sha256Digest)> = packages
+        Ok(None)
+    }
+
+    /// The locked packages of a job except the crate itself, with their
+    /// checksums. Packages without a SHA-256 checksum are left out.
+    async fn dependencies(&self, job: &StoredJob) -> Result<Vec<(Locked, Sha256Digest)>, Failure> {
+        let packages = self.store.fetch_packages(job.id).await?;
+        Ok(packages
+            .map(|value| parse_locked(&value))
+            .unwrap_or_default()
             .into_iter()
             .filter(|p| !(p.name == job.name && p.version == job.version))
             .filter_map(|p| p.checksum.parse::<Sha256Digest>().ok().map(|s| (p, s)))
-            .collect();
+            .collect())
+    }
 
-        // Earlier versions: their locks say which dependencies are familiar,
-        // and the newest one is the diff base.
-        let mut seen = BTreeSet::new();
-        let mut previous: Option<(semver::Version, Sha256Digest, BTreeSet<String>)> = None;
-        for (_, v, cksum, packages) in self.store.other_fetches(&name, job.id).await? {
-            let Ok(v) = semver::Version::parse(&v) else {
-                continue;
-            };
-            if v >= version {
-                continue;
-            }
-            let names: BTreeSet<String> = parse_locked(&packages)
-                .into_iter()
-                .map(|p| p.name)
-                .filter(|n| n != &job.name)
-                .collect();
-            seen.extend(names.iter().cloned());
-            if previous.as_ref().is_none_or(|(pv, _, _)| &v > pv) {
-                previous = Some((v, cksum, names));
-            }
-        }
-
-        let mut wanted = vec![job.cksum];
-        wanted.extend(dependencies.iter().map(|(_, s)| *s));
-        if let Some((_, cksum, _)) = &previous {
-            wanted.push(*cksum);
-        }
-        let reports = self.ensure_reports(&wanted).await?;
-        let report = reports
-            .get(&job.cksum)
-            .ok_or_else(|| Failure::permanent("the crate archive could not be analyzed"))?;
-
+    /// What the triage needs to know about each dependency.
+    async fn dependency_facts(
+        &self,
+        dependencies: &[(Locked, Sha256Digest)],
+        reports: &Reports,
+        seen: &BTreeSet<String>,
+    ) -> Result<Vec<Dependency>, Failure> {
         let names: Vec<String> = dependencies.iter().map(|(p, _)| p.name.clone()).collect();
         let popular: BTreeSet<String> = self
             .store
@@ -242,7 +255,7 @@ impl Analyzer {
             .await?
             .into_iter()
             .collect();
-        let mut deps: Vec<Dependency> = dependencies
+        let mut facts: Vec<Dependency> = dependencies
             .iter()
             .map(|(p, sha)| Dependency {
                 name: p.name.clone(),
@@ -257,7 +270,7 @@ impl Analyzer {
                 tracked: false,
             })
             .collect();
-        for dep in deps
+        for dep in facts
             .iter_mut()
             .filter(|d| d.build_time_code && !d.popular && !d.seen_before)
         {
@@ -265,15 +278,7 @@ impl Analyzer {
                 dep.tracked = self.store.contains(&dep_name, &dep.version).await?;
             }
         }
-        let decision = decide(report, &deps);
-        let version_diff = previous.as_ref().and_then(|(v, cksum, previous_names)| {
-            let current: BTreeSet<String> = names.iter().cloned().collect();
-            reports
-                .get(cksum)
-                .map(|old| diff(report, old, &v.to_string(), &current, previous_names))
-        });
-        self.record(job, &decision, version_diff.as_ref()).await?;
-        Ok(decision)
+        Ok(facts)
     }
 
     async fn record(
@@ -295,72 +300,158 @@ impl Analyzer {
 
     /// Current reports for the given crate files, analyzing missing ones.
     /// Files without a stored blob or that fail analysis are left out.
-    async fn ensure_reports(
-        &self,
-        files: &[Sha256Digest],
-    ) -> Result<BTreeMap<Sha256Digest, StaticReport>, Failure> {
-        let mut reports = BTreeMap::new();
+    async fn ensure_reports(&self, files: &[Sha256Digest]) -> Result<Reports, Failure> {
+        let mut reports = Reports::new();
         let mut missing = Vec::new();
         for sha in files.iter().collect::<BTreeSet<_>>() {
-            if let Some((ANALYZER_VERSION, value)) = self.store.static_report(sha).await?
-                && let Ok(report) = serde_json::from_value::<StaticReport>(value)
-            {
+            if let Some(report) = self.stored_report(sha).await? {
                 reports.insert(*sha, report);
-                continue;
-            }
-            if let Some(file) = self.store.crate_file(sha).await?
+            } else if let Some(file) = self.store.crate_file(sha).await?
                 && let Some(blake3) = file.blake3
             {
                 missing.push((*sha, blake3));
             }
         }
-        let mut batch: Vec<(Sha256Digest, Vec<u8>)> = Vec::new();
+        let mut batch = Vec::new();
         let mut batch_bytes = 0;
         let mut iter = missing.into_iter().peekable();
         while let Some((sha, blake3)) = iter.next() {
-            let blobs = self.blobs.clone();
-            let tar = tokio::task::spawn_blocking(move || blobs.get(&blake3, MAX_TAR_BYTES))
-                .await
-                .map_err(Failure::infrastructure)?
-                .map_err(Failure::infrastructure)?;
+            let tar = self.read_blob(blake3).await?;
             batch_bytes += tar.len();
             batch.push((sha, tar));
             if batch_bytes >= BATCH_BYTES || iter.peek().is_none() {
-                let (shas, tars): (Vec<_>, Vec<_>) = std::mem::take(&mut batch).into_iter().unzip();
+                reports.extend(self.analyze_batch(std::mem::take(&mut batch)).await?);
                 batch_bytes = 0;
-                let exe = self.exe.clone();
-                let outcomes = tokio::task::spawn_blocking(move || analyze_in_sandbox(&exe, tars))
-                    .await
-                    .map_err(Failure::infrastructure)?
-                    .map_err(Failure::infrastructure)?;
-                for (sha, outcome) in shas.into_iter().zip(outcomes) {
-                    match outcome {
-                        Outcome::Report(report) => {
-                            let max = report
-                                .max_severity()
-                                .and_then(|s| serde_json::to_value(s).ok())
-                                .and_then(|v| v.as_str().map(str::to_owned));
-                            let value = json(&report);
-                            self.store
-                                .record_static_report(
-                                    &sha,
-                                    ANALYZER_VERSION,
-                                    report.has_build_time_code(),
-                                    max.as_deref(),
-                                    &value,
-                                )
-                                .await?;
-                            reports.insert(sha, *report);
-                        }
-                        Outcome::Error(error) => {
-                            tracing::warn!(%sha, %error, "archive not analyzable");
-                        }
-                    }
-                }
             }
         }
         Ok(reports)
     }
+
+    /// The stored report of a crate file, if the current analyzer wrote it
+    /// and it still parses.
+    async fn stored_report(&self, sha: &Sha256Digest) -> Result<Option<StaticReport>, Failure> {
+        Ok(match self.store.static_report(sha).await? {
+            Some((ANALYZER_VERSION, value)) => serde_json::from_value(value).ok(),
+            _ => None,
+        })
+    }
+
+    async fn read_blob(&self, blake3: String) -> Result<Vec<u8>, Failure> {
+        let blobs = self.blobs.clone();
+        tokio::task::spawn_blocking(move || blobs.get(&blake3, MAX_TAR_BYTES))
+            .await
+            .map_err(Failure::infrastructure)?
+            .map_err(Failure::infrastructure)
+    }
+
+    /// Analyzes the tars in one sandboxed child and stores the reports.
+    /// Archives that cannot be analyzed are left out.
+    async fn analyze_batch(
+        &self,
+        batch: Vec<(Sha256Digest, Vec<u8>)>,
+    ) -> Result<Vec<(Sha256Digest, StaticReport)>, Failure> {
+        let (shas, tars): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
+        let exe = self.exe.clone();
+        let outcomes = tokio::task::spawn_blocking(move || analyze_in_sandbox(&exe, tars))
+            .await
+            .map_err(Failure::infrastructure)?
+            .map_err(Failure::infrastructure)?;
+        let mut analyzed = Vec::new();
+        for (sha, outcome) in shas.into_iter().zip(outcomes) {
+            match outcome {
+                Outcome::Report(report) => {
+                    self.store_report(&sha, &report).await?;
+                    analyzed.push((sha, *report));
+                }
+                Outcome::Error(error) => tracing::warn!(%sha, %error, "archive not analyzable"),
+            }
+        }
+        Ok(analyzed)
+    }
+
+    async fn store_report(&self, sha: &Sha256Digest, report: &StaticReport) -> Result<(), Failure> {
+        self.store
+            .record_static_report(
+                sha,
+                ANALYZER_VERSION,
+                report.has_build_time_code(),
+                report.max_severity().map(Severity::name),
+                &json(report),
+            )
+            .await?;
+        Ok(())
+    }
+}
+
+/// A decision that stops the analysis with one reason.
+fn static_only(reason: StaticOnlyReason, text: &str) -> Decision {
+    Decision {
+        triage: Triage::StaticOnly(reason),
+        reasons: vec![text.to_owned()],
+    }
+}
+
+/// The newest earlier version of a crate and the dependency names in the
+/// locks of all earlier versions.
+#[derive(Debug, Default)]
+struct History {
+    seen: BTreeSet<String>,
+    previous: Option<Previous>,
+}
+
+/// The newest earlier version, the base of the diff.
+#[derive(Debug)]
+struct Previous {
+    version: semver::Version,
+    cksum: Sha256Digest,
+    names: BTreeSet<String>,
+}
+
+/// Earlier versions: their locks say which dependencies are familiar, and
+/// the newest one is the diff base. Later and unparsable versions do not
+/// count.
+fn earlier_versions(
+    fetches: Vec<(JobId, String, Sha256Digest, serde_json::Value)>,
+    job: &StoredJob,
+    version: &semver::Version,
+) -> History {
+    let mut history = History::default();
+    for (_, other, cksum, packages) in fetches {
+        let Ok(other) = semver::Version::parse(&other) else {
+            continue;
+        };
+        if other >= *version {
+            continue;
+        }
+        let names: BTreeSet<String> = parse_locked(&packages)
+            .into_iter()
+            .map(|p| p.name)
+            .filter(|n| n != &job.name)
+            .collect();
+        history.seen.extend(names.iter().cloned());
+        if history.previous.as_ref().is_none_or(|p| other > p.version) {
+            history.previous = Some(Previous {
+                version: other,
+                cksum,
+                names,
+            });
+        }
+    }
+    history
+}
+
+/// The diff to the previous version, if there is one with a report.
+fn diff_to_previous(
+    report: &StaticReport,
+    reports: &Reports,
+    previous: Option<&Previous>,
+    dependencies: &[(Locked, Sha256Digest)],
+) -> Option<VersionDiff> {
+    let previous = previous?;
+    let old = reports.get(&previous.cksum)?;
+    let current = dependencies.iter().map(|(p, _)| p.name.clone()).collect();
+    let version = previous.version.to_string();
+    Some(diff(report, old, &version, &current, &previous.names))
 }
 
 /// Serializes to a JSON value for a `jsonb` column. The types used here
