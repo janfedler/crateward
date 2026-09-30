@@ -7,22 +7,6 @@
 
 #![forbid(unsafe_code)]
 
-mod disclosure;
-mod egress;
-
-use std::path::{Path, PathBuf};
-use std::process::ExitCode;
-
-use clap::{Parser, Subcommand};
-use crateward_core::breaker::BreakerState;
-use crateward_core::config::{Config, DEFAULT_CONFIG_PATH};
-use crateward_core::job::{JobId, JobState, Stage, mermaid_diagram};
-use crateward_core::store::{PauseReason, Store};
-use secrecy::ExposeSecret;
-
-/// `EX_CONFIG` from `sysexits.h`.
-const EXIT_CONFIG: u8 = 78;
-
 /// Like `println!`, but a closed pipe (`crateward status | head`) ends the
 /// program quietly instead of panicking.
 macro_rules! out {
@@ -37,6 +21,25 @@ macro_rules! out {
         }
     }};
 }
+
+mod disclosure;
+mod egress;
+mod error;
+mod evidence;
+mod integrity;
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
+use crateward_core::breaker::BreakerState;
+use crateward_core::config::{Config, DEFAULT_CONFIG_PATH};
+use crateward_core::job::{JobId, JobState, Stage, mermaid_diagram};
+use crateward_core::store::{PauseReason, Store};
+use secrecy::ExposeSecret;
+
+use crate::error::CliError;
+
 #[derive(Debug, Parser)]
 #[command(name = "crateward", version, about = "Crateward maintainer tool")]
 struct Cli {
@@ -73,7 +76,7 @@ enum Command {
     /// The host integrity manifest (ADR 0023).
     Integrity {
         #[command(subcommand)]
-        command: IntegrityCommand,
+        command: integrity::Command,
         /// Configuration file.
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
@@ -99,7 +102,7 @@ enum Command {
     /// Record the steps of a disclosure (DISCLOSURE.md).
     Disclosure {
         #[command(subcommand)]
-        command: DisclosureCommand,
+        command: disclosure::Command,
         /// Configuration file.
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
@@ -115,14 +118,6 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
-enum IntegrityCommand {
-    /// Record the digests of the trusted files, after a deploy.
-    Record,
-    /// Compare the trusted files with the manifest.
-    Check,
-}
-
-#[derive(Debug, Subcommand)]
 enum QuarantineCommand {
     /// Lift the quarantine. Only after the cause is understood (RUNBOOK.md).
     Lift,
@@ -134,49 +129,6 @@ enum BreakerCommand {
     Close {
         /// The stage, for example `sandbox`.
         stage: String,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum DisclosureCommand {
-    /// A confirmed finding was reported.
-    Report {
-        /// The job's number.
-        job: i64,
-        /// `malicious` (reported to the crates.io team) or `vulnerability`
-        /// (reported to the owners).
-        #[arg(long)]
-        kind: String,
-        /// Who received the report, for example `help@crates.io`.
-        #[arg(long)]
-        to: String,
-        /// The recipient's ticket or advisory number.
-        #[arg(long)]
-        reference: Option<String>,
-        /// A note for the record.
-        #[arg(long)]
-        note: Option<String>,
-    },
-    /// The recipient acted: the crate was removed or a fix released.
-    Resolved {
-        /// The job's number.
-        job: i64,
-        /// The recipient's ticket or advisory number.
-        #[arg(long)]
-        reference: Option<String>,
-    },
-    /// The finding page `findings/<slug>/` is written; list it publicly.
-    Publish {
-        /// The job's number.
-        job: i64,
-        /// Page name: lowercase letters, digits and dashes.
-        #[arg(long)]
-        slug: String,
-    },
-    /// Show a job's disclosure record.
-    Show {
-        /// The job's number.
-        job: i64,
     },
 }
 
@@ -198,98 +150,70 @@ enum StateMachineCommand {
     States,
 }
 
+fn main() -> ExitCode {
+    match run(Cli::parse().command) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            error.exit_code()
+        }
+    }
+}
+
+fn run(command: Command) -> Result<(), CliError> {
+    match command {
+        Command::Config {
+            command: ConfigCommand::Check { config },
+        } => config_check(&config),
+        Command::StateMachine { command } => {
+            state_machine(&command);
+            Ok(())
+        }
+        Command::Status { config } => with_store(&Config::load(&config)?, status),
+        Command::Quarantine {
+            command: QuarantineCommand::Lift,
+            config,
+        } => with_store(&Config::load(&config)?, quarantine_lift),
+        Command::Integrity { command, config } => integrity::run(&Config::load(&config)?, &command),
+        Command::Egress { config } => {
+            egress::run(&Config::load(&config)?);
+            Ok(())
+        }
+        Command::Evidence { job, out, config } => {
+            let config = Config::load(&config)?;
+            with_store(&config, |store| {
+                evidence::run(store, &config.instance.data_dir, JobId(job), &out)
+            })
+        }
+        Command::Disclosure { command, config } => with_store(&Config::load(&config)?, |store| {
+            disclosure::run(store, command)
+        }),
+        Command::Breaker {
+            command: BreakerCommand::Close { stage },
+            config,
+        } => breaker_close(&config, &stage),
+    }
+}
+
 /// Runs a store command against the configured database.
-fn with_store<F, Fut>(config: &Path, action: F) -> ExitCode
+fn with_store<F, Fut>(config: &Config, action: F) -> Result<(), CliError>
 where
     F: FnOnce(Store) -> Fut,
-    Fut: Future<Output = Result<(), String>>,
+    Fut: Future<Output = Result<(), CliError>>,
 {
-    let config = match Config::load(config) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::from(EXIT_CONFIG);
-        }
-    };
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let result = runtime.block_on(async {
-        let store = Store::connect(config.database.url.expose_secret())
-            .await
-            .map_err(|e| e.to_string())?;
+        .map_err(CliError::Runtime)?;
+    runtime.block_on(async {
+        let store = Store::connect(config.database.url.expose_secret()).await?;
         action(store).await
-    });
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
-        }
-    }
+    })
 }
 
-/// Records or checks the manifest in `instance.data_dir`. The Crateward
-/// binaries are the ones next to this tool.
-fn integrity(config: &Path, command: &IntegrityCommand) -> ExitCode {
-    use crateward_core::integrity;
-    let config = match Config::load(config) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::from(EXIT_CONFIG);
-        }
-    };
-    let manifest = config.instance.data_dir.join(integrity::MANIFEST);
-    let result =
-        match command {
-            IntegrityCommand::Record => std::env::current_exe()
-                .map_err(|e| e.to_string())
-                .and_then(|exe| {
-                    let dir = exe.parent().ok_or("the tool has no directory")?;
-                    let files = integrity::covered(&config, dir).map_err(|e| e.to_string())?;
-                    let text = integrity::record(&files).map_err(|e| e.to_string())?;
-                    let temporary = manifest.with_extension("tmp");
-                    std::fs::write(&temporary, &text).map_err(|e| e.to_string())?;
-                    std::fs::rename(&temporary, &manifest).map_err(|e| e.to_string())?;
-                    out!("recorded {} files in {}", files.len(), manifest.display());
-                    Ok(())
-                }),
-            IntegrityCommand::Check => std::fs::read_to_string(&manifest)
-                .map_err(|e| format!("{}: {e}", manifest.display()))
-                .and_then(|text| integrity::parse(&text).map_err(|e| e.to_string()))
-                .and_then(|parsed| {
-                    let mismatches = integrity::verify(&parsed);
-                    for m in &mismatches {
-                        out!("MISMATCH {}: {}", m.path.display(), m.reason);
-                    }
-                    if mismatches.is_empty() {
-                        out!("{} files match", parsed.len());
-                        Ok(())
-                    } else {
-                        Err(format!("{} files differ", mismatches.len()))
-                    }
-                }),
-        };
-    match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("{error}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-async fn status(store: Store) -> Result<(), String> {
-    let now = store.now_epoch().await.map_err(|e| e.to_string())?;
-    let pauses = store.pauses().await.map_err(|e| e.to_string())?;
+async fn status(store: Store) -> Result<(), CliError> {
+    let now = store.now_epoch().await?;
+    let pauses = store.pauses().await?;
     if pauses.is_empty() {
         out!("pauses: none");
     }
@@ -302,7 +226,7 @@ async fn status(store: Store) -> Result<(), String> {
             p.detail
         );
     }
-    let breakers = store.breakers().await.map_err(|e| e.to_string())?;
+    let breakers = store.breakers().await?;
     for stage in Stage::ALL {
         let state = breakers
             .get(&stage)
@@ -310,173 +234,54 @@ async fn status(store: Store) -> Result<(), String> {
             .unwrap_or(BreakerState::Closed);
         out!("breaker {:<16} {}", stage.name(), state.name());
     }
-    for (name, passed, at) in store.latest_canaries().await.map_err(|e| e.to_string())? {
+    for (name, passed, at) in store.latest_canaries().await? {
         let result = if passed { "passed" } else { "FAILED" };
         out!("canary {name:<16} {result} {} s ago", now - at);
     }
-    let pending = store
-        .pending_alerts(1000)
-        .await
-        .map_err(|e| e.to_string())?;
-    out!("alerts waiting: {}", pending.len());
+    out!(
+        "alerts waiting: {}",
+        store.pending_alerts(1000).await?.len()
+    );
     Ok(())
 }
 
-fn main() -> ExitCode {
-    match Cli::parse().command {
-        Command::Status { config } => with_store(&config, status),
-        Command::Quarantine {
-            command: QuarantineCommand::Lift,
-            config,
-        } => with_store(&config, |store| async move {
-            if store
-                .lift_pause(PauseReason::Quarantine)
-                .await
-                .map_err(|e| e.to_string())?
-            {
-                out!("quarantine lifted");
-            } else {
-                out!("no quarantine was active");
-            }
-            Ok(())
-        }),
-        Command::Integrity { command, config } => integrity(&config, &command),
-        Command::Evidence { job, out, config } => {
-            let data_dir = match Config::load(&config) {
-                Ok(loaded) => loaded.instance.data_dir,
-                Err(error) => {
-                    eprintln!("{error}");
-                    return ExitCode::from(EXIT_CONFIG);
-                }
-            };
-            with_store(&config, |store| async move {
-                let written =
-                    disclosure::evidence_pack(&store, &data_dir, JobId(job), &out).await?;
-                out!("wrote {} files to {}", written.len(), out.display());
-                for name in written {
-                    out!("  {name}");
-                }
-                Ok(())
-            })
-        }
-        Command::Disclosure { command, config } => with_store(&config, |store| async move {
-            let e = |error: crateward_core::store::StoreError| error.to_string();
-            match command {
-                DisclosureCommand::Report {
-                    job,
-                    kind,
-                    to,
-                    reference,
-                    note,
-                } => {
-                    let kind = disclosure::kind(&kind)?;
-                    disclosure::refused(
-                        store
-                            .record_report(
-                                JobId(job),
-                                kind,
-                                &to,
-                                reference.as_deref(),
-                                note.as_deref(),
-                            )
-                            .await
-                            .map_err(e)?,
-                    )?;
-                    out!("recorded the report of job {job} to {to}");
-                }
-                DisclosureCommand::Resolved { job, reference } => {
-                    disclosure::refused(
-                        store
-                            .mark_resolved(JobId(job), reference.as_deref())
-                            .await
-                            .map_err(e)?,
-                    )?;
-                    out!("job {job} is resolved; it may be published");
-                }
-                DisclosureCommand::Publish { job, slug } => {
-                    disclosure::refused(
-                        store.publish_finding(JobId(job), &slug).await.map_err(e)?,
-                    )?;
-                    out!("job {job} is listed as findings/{slug}/ at the next export");
-                }
-                DisclosureCommand::Show { job } => {
-                    match store.disclosure(JobId(job)).await.map_err(e)? {
-                        None => out!("job {job} has no disclosure record"),
-                        Some(d) => {
-                            out!("kind       {}", d.kind.name());
-                            out!("reported   {} to {}", d.reported_on, d.reported_to);
-                            out!("reference  {}", d.reference.as_deref().unwrap_or("-"));
-                            out!("resolved   {}", d.resolved_on.as_deref().unwrap_or("-"));
-                            out!("published  {}", d.published_on.as_deref().unwrap_or("-"));
-                            out!("page       {}", d.slug.as_deref().unwrap_or("-"));
-                            out!("note       {}", d.note.as_deref().unwrap_or("-"));
-                        }
-                    }
-                }
-            }
-            Ok(())
-        }),
-        Command::Egress { config } => {
-            let config = match Config::load(&config) {
-                Ok(config) => config,
-                Err(error) => {
-                    eprintln!("{error}");
-                    return ExitCode::from(EXIT_CONFIG);
-                }
-            };
-            let (sets, errors) = egress::resolve(&egress::allowances(&config));
-            for error in &errors {
-                eprintln!("not resolved: {error}");
-            }
-            // A host that stops resolving ages out of its set.
-            out!("{}", egress::render(&sets).trim_end());
-            ExitCode::SUCCESS
-        }
-        Command::Breaker {
-            command: BreakerCommand::Close { stage },
-            config,
-        } => {
-            let Some(stage) = Stage::ALL.into_iter().find(|s| s.name() == stage) else {
-                eprintln!("unknown stage {stage}");
-                return ExitCode::FAILURE;
-            };
-            with_store(&config, move |store| async move {
-                store
-                    .set_breaker(stage, BreakerState::Closed)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                out!("breaker of {} closed", stage.name());
-                Ok(())
-            })
-        }
-        Command::Config {
-            command: ConfigCommand::Check { config },
-        } => match Config::load(&config) {
-            Ok(_) => {
-                out!("{} is valid", config.display());
-                ExitCode::SUCCESS
-            }
-            Err(error) => {
-                eprintln!("{error}");
-                ExitCode::from(EXIT_CONFIG)
-            }
-        },
-        Command::StateMachine {
-            command: StateMachineCommand::Diagram,
-        } => {
-            print!("{}", mermaid_diagram());
-            ExitCode::SUCCESS
-        }
-        Command::StateMachine {
-            command: StateMachineCommand::States,
-        } => {
+async fn quarantine_lift(store: Store) -> Result<(), CliError> {
+    if store.lift_pause(PauseReason::Quarantine).await? {
+        out!("quarantine lifted");
+    } else {
+        out!("no quarantine was active");
+    }
+    Ok(())
+}
+
+fn breaker_close(config: &Path, stage: &str) -> Result<(), CliError> {
+    let stage = Stage::ALL
+        .into_iter()
+        .find(|s| s.name() == stage)
+        .ok_or_else(|| CliError::UnknownStage(stage.to_owned()))?;
+    with_store(&Config::load(config)?, |store| async move {
+        store.set_breaker(stage, BreakerState::Closed).await?;
+        out!("breaker of {} closed", stage.name());
+        Ok(())
+    })
+}
+
+fn config_check(path: &Path) -> Result<(), CliError> {
+    Config::load(path)?;
+    out!("{} is valid", path.display());
+    Ok(())
+}
+
+fn state_machine(command: &StateMachineCommand) {
+    match command {
+        StateMachineCommand::Diagram => out!("{}", mermaid_diagram().trim_end()),
+        StateMachineCommand::States => {
             for state in JobState::ALL {
                 let owner = state
                     .stage()
                     .map_or("none (terminal)", |stage| stage.name());
                 out!("{:<20} {owner}", state.name());
             }
-            ExitCode::SUCCESS
         }
     }
 }

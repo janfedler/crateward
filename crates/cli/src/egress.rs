@@ -146,6 +146,17 @@ pub fn render(sets: &[(&'static str, BTreeSet<IpAddr>)]) -> String {
     out
 }
 
+/// Prints the script for the configured hosts. A host that does not resolve
+/// is reported on stderr and left out.
+pub fn run(config: &Config) {
+    let (sets, errors) = resolve(&allowances(config));
+    for error in &errors {
+        eprintln!("not resolved: {error}");
+    }
+    // A host that stops resolving ages out of its set.
+    out!("{}", render(&sets).trim_end());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
