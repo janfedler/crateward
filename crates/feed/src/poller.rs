@@ -39,6 +39,9 @@ pub enum FeedError {
     /// The index configuration is unusable.
     #[error("index config.json: {0}")]
     IndexConfig(String),
+    /// An index lookup task panicked or was cancelled.
+    #[error("index lookup: {0}")]
+    Task(#[from] tokio::task::JoinError),
 }
 
 impl FeedError {
@@ -48,7 +51,7 @@ impl FeedError {
         match self {
             Self::Http(error) => error.is_transient(),
             Self::Store(_) => true,
-            Self::Parse(_) | Self::IndexConfig(_) => false,
+            Self::Parse(_) | Self::IndexConfig(_) | Self::Task(_) => false,
         }
     }
 }
@@ -64,6 +67,9 @@ pub struct Urls {
     pub index_root: String,
 }
 
+/// A pending version: the canonical crate name and the version text.
+type Key = (String, String);
+
 /// A version seen in a feed, waiting for its index entry.
 #[derive(Debug, Clone)]
 struct Pending {
@@ -73,6 +79,16 @@ struct Pending {
     first_seen: Instant,
     next_try: Instant,
 }
+
+impl Pending {
+    /// Whether the feed has waited long enough for the index entry.
+    fn expired(&self, now: Instant) -> bool {
+        now.duration_since(self.first_seen) >= GIVE_UP_AFTER
+    }
+}
+
+/// A pending version with what its index file said.
+type Lookup = (Key, Pending, Result<Fetched, HttpError>);
 
 /// What one poll did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -119,7 +135,7 @@ pub struct Feed {
     urls: Urls,
     store: Store,
     feed_validators: HashMap<String, Validators>,
-    pending: BTreeMap<(String, String), Pending>,
+    pending: BTreeMap<Key, Pending>,
     /// Delay before looking up a lagging version again.
     pub index_retry: Duration,
     /// Reverse dependencies from which a crate counts as popular.
@@ -251,39 +267,10 @@ impl Feed {
         Ok(())
     }
 
+    /// Looks up every version that is due in its index file.
     async fn resolve_due(&mut self, report: &mut PollReport) -> Result<(), FeedError> {
         let now = Instant::now();
-        let due: Vec<_> = self
-            .pending
-            .iter()
-            .filter(|(_, p)| p.next_try <= now)
-            .map(|(k, _)| k.clone())
-            .collect();
-        // Fetch index files concurrently; the client's pacer still bounds
-        // the request rate. Freshly published index files often miss the
-        // CDN cache, so latency, not rate, dominates.
-        let mut fetches = tokio::task::JoinSet::new();
-        let mut results = Vec::with_capacity(due.len());
-        for key in due {
-            let Some(pending) = self.pending.get(&key).cloned() else {
-                continue;
-            };
-            if fetches.len() >= INDEX_CONCURRENCY
-                && let Some(done) = fetches.join_next().await
-            {
-                results.push(done.map_err(|e| FeedError::IndexConfig(e.to_string()))?);
-            }
-            let url = format!("{}{}", self.urls.index_root, pending.name.index_path());
-            let client = self.index.clone();
-            fetches.spawn(async move {
-                let fetched = client.get(&url, None, cratesio::MAX_INDEX_FILE_BYTES).await;
-                (key, pending, fetched)
-            });
-        }
-        while let Some(done) = fetches.join_next().await {
-            results.push(done.map_err(|e| FeedError::IndexConfig(e.to_string()))?);
-        }
-        for (key, pending, fetched) in results {
+        for (key, pending, fetched) in self.fetch_due(now).await? {
             let text = match fetched? {
                 Fetched::Body { body, .. } => String::from_utf8_lossy(&body).into_owned(),
                 Fetched::Missing => {
@@ -294,50 +281,124 @@ impl Feed {
                 }
                 Fetched::NotModified => continue,
             };
-            let versions = text.lines().filter(|l| !l.trim().is_empty()).count();
-            match cratesio::find_version(&text, &pending.version)? {
-                Some((entry, raw)) => {
-                    let new_crate = pending.new_crate || versions == 1;
-                    let popular = self
-                        .store
-                        .reverse_dependencies(&entry.name)
-                        .await?
-                        .is_some_and(|n| n >= self.popular_threshold);
-                    let job = NewJob {
-                        priority: priority(&entry, new_crate, popular),
-                        name: entry.name.clone(),
-                        version: entry.version.clone(),
-                        cksum: entry.cksum,
-                        published_at: entry.published,
-                        index_entry: raw,
-                    };
-                    match self.store.enqueue(&job).await? {
-                        Some(id) => {
-                            report.enqueued += 1;
-                            tracing::info!(
-                                job = id.0,
-                                name = %entry.name,
-                                version = %entry.version,
-                                priority = job.priority,
-                                "enqueued"
-                            );
-                        }
-                        None => report.already_known += 1,
-                    }
-                    self.pending.remove(&key);
-                }
-                None if now.duration_since(pending.first_seen) >= GIVE_UP_AFTER => {
-                    self.pending.remove(&key);
-                    report.gave_up += 1;
-                    tracing::warn!(name = %pending.name, version = %pending.version, "gave up waiting for the index");
-                }
-                None => {
-                    if let Some(p) = self.pending.get_mut(&key) {
-                        p.next_try = now + self.index_retry;
-                    }
-                }
-            }
+            self.settle(&key, &pending, &text, now, report).await?;
         }
         Ok(())
+    }
+
+    /// Fetches the index files of the versions that are due, several at a
+    /// time. The client's pacer still bounds the request rate. Freshly
+    /// published index files often miss the CDN cache, so latency, not rate,
+    /// dominates.
+    async fn fetch_due(&self, now: Instant) -> Result<Vec<Lookup>, FeedError> {
+        let mut fetches = tokio::task::JoinSet::new();
+        let mut results = Vec::new();
+        for (key, pending) in self.pending.iter().filter(|(_, p)| p.next_try <= now) {
+            if fetches.len() >= INDEX_CONCURRENCY
+                && let Some(done) = fetches.join_next().await
+            {
+                results.push(done?);
+            }
+            let url = format!("{}{}", self.urls.index_root, pending.name.index_path());
+            let client = self.index.clone();
+            let (key, pending) = (key.clone(), pending.clone());
+            fetches.spawn(async move {
+                let fetched = client.get(&url, None, cratesio::MAX_INDEX_FILE_BYTES).await;
+                (key, pending, fetched)
+            });
+        }
+        while let Some(done) = fetches.join_next().await {
+            results.push(done?);
+        }
+        Ok(results)
+    }
+
+    /// Enqueues the version if its index file has it, else waits or gives up.
+    async fn settle(
+        &mut self,
+        key: &Key,
+        pending: &Pending,
+        text: &str,
+        now: Instant,
+        report: &mut PollReport,
+    ) -> Result<(), FeedError> {
+        let Some((entry, raw)) = cratesio::find_version(text, &pending.version)? else {
+            self.wait_or_give_up(key, pending, now, report);
+            return Ok(());
+        };
+        let versions = text.lines().filter(|l| !l.trim().is_empty()).count();
+        let new_crate = pending.new_crate || versions == 1;
+        let popular = self
+            .store
+            .reverse_dependencies(&entry.name)
+            .await?
+            .is_some_and(|n| n >= self.popular_threshold);
+        let job = NewJob {
+            priority: priority(&entry, new_crate, popular),
+            name: entry.name.clone(),
+            version: entry.version.clone(),
+            cksum: entry.cksum,
+            published_at: entry.published,
+            index_entry: raw,
+        };
+        match self.store.enqueue(&job).await? {
+            Some(id) => {
+                report.enqueued += 1;
+                tracing::info!(
+                    job = id.0,
+                    name = %entry.name,
+                    version = %entry.version,
+                    priority = job.priority,
+                    "enqueued"
+                );
+            }
+            None => report.already_known += 1,
+        }
+        self.pending.remove(key);
+        Ok(())
+    }
+
+    /// The index does not have the version yet: look again later, or give up.
+    fn wait_or_give_up(
+        &mut self,
+        key: &Key,
+        pending: &Pending,
+        now: Instant,
+        report: &mut PollReport,
+    ) {
+        if pending.expired(now) {
+            self.pending.remove(key);
+            report.gave_up += 1;
+            tracing::warn!(name = %pending.name, version = %pending.version, "gave up waiting for the index");
+        } else if let Some(p) = self.pending.get_mut(key) {
+            p.next_try = now + self.index_retry;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pending_since(first_seen: Instant) -> Pending {
+        Pending {
+            name: CrateName::parse("demo").unwrap(),
+            version: semver::Version::new(1, 0, 0),
+            new_crate: false,
+            first_seen,
+            next_try: first_seen,
+        }
+    }
+
+    #[test]
+    fn a_version_expires_after_two_hours_and_not_before() {
+        let seen = Instant::now();
+        let pending = pending_since(seen);
+        let hours = |h: u64| seen + Duration::from_secs(h * 3600);
+        assert!(!pending.expired(seen));
+        assert!(!pending.expired(hours(1)));
+        assert!(!pending.expired(hours(2) - Duration::from_millis(1)));
+        assert!(pending.expired(hours(2)));
+        assert!(pending.expired(hours(3)));
     }
 }

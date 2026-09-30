@@ -7,16 +7,16 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use bytes::Bytes;
-use crateward_core::http::{ClientConfig, PoliteClient};
+use crateward_core::http::{ClientConfig, HttpError, PoliteClient};
 use crateward_core::job::{JobId, Stage};
 use crateward_core::store::Store;
-use crateward_feed::poller::{Feed, Urls};
+use crateward_feed::poller::{Feed, FeedError, Urls};
 use http_body_util::Full;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
@@ -24,6 +24,8 @@ use hyper_util::rt::TokioIo;
 #[derive(Default)]
 struct MockState {
     files: HashMap<String, String>,
+    /// Paths that answer with a server error.
+    broken: HashSet<String>,
     hits: HashMap<String, usize>,
     not_modified: usize,
 }
@@ -45,6 +47,12 @@ async fn serve(
     let path = req.uri().path().to_owned();
     let mut s = state.lock().unwrap();
     *s.hits.entry(path.clone()).or_default() += 1;
+    if s.broken.contains(&path) {
+        return Ok(Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Full::default())
+            .unwrap());
+    }
     let Some(body) = s.files.get(&path).cloned() else {
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -133,6 +141,36 @@ async fn test_store(schema: &str) -> Option<Store> {
     let mut store = Store::from_client(client);
     store.migrate().await.unwrap();
     Some(store)
+}
+
+/// Another connection to the schema of a test.
+async fn connect(schema: &str) -> Store {
+    let (client, connection) = tokio_postgres::connect(
+        &std::env::var("CRATEWARD_TEST_DATABASE_URL").unwrap(),
+        tokio_postgres::NoTls,
+    )
+    .await
+    .unwrap();
+    tokio::spawn(connection);
+    client
+        .batch_execute(&format!("SET search_path TO {schema}"))
+        .await
+        .unwrap();
+    Store::from_client(client)
+}
+
+async fn drop_schema(schema: &str) {
+    let (client, connection) = tokio_postgres::connect(
+        &std::env::var("CRATEWARD_TEST_DATABASE_URL").unwrap(),
+        tokio_postgres::NoTls,
+    )
+    .await
+    .unwrap();
+    tokio::spawn(connection);
+    client
+        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .unwrap();
 }
 
 fn client() -> PoliteClient {
@@ -238,18 +276,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
 
     // The new crate with a native link comes first; the name keeps its
     // published casing from the index, not the feed's.
-    let (client, connection) = tokio_postgres::connect(
-        &std::env::var("CRATEWARD_TEST_DATABASE_URL").unwrap(),
-        tokio_postgres::NoTls,
-    )
-    .await
-    .unwrap();
-    tokio::spawn(connection);
-    client
-        .batch_execute(&format!("SET search_path TO {schema}"))
-        .await
-        .unwrap();
-    let check = Store::from_client(client);
+    let check = connect(&schema).await;
     let first_claim = check
         .claim(Stage::Fetch, "t", Duration::from_secs(30))
         .await
@@ -268,4 +295,193 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
         check.count_by_state().await.unwrap().get("Discovered"),
         Some(&3)
     );
+    drop_schema(&schema).await;
+}
+
+/// A feed against the mock, in a schema of its own.
+struct World {
+    state: Shared,
+    feed: Feed,
+    schema: String,
+}
+
+impl World {
+    /// The feeds are empty and the retry delay is zero.
+    async fn new(test: &str) -> Option<Self> {
+        let schema = format!("feed_{test}_{}", std::process::id());
+        let store = test_store(&schema).await?;
+        let state: Shared = Arc::default();
+        let base = start_mock(state.clone()).await;
+        let urls = Urls {
+            rss_updates: format!("{base}/rss/updates.xml"),
+            rss_new_crates: format!("{base}/rss/crates.xml"),
+            index_root: format!("{base}/index/"),
+        };
+        let mut feed = Feed::new(client(), client(), urls, store);
+        feed.index_retry = Duration::ZERO;
+        let world = Self {
+            state,
+            feed,
+            schema,
+        };
+        world.serve("/rss/crates.xml", rss(&[]));
+        world.serve("/rss/updates.xml", rss(&[]));
+        Some(world)
+    }
+
+    fn serve(&self, path: &str, body: String) {
+        self.state.lock().unwrap().files.insert(path.into(), body);
+    }
+
+    fn hits(&self, path: &str) -> usize {
+        let state = self.state.lock().unwrap();
+        state.hits.get(path).copied().unwrap_or(0)
+    }
+
+    /// The queued jobs as name and priority, sorted by name.
+    async fn jobs(&self) -> Vec<(String, i16)> {
+        let store = connect(&self.schema).await;
+        let mut jobs = Vec::new();
+        while let Some(job) = store
+            .claim(Stage::Fetch, "t", Duration::from_secs(30))
+            .await
+            .unwrap()
+        {
+            jobs.push((job.name, job.priority));
+        }
+        jobs.sort();
+        jobs
+    }
+
+    async fn finish(self) {
+        drop_schema(&self.schema).await;
+    }
+}
+
+#[tokio::test]
+async fn deleted_crates_are_dropped_and_lagging_versions_wait_for_their_turn() {
+    let Some(mut world) = World::new("waiting").await else {
+        return;
+    };
+    world.serve(
+        "/rss/updates.xml",
+        rss(&[("ghost", "1.0.0"), ("lagging", "1.1.0")]),
+    );
+    world.serve("/index/la/gg/lagging", index_line("lagging", "1.0.0", ""));
+    world.feed.index_retry = Duration::from_secs(3600);
+
+    let first = world.feed.poll_once().await.unwrap();
+    assert_eq!(first.feed_items, 2, "{first:?}");
+    assert_eq!(first.missing, 1, "{first:?}");
+    assert_eq!(first.waiting, 1, "{first:?}");
+    assert_eq!(first.enqueued, 0, "{first:?}");
+
+    // The lagging version is not due again for an hour; the deleted crate
+    // is not looked up again at all.
+    let second = world.feed.poll_once().await.unwrap();
+    assert_eq!(second.feed_items, 0, "{second:?}");
+    assert_eq!(second.missing, 0, "{second:?}");
+    assert_eq!(second.waiting, 1, "{second:?}");
+    assert_eq!(world.hits("/index/gh/os/ghost"), 1);
+    assert_eq!(world.hits("/index/la/gg/lagging"), 1);
+    assert!(world.jobs().await.is_empty());
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn priority_adds_new_crates_popularity_and_build_time_signals() {
+    let Some(mut world) = World::new("priority").await else {
+        return;
+    };
+    connect(&world.schema)
+        .await
+        .upsert_crate_stats(&[
+            ("busy".into(), 5000, 100),
+            ("quiet".into(), 10, 99),
+            ("both".into(), 1, 500),
+        ])
+        .await
+        .unwrap();
+    world.serve(
+        "/rss/updates.xml",
+        rss(&[
+            ("solo", "1.0.0"),
+            ("busy", "2.0.0"),
+            ("quiet", "2.0.0"),
+            ("linked", "2.0.0"),
+            ("both", "1.0.0"),
+        ]),
+    );
+    let two = |name: &str, extra: &str| {
+        format!(
+            "{}\n{}\n",
+            index_line(name, "1.0.0", ""),
+            index_line(name, "2.0.0", extra)
+        )
+    };
+    let links = r#","links":"z""#;
+    // The index file of a crate with one version marks a new crate.
+    world.serve("/index/so/lo/solo", index_line("solo", "1.0.0", ""));
+    world.serve("/index/bu/sy/busy", two("busy", ""));
+    world.serve("/index/qu/ie/quiet", two("quiet", ""));
+    world.serve("/index/li/nk/linked", two("linked", links));
+    world.serve("/index/bo/th/both", index_line("both", "1.0.0", links));
+
+    let report = world.feed.poll_once().await.unwrap();
+    assert_eq!(report.enqueued, 5, "{report:?}");
+    let expected = [
+        ("both", 90),
+        ("busy", 30),
+        ("linked", 20),
+        ("quiet", 0),
+        ("solo", 40),
+    ];
+    assert_eq!(
+        world.jobs().await,
+        expected.map(|(name, priority)| (name.to_owned(), priority))
+    );
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn a_failing_index_fetch_fails_the_poll_and_the_version_stays_queued() {
+    let Some(mut world) = World::new("failing").await else {
+        return;
+    };
+    world.serve("/rss/updates.xml", rss(&[("flaky", "1.0.0")]));
+    world.serve("/index/fl/ak/flaky", index_line("flaky", "1.0.0", ""));
+    let broken = "/index/fl/ak/flaky".to_owned();
+    world.state.lock().unwrap().broken.insert(broken.clone());
+
+    let error = world.feed.poll_once().await.unwrap_err();
+    assert!(
+        matches!(error, FeedError::Http(HttpError::Server(500))),
+        "{error}"
+    );
+    assert!(error.is_transient());
+    assert!(world.jobs().await.is_empty());
+
+    // The feeds did not change, so only the queued version can bring the job.
+    world.state.lock().unwrap().broken.remove(&broken);
+    let report = world.feed.poll_once().await.unwrap();
+    assert_eq!(report.feed_items, 0, "{report:?}");
+    assert_eq!(report.enqueued, 1, "{report:?}");
+    assert_eq!(report.waiting, 0, "{report:?}");
+    assert_eq!(world.jobs().await, [("flaky".to_owned(), 40)]);
+    world.finish().await;
+}
+
+#[tokio::test]
+async fn an_index_file_that_does_not_parse_is_a_permanent_error() {
+    let Some(mut world) = World::new("garbled").await else {
+        return;
+    };
+    world.serve("/rss/updates.xml", rss(&[("garbled", "1.0.0")]));
+    world.serve("/index/ga/rb/garbled", "this is not json\n".into());
+
+    let error = world.feed.poll_once().await.unwrap_err();
+    assert!(matches!(error, FeedError::Parse(_)), "{error}");
+    assert!(!error.is_transient());
+    assert!(world.jobs().await.is_empty());
+    world.finish().await;
 }
