@@ -511,15 +511,21 @@ impl Issues {
         self.check(url.scheme() == "https", key, "must use https");
     }
 
-    fn at_least<T: PartialOrd + fmt::Display>(&mut self, value: T, min: T, key: &str) {
+    fn at_least<T: Copy + PartialOrd + fmt::Display>(&mut self, value: T, min: T, key: &str) {
         self.check(value >= min, key, format!("must be at least {min}"));
     }
 
-    fn at_most<T: PartialOrd + fmt::Display>(&mut self, value: T, max: T, key: &str) {
+    fn at_most<T: Copy + PartialOrd + fmt::Display>(&mut self, value: T, max: T, key: &str) {
         self.check(value <= max, key, format!("must be at most {max}"));
     }
 
-    fn between<T: PartialOrd + fmt::Display>(&mut self, value: T, min: T, max: T, key: &str) {
+    fn between<T: Copy + PartialOrd + fmt::Display>(
+        &mut self,
+        value: T,
+        min: T,
+        max: T,
+        key: &str,
+    ) {
         let message = format!("must be between {min} and {max}");
         self.check(min <= value && value <= max, key, message);
     }

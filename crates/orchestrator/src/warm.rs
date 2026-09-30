@@ -773,14 +773,16 @@ mod tests {
                 r.trace.tamper = vec![tamper("bpf cmd 5")];
             }),
             ("a process ran as root: ", |r| {
-                r.trace.processes = vec![root()]
-            }),
-            ("a honeytoken was used: ", |r| r.leaked = vec![leak()]),
-            ("a honeytoken was used: ", |r| {
-                r.tokens_in_trace = vec![leak()]
+                r.trace.processes = vec![root()];
             }),
             ("a honeytoken was used: ", |r| {
-                r.tokens_on_disk = vec![leak()]
+                r.leaked = vec![leak()];
+            }),
+            ("a honeytoken was used: ", |r| {
+                r.tokens_in_trace = vec![leak()];
+            }),
+            ("a honeytoken was used: ", |r| {
+                r.tokens_on_disk = vec![leak()];
             }),
             ("the fake internet saw traffic: ", |r| {
                 r.network.dns = vec!["example.com".into()];
@@ -792,7 +794,7 @@ mod tests {
                 r.network.packets = vec!["icmp".into()];
             }),
             ("the fake internet saw traffic: ", |r| {
-                r.network.udp_datagrams = 1
+                r.network.udp_datagrams = 1;
             }),
         ];
         for (expected, change) in cases {
@@ -831,7 +833,7 @@ mod tests {
             ("a process ran as root: ", |r| r.trace.processes.clear()),
             ("a honeytoken was used: ", |r| r.leaked.clear()),
             ("the fake internet saw traffic: ", |r| {
-                r.network.udp_datagrams = 0
+                r.network.udp_datagrams = 0;
             }),
             ("the scratch disk was not scanned", |r| {
                 r.scratch = Some(ScratchReport::default());

@@ -99,7 +99,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
                     "dump statistics refreshed"
                 ),
                 Err(error) => {
-                    tracing::warn!(%error, "dump refresh failed; retrying at the next interval")
+                    tracing::warn!(%error, "dump refresh failed; retrying at the next interval");
                 }
             }
             tokio::time::sleep(every).await;

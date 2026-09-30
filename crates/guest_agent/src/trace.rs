@@ -619,8 +619,7 @@ mod tests {
         }
         assert!(decode(&header(99, 0), 0).is_none());
         // A length field larger than its buffer is clamped.
-        let record = exec(b"/bin/sh", b"sh\0");
-        let mut long = record.clone();
+        let mut long = exec(b"/bin/sh", b"sh\0");
         long[24..28].copy_from_slice(&i32::MAX.to_le_bytes());
         long[28..32].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(decode(&long, 0).is_some());
@@ -691,7 +690,7 @@ mod tests {
         let fork = record(KIND_FORK, &[7], &[]);
         assert_eq!(decode(&fork, u64::MAX).unwrap().ms, 0);
         // Bytes after the layout are ignored.
-        let mut long = fork.clone();
+        let mut long = fork;
         long.extend_from_slice(&[0xff; 9]);
         assert_eq!(decode(&long, 0).unwrap().kind, TraceKind::Fork { child: 7 });
     }
