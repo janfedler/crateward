@@ -9,7 +9,7 @@
 //! step fails. From then on Firecracker's stdout and stderr go to the log.
 
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -86,7 +86,9 @@ fn step<E: std::fmt::Display>(step: &'static str) -> impl FnOnce(E) -> LaunchErr
 
 fn read_line<R: BufRead>(input: &mut R, limit: usize) -> Result<String, LaunchError> {
     let mut line = String::new();
-    let mut limited = std::io::Read::take(&mut *input, u64::try_from(limit).unwrap_or(u64::MAX));
+    let mut limited = input
+        .by_ref()
+        .take(u64::try_from(limit).unwrap_or(u64::MAX));
     limited
         .read_line(&mut line)
         .map_err(step("reading from the orchestrator"))?;
@@ -148,43 +150,55 @@ fn run_ip(args: &[&str]) -> Result<(), LaunchError> {
     }
 }
 
-/// Everything between the ID maps and `exec`.
-fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
-    // Opened while host paths are still visible.
-    let log = OpenOptions::new()
+/// Files opened while host paths are still visible.
+struct HostFiles {
+    log: File,
+    null: File,
+    authority: Option<Vec<u8>>,
+    events: Option<File>,
+}
+
+fn open_append(path: &Path, what: &'static str) -> Result<File, LaunchError> {
+    OpenOptions::new()
         .create(true)
         .append(true)
         .mode(0o600)
-        .open(&spec.log)
-        .map_err(step("opening the log"))?;
+        .open(path)
+        .map_err(step(what))
+}
+
+fn read_authority(path: &Path) -> Result<Vec<u8>, LaunchError> {
+    let mut pem = Vec::new();
+    File::open(path)
+        .and_then(|f| f.take(64 * 1024).read_to_end(&mut pem))
+        .map_err(step("reading the TLS authority"))?;
+    Ok(pem)
+}
+
+fn open_host_files(spec: &JailSpec) -> Result<HostFiles, LaunchError> {
+    let log = open_append(&spec.log, "opening the log")?;
     let null = File::open("/dev/null").map_err(step("opening /dev/null"))?;
     let authority = spec
         .sinks
         .as_ref()
-        .and_then(|sinks| sinks.authority.as_ref())
-        .map(|path| {
-            let mut pem = Vec::new();
-            File::open(path)
-                .and_then(|f| {
-                    std::io::Read::read_to_end(&mut std::io::Read::take(f, 64 * 1024), &mut pem)
-                })
-                .map(|_| pem)
-                .map_err(step("reading the TLS authority"))
-        })
+        .and_then(|sinks| sinks.authority.as_deref())
+        .map(read_authority)
         .transpose()?;
     let events = spec
         .sinks
         .as_ref()
-        .map(|sinks| {
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .mode(0o600)
-                .open(&sinks.events)
-                .map_err(step("opening the network event log"))
-        })
+        .map(|sinks| open_append(&sinks.events, "opening the network event log"))
         .transpose()?;
+    Ok(HostFiles {
+        log,
+        null,
+        authority,
+        events,
+    })
+}
 
+/// Moves into new mount, network, IPC and UTS namespaces.
+fn isolate(spec: &JailSpec) -> Result<(), LaunchError> {
     unshare(Namespaces::Isolation).map_err(step("unsharing mount, network, IPC and UTS"))?;
     // Nothing done below may propagate back to the host's mount namespace.
     rustix::mount::mount_change(
@@ -192,8 +206,20 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
         MountPropagationFlags::PRIVATE | MountPropagationFlags::REC,
     )
     .map_err(step("making mounts private"))?;
-    rustix::system::sethostname(spec.id.as_bytes()).map_err(step("setting the hostname"))?;
+    rustix::system::sethostname(spec.id.as_bytes()).map_err(step("setting the hostname"))
+}
 
+fn bind_device(root: &Path, device: &Path) -> Result<(), LaunchError> {
+    let target = root.join(device.strip_prefix("/").unwrap_or(device));
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(step("creating /dev in the jail"))?;
+    }
+    bind(device, &target, MountFlags::NOSUID | MountFlags::NOEXEC)
+}
+
+/// Fills the jail root with bind mounts: Firecracker, the VM's files, the
+/// device nodes and the fake internet.
+fn mount_root(spec: &JailSpec) -> Result<(), LaunchError> {
     let root = &spec.root;
     // pivot_root needs the new root to be a mount point.
     rustix::mount::mount_bind(root, root).map_err(step("binding the jail root"))?;
@@ -212,12 +238,7 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
         bind(&mount.source, &root.join(&mount.target), flags)?;
     }
     for device in &spec.devices {
-        let relative = device.strip_prefix("/").unwrap_or(device);
-        let target = root.join(relative);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(step("creating /dev in the jail"))?;
-        }
-        bind(device, &target, MountFlags::NOSUID | MountFlags::NOEXEC)?;
+        bind_device(root, device)?;
     }
     if let Some(sinks) = &spec.sinks {
         bind(
@@ -226,59 +247,69 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
             MountFlags::RDONLY | hardened,
         )?;
     }
+    Ok(())
+}
 
+/// Brings up the loopback and the tap device, and sends the guest's traffic
+/// to the fake internet when there is one.
+fn set_up_network(spec: &JailSpec) -> Result<(), LaunchError> {
     run_ip(&["link", "set", "lo", "up"])?;
-    if let Some(tap) = &spec.tap {
-        let owner = INSIDE_VM_ID.to_string();
-        run_ip(&[
-            "tuntap", "add", "dev", tap, "mode", "tap", "user", &owner, "group", &owner,
-        ])?;
-        // A fixed host side MAC lets the fake internet skip frames the host
-        // sent, and without an IPv6 link local address the host sends no
-        // IPv6 at all: every IPv6 frame on the tap is the guest's.
-        let mac = crateward_fake_internet::capture::HOST_MAC
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":");
-        run_ip(&["link", "set", "dev", tap, "address", &mac])?;
-        run_ip(&["link", "set", "dev", tap, "addrgenmode", "none"])?;
-        run_ip(&["link", "set", tap, "up"])?;
-        if spec.sinks.is_some() {
-            run_ip(&[
-                "addr",
-                "add",
-                &format!("{HOST_ADDRESS}/{PREFIX_LEN}"),
-                "dev",
-                tap,
-            ])?;
-            run_nft(&ruleset(tap))?;
-        }
+    let Some(tap) = &spec.tap else {
+        return Ok(());
+    };
+    let owner = INSIDE_VM_ID.to_string();
+    run_ip(&[
+        "tuntap", "add", "dev", tap, "mode", "tap", "user", &owner, "group", &owner,
+    ])?;
+    // A fixed host side MAC lets the fake internet skip frames the host
+    // sent, and without an IPv6 link local address the host sends no IPv6
+    // at all: every IPv6 frame on the tap is the guest's.
+    let mac = crateward_fake_internet::capture::HOST_MAC
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    run_ip(&["link", "set", "dev", tap, "address", &mac])?;
+    run_ip(&["link", "set", "dev", tap, "addrgenmode", "none"])?;
+    run_ip(&["link", "set", tap, "up"])?;
+    if spec.sinks.is_some() {
+        let address = format!("{HOST_ADDRESS}/{PREFIX_LEN}");
+        run_ip(&["addr", "add", &address, "dev", tap])?;
+        run_nft(&ruleset(tap))?;
     }
+    Ok(())
+}
 
-    // Swap the root: the old one is stacked under the new one and then
-    // detached, so no host path remains reachable.
+/// Swaps the root: the old one is stacked under the new one and then
+/// detached, so no host path remains reachable.
+fn pivot(root: &Path) -> Result<(), LaunchError> {
     std::env::set_current_dir(root).map_err(step("entering the jail root"))?;
     rustix::process::pivot_root(".", ".").map_err(step("pivot_root"))?;
     rustix::mount::unmount(".", UnmountFlags::DETACH).map_err(step("detaching the old root"))?;
-    std::env::set_current_dir("/").map_err(step("entering the new root"))?;
+    std::env::set_current_dir("/").map_err(step("entering the new root"))
+}
 
-    let limit = |resource, value| {
-        rustix::process::setrlimit(
-            resource,
-            Rlimit {
-                current: Some(value),
-                maximum: Some(value),
-            },
-        )
-        .map_err(step("setting a resource limit"))
+fn set_limit(resource: Resource, value: u64) -> Result<(), LaunchError> {
+    let limit = Rlimit {
+        current: Some(value),
+        maximum: Some(value),
     };
-    limit(Resource::Nofile, spec.max_open_files)?;
-    limit(Resource::Fsize, spec.max_file_size)?;
-    if let Some(events) = events {
-        start_sinks(events, &log, &null, authority)?;
+    rustix::process::setrlimit(resource, limit).map_err(step("setting a resource limit"))
+}
+
+/// Everything between the ID maps and `exec`.
+fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
+    let files = open_host_files(spec)?;
+    isolate(spec)?;
+    mount_root(spec)?;
+    set_up_network(spec)?;
+    pivot(&spec.root)?;
+    set_limit(Resource::Nofile, spec.max_open_files)?;
+    set_limit(Resource::Fsize, spec.max_file_size)?;
+    if let Some(events) = files.events {
+        start_sinks(events, &files.log, &files.null, files.authority)?;
     }
-    Ok((log, null))
+    Ok((files.log, files.null))
 }
 
 /// Starts the fake internet as the slot's user in the jail. It ends with

@@ -19,7 +19,7 @@ use crateward_core::job::BuildOutcome;
 use crateward_core::name::{CrateName, CrateNameError};
 
 use crate::payload::{Package, PayloadSpec};
-use crate::trace::Role;
+use crate::trace::{Role, TraceSummary};
 use crate::worker::RunReport;
 
 /// A fixture crate and what its run must show.
@@ -188,71 +188,86 @@ fn check_known_bad(report: &RunReport) -> Vec<String> {
         report.outcome == BuildOutcome::Succeeded,
         "the build did not succeed",
     );
+    bad_traffic(report, &mut p);
+    expect(&mut p, report.trace.complete, "the trace did not end");
+    bad_trace(&report.trace, &mut p);
+    bad_disk(report, &mut p);
+    p
+}
+
+/// What the fake internet and the honeytoken search must show.
+fn bad_traffic(report: &RunReport, p: &mut Vec<String>) {
     expect(
-        &mut p,
+        p,
         report.network.dns.iter().any(|n| n == EXFIL_HOST),
         "the lookup was not logged",
     );
     let leaked =
         |kind: &str, via: &str| report.leaked.iter().any(|l| l.kind == kind && l.via == via);
     expect(
-        &mut p,
+        p,
         leaked("cargo_registry_token", &format!("http://{EXFIL_HOST}")),
         "the token sent over HTTP was not found",
     );
     expect(
-        &mut p,
+        p,
         leaked("aws_access_key_id", "https://tls.crateward-canary.invalid"),
         "the key sent over HTTPS was not found",
     );
-    let trace = &report.trace;
-    expect(&mut p, trace.complete, "the trace did not end");
+}
+
+/// What the trace must show of the build script and its `curl`.
+fn bad_trace(trace: &TraceSummary, p: &mut Vec<String>) {
     let script = trace
         .processes
         .iter()
         .find(|x| x.role == Role::BuildScript && x.exe.contains(KNOWN_BAD.name));
+    let Some(script) = script else {
+        p.push("the build script is not in the trace".into());
+        return;
+    };
     let opened = |pid: u32, file: &str| {
         trace
             .sensitive_opens
             .iter()
             .any(|f| f.pid == pid && f.path.ends_with(file))
     };
-    match script {
-        None => p.push("the build script is not in the trace".into()),
-        Some(script) => {
-            expect(
-                &mut p,
-                opened(script.pid, "/.cargo/credentials.toml"),
-                "the credentials read is not in the trace",
-            );
-            expect(
-                &mut p,
-                trace.sockets.iter().any(|s| {
-                    s.pid == script.pid && s.how == "connect" && s.address.ends_with(":80")
-                }),
-                "the connect is not in the trace",
-            );
-            expect(
-                &mut p,
-                trace
-                    .sockets
-                    .iter()
-                    .any(|s| s.pid == script.pid && s.address == "[2001:db8::7]:443"),
-                "the IPv6 attempt is not in the trace",
-            );
-            let curl = trace
-                .processes
-                .iter()
-                .find(|x| x.ppid == Some(script.pid) && x.exe.ends_with("/curl"));
-            expect(
-                &mut p,
-                curl.is_some_and(|c| opened(c.pid, "/.aws/credentials")),
-                "curl reading the AWS file is not in the trace",
-            );
-        }
-    }
     expect(
-        &mut p,
+        p,
+        opened(script.pid, "/.cargo/credentials.toml"),
+        "the credentials read is not in the trace",
+    );
+    expect(
+        p,
+        trace
+            .sockets
+            .iter()
+            .any(|s| s.pid == script.pid && s.how == "connect" && s.address.ends_with(":80")),
+        "the connect is not in the trace",
+    );
+    expect(
+        p,
+        trace
+            .sockets
+            .iter()
+            .any(|s| s.pid == script.pid && s.address == "[2001:db8::7]:443"),
+        "the IPv6 attempt is not in the trace",
+    );
+    let curl = trace
+        .processes
+        .iter()
+        .find(|x| x.ppid == Some(script.pid) && x.exe.ends_with("/curl"));
+    expect(
+        p,
+        curl.is_some_and(|c| opened(c.pid, "/.aws/credentials")),
+        "curl reading the AWS file is not in the trace",
+    );
+}
+
+/// What the scratch disk must show.
+fn bad_disk(report: &RunReport, p: &mut Vec<String>) {
+    expect(
+        p,
         report
             .tokens_on_disk
             .iter()
@@ -260,7 +275,7 @@ fn check_known_bad(report: &RunReport) -> Vec<String> {
         "the copied token was not found on disk",
     );
     expect(
-        &mut p,
+        p,
         report.scratch.as_ref().is_some_and(|s| {
             s.outside_build
                 .iter()
@@ -268,7 +283,6 @@ fn check_known_bad(report: &RunReport) -> Vec<String> {
         }),
         "the autostart file was not found on disk",
     );
-    p
 }
 
 fn check_known_good(report: &RunReport) -> Vec<String> {
@@ -315,7 +329,12 @@ fn check_known_good(report: &RunReport) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use crateward_fake_internet::sniff::Sniffed;
+
     use super::*;
+    use crate::scratch::{Entry, ScratchReport};
+    use crate::trace::{FileAccess, Process, SocketUse, Tamper, TraceSummary};
+    use crate::worker::{Connection, Leak, NetworkSummary};
 
     #[test]
     fn fixtures_pack_and_name_themselves() {
@@ -361,6 +380,288 @@ mod tests {
         assert!(
             matches!(error, CanaryError::Blob(BlobError::Io { .. })),
             "{error}"
+        );
+    }
+
+    fn run(outcome: BuildOutcome) -> RunReport {
+        RunReport {
+            outcome,
+            end: String::new(),
+            exit: None,
+            restore_ms: 0,
+            run_ms: 0,
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+            truncated: false,
+            payload_files: 0,
+            payload_bytes: 0,
+            missing_packages: Vec::new(),
+            network: NetworkSummary::default(),
+            leaked: Vec::new(),
+            trace: TraceSummary::default(),
+            tokens_in_trace: Vec::new(),
+            scratch: None,
+            tokens_on_disk: Vec::new(),
+        }
+    }
+
+    fn process(pid: u32, ppid: u32, exe: &str, role: Role) -> Process {
+        Process {
+            pid,
+            ppid: Some(ppid),
+            exe: exe.into(),
+            argv: Vec::new(),
+            role,
+            started_ms: 0,
+            exit: None,
+            ended_ms: None,
+            became_root: false,
+        }
+    }
+
+    fn open(pid: u32, path: &str) -> FileAccess {
+        FileAccess {
+            pid,
+            exe: String::new(),
+            path: path.into(),
+            flags: 0,
+            ms: 0,
+        }
+    }
+
+    fn socket(pid: u32, how: &str, address: &str) -> SocketUse {
+        SocketUse {
+            pid,
+            exe: String::new(),
+            how: how.into(),
+            address: address.into(),
+            sock_type: 1,
+            ms: 0,
+        }
+    }
+
+    fn leak(kind: &str, via: &str) -> Leak {
+        Leak {
+            kind: kind.into(),
+            via: via.into(),
+        }
+    }
+
+    fn entry(path: &str) -> Entry {
+        Entry {
+            path: path.into(),
+            kind: "file".into(),
+            size: 0,
+            mode: 0o644,
+            uid: 0,
+            target: None,
+        }
+    }
+
+    const SCRIPT: &str =
+        "/work/target/debug/build/canary-exfil-0123456789abcdef/build-script-build";
+
+    /// A run of the known bad canary that shows everything it must.
+    fn caught() -> RunReport {
+        let mut report = run(BuildOutcome::Succeeded);
+        report.network.dns = vec![EXFIL_HOST.into()];
+        report.leaked = vec![
+            leak("cargo_registry_token", &format!("http://{EXFIL_HOST}")),
+            leak("aws_access_key_id", "https://tls.crateward-canary.invalid"),
+        ];
+        report.trace.complete = true;
+        report.trace.processes = vec![
+            process(10, 1, SCRIPT, Role::BuildScript),
+            process(11, 10, "/usr/bin/curl", Role::Other),
+        ];
+        report.trace.sensitive_opens = vec![
+            open(10, "/work/home/.cargo/credentials.toml"),
+            open(11, "/work/home/.aws/credentials"),
+        ];
+        report.trace.sockets = vec![
+            socket(10, "connect", "192.0.2.1:80"),
+            socket(10, "connect", "[2001:db8::7]:443"),
+        ];
+        report.tokens_on_disk = vec![leak("cargo_registry_token", "/work/target/out/stolen.txt")];
+        report.scratch = Some(ScratchReport {
+            outside_build: vec![entry("/work/home/.config/autostart/canary.desktop")],
+            ..ScratchReport::default()
+        });
+        report
+    }
+
+    /// A run of the known good canary that shows nothing.
+    fn clean() -> RunReport {
+        let mut report = run(BuildOutcome::Succeeded);
+        report.trace.complete = true;
+        report.scratch = Some(ScratchReport::default());
+        report
+    }
+
+    type Change = fn(&mut RunReport);
+
+    fn scratch(report: &mut RunReport) -> &mut ScratchReport {
+        report.scratch.as_mut().unwrap()
+    }
+
+    #[test]
+    fn a_run_with_the_expected_evidence_passes() {
+        assert_eq!(KNOWN_BAD.check(&caught()), Vec::<String>::new());
+        assert_eq!(KNOWN_GOOD.check(&clean()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_known_bad_canary_names_each_missing_piece() {
+        let cases: [(&str, Change); 12] = [
+            ("the build did not succeed", |r| {
+                r.outcome = BuildOutcome::Failed;
+            }),
+            ("the lookup was not logged", |r| r.network.dns.clear()),
+            ("the token sent over HTTP was not found", |r| {
+                r.leaked.remove(0);
+            }),
+            ("the key sent over HTTPS was not found", |r| {
+                r.leaked.remove(1);
+            }),
+            ("the trace did not end", |r| r.trace.complete = false),
+            ("the build script is not in the trace", |r| {
+                r.trace.processes.clear();
+            }),
+            ("the credentials read is not in the trace", |r| {
+                r.trace.sensitive_opens.remove(0);
+            }),
+            ("the connect is not in the trace", |r| {
+                r.trace.sockets.remove(0);
+            }),
+            ("the IPv6 attempt is not in the trace", |r| {
+                r.trace.sockets.remove(1);
+            }),
+            ("curl reading the AWS file is not in the trace", |r| {
+                r.trace.sensitive_opens.remove(1);
+            }),
+            ("the copied token was not found on disk", |r| {
+                r.tokens_on_disk.clear();
+            }),
+            ("the autostart file was not found on disk", |r| {
+                scratch(r).outside_build.clear();
+            }),
+        ];
+        for (problem, change) in cases {
+            let mut report = caught();
+            change(&mut report);
+            assert_eq!(KNOWN_BAD.check(&report), [problem]);
+        }
+    }
+
+    #[test]
+    fn the_known_bad_canary_lists_problems_in_order() {
+        let nothing = run(BuildOutcome::Failed);
+        assert_eq!(
+            KNOWN_BAD.check(&nothing),
+            [
+                "the build did not succeed",
+                "the lookup was not logged",
+                "the token sent over HTTP was not found",
+                "the key sent over HTTPS was not found",
+                "the trace did not end",
+                "the build script is not in the trace",
+                "the copied token was not found on disk",
+                "the autostart file was not found on disk",
+            ]
+        );
+        let mut script_only = run(BuildOutcome::Succeeded);
+        script_only.trace.complete = true;
+        script_only.trace.processes = vec![process(10, 1, SCRIPT, Role::BuildScript)];
+        assert_eq!(
+            KNOWN_BAD.check(&script_only),
+            [
+                "the lookup was not logged",
+                "the token sent over HTTP was not found",
+                "the key sent over HTTPS was not found",
+                "the credentials read is not in the trace",
+                "the connect is not in the trace",
+                "the IPv6 attempt is not in the trace",
+                "curl reading the AWS file is not in the trace",
+                "the copied token was not found on disk",
+                "the autostart file was not found on disk",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_known_good_canary_names_everything_it_flags() {
+        let cases: [(&str, Change); 16] = [
+            ("the build did not succeed", |r| {
+                r.outcome = BuildOutcome::TimedOut;
+            }),
+            ("the trace did not end", |r| r.trace.complete = false),
+            ("a honeytoken was flagged", |r| {
+                r.leaked.push(leak("k", "v"));
+            }),
+            ("a honeytoken was flagged", |r| {
+                r.tokens_in_trace.push(leak("k", "v"));
+            }),
+            ("a honeytoken was flagged", |r| {
+                r.tokens_on_disk.push(leak("k", "v"));
+            }),
+            ("a file access was flagged", |r| {
+                r.trace.sensitive_opens.push(open(1, "/x"));
+            }),
+            ("a file access was flagged", |r| {
+                r.trace.writes_outside_work.push(open(1, "/x"));
+            }),
+            ("a socket was flagged", |r| {
+                r.trace.sockets.push(socket(1, "connect", "x"));
+            }),
+            ("a tamper attempt was flagged", |r| {
+                r.trace.tamper.push(Tamper {
+                    pid: 1,
+                    what: "bpf cmd 5".into(),
+                    ms: 0,
+                });
+            }),
+            ("network traffic was flagged", |r| {
+                r.network.dns.push("x".into());
+            }),
+            ("network traffic was flagged", |r| {
+                r.network.packets.push("icmp".into());
+            }),
+            ("network traffic was flagged", |r| {
+                r.network.connections.push(Connection {
+                    dst: "192.0.2.1:80".into(),
+                    sniffed: Sniffed::Unknown,
+                    bytes: 0,
+                    inner: None,
+                });
+            }),
+            ("the scratch disk was flagged", |r| r.scratch = None),
+            ("the scratch disk was flagged", |r| {
+                scratch(r).error = Some("unreadable".into());
+            }),
+            ("the scratch disk was flagged", |r| {
+                scratch(r).outside_build.push(entry("/etc/x"));
+            }),
+            ("the scratch disk was flagged", |r| {
+                scratch(r).planted_changed.push("/work/x".into());
+            }),
+        ];
+        for (problem, change) in cases {
+            let mut report = clean();
+            change(&mut report);
+            assert_eq!(KNOWN_GOOD.check(&report), [problem]);
+        }
+        let mut report = clean();
+        scratch(&mut report)
+            .executables_outside_target
+            .push(entry("/x"));
+        assert_eq!(KNOWN_GOOD.check(&report), ["the scratch disk was flagged"]);
+        assert_eq!(
+            KNOWN_GOOD.check(&run(BuildOutcome::Failed)),
+            [
+                "the build did not succeed",
+                "the trace did not end",
+                "the scratch disk was flagged",
+            ]
         );
     }
 }

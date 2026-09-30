@@ -53,6 +53,16 @@ fn upper(rng: &mut impl rand::Rng, len: usize) -> String {
         .collect()
 }
 
+/// The private key file: a fixed header, the job's marker and a footer.
+fn ssh_key(marker: &str) -> String {
+    format!(
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+         b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n\
+         {marker}\n\
+         -----END OPENSSH PRIVATE KEY-----\n"
+    )
+}
+
 impl Honeytokens {
     /// Generates a fresh set for one job. `owner` is the builder's UID.
     #[must_use]
@@ -63,47 +73,27 @@ impl Honeytokens {
         let aws_id = format!("AKIA{}", upper(rng, 16));
         let aws_secret = random(rng, 40);
         let ssh_marker = random(rng, 64);
-        let ssh_key = format!(
-            "-----BEGIN OPENSSH PRIVATE KEY-----\n\
-             b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n\
-             {ssh_marker}\n\
-             -----END OPENSSH PRIVATE KEY-----\n"
-        );
         let dir = |path: &str, mode: u32| PathSpec {
             path: format!("{HOME}{path}"),
             owner,
             mode,
         };
-        let file = |path: &str, mode: u32, contents: String| FileSpec {
-            path: dir(path, mode),
+        let file = |path: &str, contents: String| FileSpec {
+            path: dir(path, 0o600),
             contents: contents.into_bytes(),
+        };
+        let token = |kind, value: &str| Token {
+            kind,
+            value: value.to_owned(),
         };
         Self {
             tokens: vec![
-                Token {
-                    kind: "cargo_registry_token",
-                    value: cargo.clone(),
-                },
-                Token {
-                    kind: "github_token_file",
-                    value: github_file.clone(),
-                },
-                Token {
-                    kind: "github_token_env",
-                    value: github_env.clone(),
-                },
-                Token {
-                    kind: "aws_access_key_id",
-                    value: aws_id.clone(),
-                },
-                Token {
-                    kind: "aws_secret_access_key",
-                    value: aws_secret.clone(),
-                },
-                Token {
-                    kind: "ssh_private_key",
-                    value: ssh_marker,
-                },
+                token("cargo_registry_token", &cargo),
+                token("github_token_file", &github_file),
+                token("github_token_env", &github_env),
+                token("aws_access_key_id", &aws_id),
+                token("aws_secret_access_key", &aws_secret),
+                token("ssh_private_key", &ssh_marker),
             ],
             directories: vec![
                 dir("", 0o755),
@@ -114,20 +104,17 @@ impl Honeytokens {
             files: vec![
                 file(
                     "/.cargo/credentials.toml",
-                    0o600,
                     format!("[registry]\ntoken = \"{cargo}\"\n"),
                 ),
-                file("/.ssh/id_ed25519", 0o600, ssh_key),
+                file("/.ssh/id_ed25519", ssh_key(&ssh_marker)),
                 file(
                     "/.aws/credentials",
-                    0o600,
                     format!(
                         "[default]\naws_access_key_id = {aws_id}\naws_secret_access_key = {aws_secret}\n"
                     ),
                 ),
                 file(
                     "/.git-credentials",
-                    0o600,
                     format!("https://builder:{github_file}@github.com\n"),
                 ),
             ],
@@ -179,5 +166,110 @@ mod tests {
         assert_eq!(found[0].kind, "cargo_registry_token");
         assert!(Honeytokens::found_in(&b.tokens, leaked.as_bytes()).is_empty());
         assert!(a.files.iter().all(|f| f.path.path.starts_with(HOME)));
+    }
+
+    #[test]
+    fn every_token_lands_in_its_file_with_its_mode() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+        let set = Honeytokens::generate(&mut rng, 1000);
+        let kinds: Vec<_> = set.tokens.iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                "cargo_registry_token",
+                "github_token_file",
+                "github_token_env",
+                "aws_access_key_id",
+                "aws_secret_access_key",
+                "ssh_private_key",
+            ]
+        );
+        let value = |kind: &str| {
+            set.tokens
+                .iter()
+                .find(|t| t.kind == kind)
+                .unwrap()
+                .value
+                .clone()
+        };
+        let directories: Vec<_> = set
+            .directories
+            .iter()
+            .map(|d| (d.path.as_str(), d.owner, d.mode))
+            .collect();
+        assert_eq!(
+            directories,
+            [
+                ("/work/home", 1000, 0o755),
+                ("/work/home/.cargo", 1000, 0o755),
+                ("/work/home/.ssh", 1000, 0o700),
+                ("/work/home/.aws", 1000, 0o755),
+            ]
+        );
+        let files: Vec<_> = set
+            .files
+            .iter()
+            .map(|f| {
+                let text = String::from_utf8(f.contents.clone()).unwrap();
+                (f.path.path.as_str(), f.path.owner, f.path.mode, text)
+            })
+            .collect();
+        let ssh = format!(
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+             b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n\
+             {}\n\
+             -----END OPENSSH PRIVATE KEY-----\n",
+            value("ssh_private_key")
+        );
+        assert_eq!(
+            files,
+            [
+                (
+                    "/work/home/.cargo/credentials.toml",
+                    1000,
+                    0o600,
+                    format!(
+                        "[registry]\ntoken = \"{}\"\n",
+                        value("cargo_registry_token")
+                    )
+                ),
+                ("/work/home/.ssh/id_ed25519", 1000, 0o600, ssh),
+                (
+                    "/work/home/.aws/credentials",
+                    1000,
+                    0o600,
+                    format!(
+                        "[default]\naws_access_key_id = {}\naws_secret_access_key = {}\n",
+                        value("aws_access_key_id"),
+                        value("aws_secret_access_key")
+                    )
+                ),
+                (
+                    "/work/home/.git-credentials",
+                    1000,
+                    0o600,
+                    format!(
+                        "https://builder:{}@github.com\n",
+                        value("github_token_file")
+                    )
+                ),
+            ]
+        );
+        assert_eq!(
+            set.env,
+            [("GITHUB_TOKEN".to_owned(), value("github_token_env"))]
+        );
+        assert_eq!(value("github_token_file").len(), 40);
+        assert_eq!(value("github_token_env").len(), 40);
+        assert_ne!(value("github_token_file"), value("github_token_env"));
+        assert_eq!(value("aws_secret_access_key").len(), 40);
+        assert_eq!(value("ssh_private_key").len(), 64);
+    }
+
+    #[test]
+    fn a_seed_gives_the_same_values() {
+        let make = || Honeytokens::generate(&mut rand::rngs::StdRng::seed_from_u64(7), 1000);
+        let expected = make().records();
+        assert_eq!(make().records(), expected);
     }
 }

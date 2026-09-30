@@ -35,6 +35,8 @@ use crateward_core::store::Store;
 
 use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
+use crate::scratch::ScratchReport;
+use crate::trace::TraceSummary;
 use crate::worker::{BUILDER, Failure, JobFiles, Locked, RunPlan, RunReport, Sandbox};
 
 /// A crate version.
@@ -160,6 +162,23 @@ fn script(plan: &Plan) -> String {
 /// Why a warm build's result is not used, or `None` if it is clean.
 #[must_use]
 pub fn rejection(report: &RunReport) -> Option<String> {
+    if let Some(why) = behavior_problem(report) {
+        return Some(format!("{why}: {}", first_example(&report.trace)));
+    }
+    let Some(scratch) = &report.scratch else {
+        return Some("the scratch disk was not scanned".into());
+    };
+    if scratch.units.is_empty() {
+        return Some("the replays compiled nothing".into());
+    }
+    let entry = unexpected_entry(scratch)?;
+    Some(format!(
+        "the scratch disk holds unexpected entries: {entry}"
+    ))
+}
+
+/// The first thing the run did that a clean build never does.
+fn behavior_problem(report: &RunReport) -> Option<&'static str> {
     let t = &report.trace;
     let n = &report.network;
     let problems = [
@@ -192,34 +211,33 @@ pub fn rejection(report: &RunReport) -> Option<String> {
             "the fake internet saw traffic",
         ),
     ];
-    if let Some((_, why)) = problems.iter().find(|(bad, _)| *bad) {
-        // Name the first entry, rendered by the trace summary already.
-        let example = t
-            .sockets
-            .first()
-            .map(|x| format!("{} {}", x.exe, x.address))
-            .or_else(|| {
-                t.sensitive_opens
-                    .first()
-                    .map(|x| format!("{} {}", x.exe, x.path))
-            })
-            .or_else(|| {
-                t.writes_outside_work
-                    .first()
-                    .map(|x| format!("{} {}", x.exe, x.path))
-            })
-            .or_else(|| t.tamper.first().map(|x| x.what.clone()))
-            .unwrap_or_default();
-        return Some(format!("{why}: {example}"));
-    }
-    let Some(s) = &report.scratch else {
-        return Some("the scratch disk was not scanned".into());
-    };
-    if s.units.is_empty() {
-        return Some("the replays compiled nothing".into());
-    }
-    let unexpected = s
-        .error
+    problems
+        .into_iter()
+        .find(|(bad, _)| *bad)
+        .map(|(_, why)| why)
+}
+
+/// The first entry of the trace's lists, rendered by the trace summary
+/// already, or an empty string.
+fn first_example(t: &TraceSummary) -> String {
+    t.sockets
+        .first()
+        .map(|x| format!("{} {}", x.exe, x.address))
+        .or_else(|| {
+            let x = t.sensitive_opens.first()?;
+            Some(format!("{} {}", x.exe, x.path))
+        })
+        .or_else(|| {
+            let x = t.writes_outside_work.first()?;
+            Some(format!("{} {}", x.exe, x.path))
+        })
+        .or_else(|| t.tamper.first().map(|x| x.what.clone()))
+        .unwrap_or_default()
+}
+
+/// The first entry the scratch scan flags, list by list.
+fn unexpected_entry(s: &ScratchReport) -> Option<String> {
+    s.error
         .clone()
         .or_else(|| s.outside_build.first().map(|e| e.path.clone()))
         .or_else(|| s.executables_outside_target.first().map(|e| e.path.clone()))
@@ -230,13 +248,7 @@ pub fn rejection(report: &RunReport) -> Option<String> {
                 .map(|e| format!("{} ({})", e.path, e.kind))
         })
         .or_else(|| s.links_outside.first().map(|e| e.path.clone()))
-        .or_else(|| s.planted_changed.first().cloned());
-    if let Some(entry) = unexpected {
-        return Some(format!(
-            "the scratch disk holds unexpected entries: {entry}"
-        ));
-    }
-    None
+        .or_else(|| s.planted_changed.first().cloned())
 }
 
 /// Loads the samples and the gate from the store and plans a warm build.
@@ -630,5 +642,255 @@ mod tests {
             [("sum-serde-1.0.0".to_owned(), "b".to_owned())].into();
         let all: HashSet<String> = blobs.keys().cloned().collect();
         assert!(plan(&samples, &all, &blobs, 2, 10).probes.is_empty());
+    }
+    use crate::scratch::Entry;
+    use crate::trace::{FileAccess, Process, Role, SocketUse, Tamper};
+    use crate::worker::{Connection, Leak, NetworkSummary};
+
+    /// A run the warm build accepts.
+    fn clean() -> RunReport {
+        RunReport {
+            outcome: BuildOutcome::Succeeded,
+            end: String::new(),
+            exit: None,
+            restore_ms: 0,
+            run_ms: 0,
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+            truncated: false,
+            payload_files: 0,
+            payload_bytes: 0,
+            missing_packages: Vec::new(),
+            network: NetworkSummary::default(),
+            leaked: Vec::new(),
+            trace: TraceSummary {
+                complete: true,
+                ..TraceSummary::default()
+            },
+            tokens_in_trace: Vec::new(),
+            scratch: Some(ScratchReport {
+                units: vec!["libserde-0123456789abcdef.rmeta".into()],
+                ..ScratchReport::default()
+            }),
+            tokens_on_disk: Vec::new(),
+        }
+    }
+
+    fn access(exe: &str, path: &str) -> FileAccess {
+        FileAccess {
+            pid: 7,
+            exe: exe.into(),
+            path: path.into(),
+            flags: 0,
+            ms: 0,
+        }
+    }
+
+    fn socket(exe: &str, address: &str) -> SocketUse {
+        SocketUse {
+            pid: 7,
+            exe: exe.into(),
+            how: "connect".into(),
+            address: address.into(),
+            sock_type: 1,
+            ms: 0,
+        }
+    }
+
+    fn tamper(what: &str) -> Tamper {
+        Tamper {
+            pid: 7,
+            what: what.into(),
+            ms: 0,
+        }
+    }
+
+    fn root() -> Process {
+        Process {
+            pid: 7,
+            ppid: Some(1),
+            exe: "/bin/sh".into(),
+            argv: Vec::new(),
+            role: Role::Other,
+            started_ms: 0,
+            exit: None,
+            ended_ms: None,
+            became_root: true,
+        }
+    }
+
+    fn leak() -> Leak {
+        Leak {
+            kind: "aws_access_key_id".into(),
+            via: "udp".into(),
+        }
+    }
+
+    fn connection() -> Connection {
+        Connection {
+            dst: "1.2.3.4:80".into(),
+            sniffed: crateward_fake_internet::sniff::Sniffed::Unknown,
+            bytes: 0,
+            inner: None,
+        }
+    }
+
+    fn entry(path: &str, kind: &str) -> Entry {
+        Entry {
+            path: path.into(),
+            kind: kind.into(),
+            size: 0,
+            mode: 0o644,
+            uid: 0,
+            target: None,
+        }
+    }
+
+    type Edit<T> = fn(&mut T);
+
+    fn rejected(change: Edit<RunReport>) -> Option<String> {
+        let mut report = clean();
+        change(&mut report);
+        rejection(&report)
+    }
+
+    #[test]
+    fn a_clean_run_is_used() {
+        assert_eq!(rejection(&clean()), None);
+    }
+
+    #[test]
+    fn each_problem_of_the_run_is_named_with_its_example() {
+        let cases: [(&str, Edit<RunReport>); 13] = [
+            ("the trace is incomplete: ", |r| r.trace.complete = false),
+            ("a process used a socket: curl 1.2.3.4:80", |r| {
+                r.trace.sockets = vec![socket("curl", "1.2.3.4:80")];
+            }),
+            ("a process opened a sensitive file: cat /etc/shadow", |r| {
+                r.trace.sensitive_opens = vec![access("cat", "/etc/shadow")];
+            }),
+            ("a process wrote outside the build: tee /etc/motd", |r| {
+                r.trace.writes_outside_work = vec![access("tee", "/etc/motd")];
+            }),
+            ("a process tried to tamper: bpf cmd 5", |r| {
+                r.trace.tamper = vec![tamper("bpf cmd 5")];
+            }),
+            ("a process ran as root: ", |r| {
+                r.trace.processes = vec![root()]
+            }),
+            ("a honeytoken was used: ", |r| r.leaked = vec![leak()]),
+            ("a honeytoken was used: ", |r| {
+                r.tokens_in_trace = vec![leak()]
+            }),
+            ("a honeytoken was used: ", |r| {
+                r.tokens_on_disk = vec![leak()]
+            }),
+            ("the fake internet saw traffic: ", |r| {
+                r.network.dns = vec!["example.com".into()];
+            }),
+            ("the fake internet saw traffic: ", |r| {
+                r.network.connections = vec![connection()];
+            }),
+            ("the fake internet saw traffic: ", |r| {
+                r.network.packets = vec!["icmp".into()];
+            }),
+            ("the fake internet saw traffic: ", |r| {
+                r.network.udp_datagrams = 1
+            }),
+        ];
+        for (expected, change) in cases {
+            assert_eq!(rejected(change).as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn problems_are_reported_in_a_fixed_order() {
+        let mut report = clean();
+        report.trace.complete = false;
+        report.trace.sockets = vec![socket("curl", "1.2.3.4:80")];
+        report.trace.sensitive_opens = vec![access("cat", "/etc/shadow")];
+        report.trace.writes_outside_work = vec![access("tee", "/etc/motd")];
+        report.trace.tamper = vec![tamper("bpf cmd 5")];
+        report.trace.processes = vec![root()];
+        report.leaked = vec![leak()];
+        report.network.udp_datagrams = 1;
+        report.scratch = None;
+        let steps: [(&str, Edit<RunReport>); 9] = [
+            ("the trace is incomplete: curl 1.2.3.4:80", |r| {
+                r.trace.complete = true;
+            }),
+            ("a process used a socket: curl 1.2.3.4:80", |r| {
+                r.trace.sockets.clear();
+            }),
+            ("a process opened a sensitive file: cat /etc/shadow", |r| {
+                r.trace.sensitive_opens.clear();
+            }),
+            ("a process wrote outside the build: tee /etc/motd", |r| {
+                r.trace.writes_outside_work.clear();
+            }),
+            ("a process tried to tamper: bpf cmd 5", |r| {
+                r.trace.tamper.clear();
+            }),
+            ("a process ran as root: ", |r| r.trace.processes.clear()),
+            ("a honeytoken was used: ", |r| r.leaked.clear()),
+            ("the fake internet saw traffic: ", |r| {
+                r.network.udp_datagrams = 0
+            }),
+            ("the scratch disk was not scanned", |r| {
+                r.scratch = Some(ScratchReport::default());
+            }),
+        ];
+        for (expected, fix) in steps {
+            assert_eq!(rejection(&report).as_deref(), Some(expected));
+            fix(&mut report);
+        }
+        assert_eq!(
+            rejection(&report).as_deref(),
+            Some("the replays compiled nothing")
+        );
+    }
+
+    #[test]
+    fn the_scratch_disk_must_hold_compiled_units() {
+        assert_eq!(
+            rejected(|r| r.scratch = None).as_deref(),
+            Some("the scratch disk was not scanned")
+        );
+        assert_eq!(
+            rejected(|r| r.scratch = Some(ScratchReport::default())).as_deref(),
+            Some("the replays compiled nothing")
+        );
+    }
+
+    #[test]
+    fn unexpected_scratch_entries_are_reported_in_a_fixed_order() {
+        let mut report = clean();
+        let scratch = report.scratch.as_mut().unwrap();
+        scratch.error = Some("reading the image: bad".into());
+        scratch.outside_build = vec![entry("/etc/outside", "file")];
+        scratch.executables_outside_target = vec![entry("/work/tool", "file")];
+        scratch.setid = vec![entry("/work/su", "file")];
+        scratch.special = vec![entry("/work/pipe", "fifo")];
+        scratch.links_outside = vec![entry("/work/link", "symlink")];
+        scratch.planted_changed = vec!["/work/home/.aws/credentials".into()];
+        let steps: [(&str, Edit<ScratchReport>); 7] = [
+            ("reading the image: bad", |s| s.error = None),
+            ("/etc/outside", |s| s.outside_build.clear()),
+            ("/work/tool", |s| s.executables_outside_target.clear()),
+            ("/work/su", |s| s.setid.clear()),
+            ("/work/pipe (fifo)", |s| s.special.clear()),
+            ("/work/link", |s| s.links_outside.clear()),
+            ("/work/home/.aws/credentials", |s| s.planted_changed.clear()),
+        ];
+        for (expected, fix) in steps {
+            assert_eq!(
+                rejection(&report),
+                Some(format!(
+                    "the scratch disk holds unexpected entries: {expected}"
+                ))
+            );
+            fix(report.scratch.as_mut().unwrap());
+        }
+        assert_eq!(rejection(&report), None);
     }
 }

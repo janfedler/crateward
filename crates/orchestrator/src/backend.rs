@@ -20,9 +20,10 @@ use std::time::Duration;
 
 use crateward_core::protocol::{JobSpec, TracingStatus, Workspace};
 use tokio::time::Instant;
+use tokio::time::error::Elapsed;
 
-use crate::cgroup::{CgroupError, CgroupTree, SLOT_PREFIX, SlotLimits};
-use crate::firecracker::agent::RunOutcome;
+use crate::cgroup::{CgroupError, CgroupTree, SLOT_PREFIX, SlotCgroup, SlotLimits};
+use crate::firecracker::agent::{AgentConnection, AgentError, RunOutcome};
 use crate::firecracker::vm::{
     BootSpec, Isolation, JailConfig, JobDrives, Launch, Snapshot, TAP, Vm, VmError,
 };
@@ -324,7 +325,7 @@ impl FirecrackerBackend {
         slot: u32,
         job: JobInput,
         wall_clock: Duration,
-        cgroup: &crate::cgroup::SlotCgroup,
+        cgroup: &SlotCgroup,
     ) -> Result<JobRun, BackendError> {
         let launch = Self::launch(
             &self.config,
@@ -335,12 +336,7 @@ impl FirecrackerBackend {
         let started = Instant::now();
         let mut vm = Vm::restore(&launch, &self.snapshot, job.drives.as_ref()).await?;
         // No crate code has run yet, so a failure up to here is ours.
-        let ready = async {
-            let mut agent = vm.agent(Instant::now() + AGENT_READY_TIMEOUT).await?;
-            agent.prepare(job.workspace).await.map_err(VmError::from)?;
-            Ok::<_, VmError>(agent)
-        };
-        let mut agent = match ready.await {
+        let mut agent = match ready_agent(&vm, job.workspace).await {
             Ok(agent) => agent,
             Err(error) => {
                 let _ = vm.destroy().await;
@@ -353,47 +349,77 @@ impl FirecrackerBackend {
         let run = run_started.elapsed();
         // Errors from here on are kept, not returned: the decoy is checked
         // whatever happened.
-        let end = match result {
-            Ok(Ok(outcome)) => Ok(JobEnd::Finished(outcome)),
-            Err(_) => cgroup
-                .kill()
-                .map(|()| JobEnd::HostTimeout)
-                .map_err(BackendError::from),
-            Ok(Err(error)) => {
-                let limits = cgroup
-                    .event("memory.events", "oom_kill ")
-                    .and_then(|oom| Ok((oom, cgroup.event("pids.events", "max ")?)));
-                match limits {
-                    Ok((oom, pids)) if oom > 0 || pids > 0 => Ok(JobEnd::ResourceLimit),
-                    Ok(_) => {
-                        let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
-                        // The console's last lines usually say why; the guest
-                        // wrote them, so they are escaped.
-                        let tail = console_tail(&launch.dir.join("firecracker.log"));
-                        Ok(classify_exit(status, &format!("{error}; console: {tail}")))
-                    }
-                    Err(cgroup_error) => Err(cgroup_error.into()),
-                }
-            }
-        };
+        let end = run_end(result, cgroup, &mut vm, &launch).await;
         drop(agent);
-        // Stop every process of the slot (Firecracker and the fake
-        // internet) before looking at the decoy, so no read can follow the
-        // check unseen; then remove the evidence.
-        let mut cleanup: Vec<BackendError> = Vec::new();
-        if let Err(error) = cgroup.kill_and_wait() {
-            cleanup.push(error.into());
-        }
-        if let Err(error) = vm.kill().await {
-            cleanup.push(error.into());
-        }
-        let decoy = vm.jail_root().map(crate::jail::decoy::inspect);
-        if let Err(error) = vm.remove().await {
-            cleanup.push(error.into());
-        }
+        let (decoy, cleanup) = stop_slot(cgroup, vm).await;
         let end = settle(slot, end, decoy, cleanup)?;
         Ok(JobRun { end, restore, run })
     }
+}
+
+/// Waits for a restored VM's agent and prepares its workspace.
+async fn ready_agent(vm: &Vm, workspace: Workspace) -> Result<AgentConnection, VmError> {
+    let mut agent = vm.agent(Instant::now() + AGENT_READY_TIMEOUT).await?;
+    agent.prepare(workspace).await.map_err(VmError::from)?;
+    Ok(agent)
+}
+
+/// How the run ended, from the agent's answer or the host's wall clock.
+async fn run_end(
+    result: Result<Result<RunOutcome, AgentError>, Elapsed>,
+    cgroup: &SlotCgroup,
+    vm: &mut Vm,
+    launch: &Launch,
+) -> Result<JobEnd, BackendError> {
+    match result {
+        Ok(Ok(outcome)) => Ok(JobEnd::Finished(outcome)),
+        Err(_) => {
+            cgroup.kill()?;
+            Ok(JobEnd::HostTimeout)
+        }
+        Ok(Err(error)) => broken_agent(&error, cgroup, vm, launch).await,
+    }
+}
+
+/// The agent stopped answering: a limit of the cgroup explains it, or else
+/// the way Firecracker exited.
+async fn broken_agent(
+    error: &AgentError,
+    cgroup: &SlotCgroup,
+    vm: &mut Vm,
+    launch: &Launch,
+) -> Result<JobEnd, BackendError> {
+    let oom = cgroup.event("memory.events", "oom_kill ")?;
+    let pids = cgroup.event("pids.events", "max ")?;
+    if oom > 0 || pids > 0 {
+        return Ok(JobEnd::ResourceLimit);
+    }
+    let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
+    // The console's last lines usually say why; the guest wrote them, so
+    // they are escaped.
+    let tail = console_tail(&launch.dir.join("firecracker.log"));
+    Ok(classify_exit(status, &format!("{error}; console: {tail}")))
+}
+
+/// Stops every process of the slot (Firecracker and the fake internet)
+/// before looking at the decoy, so no read can follow the check unseen;
+/// then removes the evidence. Returns the decoy's state and the errors.
+async fn stop_slot(
+    cgroup: &SlotCgroup,
+    mut vm: Vm,
+) -> (Option<crate::jail::decoy::Decoy>, Vec<BackendError>) {
+    let mut cleanup: Vec<BackendError> = Vec::new();
+    if let Err(error) = cgroup.kill_and_wait() {
+        cleanup.push(error.into());
+    }
+    if let Err(error) = vm.kill().await {
+        cleanup.push(error.into());
+    }
+    let decoy = vm.jail_root().map(crate::jail::decoy::inspect);
+    if let Err(error) = vm.remove().await {
+        cleanup.push(error.into());
+    }
+    (decoy, cleanup)
 }
 
 impl VmBackend for FirecrackerBackend {

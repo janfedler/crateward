@@ -174,21 +174,6 @@ fn header(size: u64, mode: u32) -> tar::Header {
     header
 }
 
-fn append<W: Write>(
-    builder: &mut tar::Builder<W>,
-    path: &str,
-    mode: u32,
-    data: &[u8],
-    stats: &mut PayloadStats,
-) -> Result<(), PayloadError> {
-    builder
-        .append_data(&mut header(data.len() as u64, mode), path, data)
-        .map_err(io(format!("writing {path}")))?;
-    stats.files += 1;
-    stats.bytes += data.len() as u64;
-    Ok(())
-}
-
 /// Why a manifest could not be reduced to a stub.
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -240,6 +225,114 @@ pub fn stub_manifest(original: &[u8]) -> Result<String, ManifestError> {
     Ok(toml::to_string(&manifest)?)
 }
 
+/// A tar stream that counts what goes into it.
+struct TarWriter<W: Write> {
+    builder: tar::Builder<W>,
+    stats: PayloadStats,
+}
+
+impl<W: Write> TarWriter<W> {
+    fn append(&mut self, path: &str, mode: u32, data: &[u8]) -> Result<(), PayloadError> {
+        self.builder
+            .append_data(&mut header(data.len() as u64, mode), path, data)
+            .map_err(io(format!("writing {path}")))?;
+        self.stats.files += 1;
+        self.stats.bytes += data.len() as u64;
+        Ok(())
+    }
+
+    fn probe(&mut self, dir: &str, probe: &ProbeSpec) -> Result<(), PayloadError> {
+        let manifest = probe_manifest(&probe.name, &probe.version);
+        for (file, data) in [
+            ("Cargo.toml", manifest.as_bytes()),
+            ("Cargo.lock", probe.lockfile.as_bytes()),
+            ("lib.rs", b"".as_slice()),
+            (".cargo/config.toml", CARGO_CONFIG.as_bytes()),
+        ] {
+            self.append(&format!("{dir}/{file}"), 0o644, data)?;
+        }
+        Ok(())
+    }
+
+    /// The files of one locked crate from its blob, then our checksum file.
+    fn package(
+        &mut self,
+        package: &Package,
+        blobs: &BlobStore,
+        stubs: &[String],
+    ) -> Result<(), PayloadError> {
+        let dir = format!("{}-{}", package.name, package.version);
+        let stub = stubs.contains(&dir);
+        let tar = blobs
+            .get(&package.blake3, MAX_BLOB_BYTES)
+            .map_err(|source| PayloadError::Blob {
+                package: dir.clone(),
+                source,
+            })?;
+        let mut archive = tar::Archive::new(tar.as_slice());
+        for entry in archive.entries().map_err(io(format!("reading {dir}")))? {
+            let entry = entry.map_err(io(format!("reading {dir}")))?;
+            self.entry(entry, &dir, stub)?;
+        }
+        // Directory sources need a checksum file; `package` must match the
+        // lockfile. File hashes are left out: the payload is read only.
+        let checksum = format!("{{\"files\":{{}},\"package\":\"{}\"}}", package.checksum);
+        let path = format!("vendor/{dir}/.cargo-checksum.json");
+        self.append(&path, 0o644, checksum.as_bytes())
+    }
+
+    fn entry(
+        &mut self,
+        mut entry: tar::Entry<'_, &[u8]>,
+        dir: &str,
+        stub: bool,
+    ) -> Result<(), PayloadError> {
+        if !entry.header().entry_type().is_file() {
+            return Ok(());
+        }
+        let path = entry
+            .path()
+            .map_err(io(format!("reading {dir}")))?
+            .to_string_lossy()
+            .into_owned();
+        let Some(rest) = path.strip_prefix(dir).and_then(|r| r.strip_prefix('/')) else {
+            return Err(PayloadError::Mismatch(dir.to_owned()));
+        };
+        // Cargo trusts this file for vendored sources; only ours counts.
+        if rest == ".cargo-checksum.json" || (stub && rest != "Cargo.toml") {
+            return Ok(());
+        }
+        let executable = entry.header().mode().is_ok_and(|m| m & 0o111 != 0);
+        let mut data = Vec::new();
+        entry
+            .read_to_end(&mut data)
+            .map_err(io(format!("reading {path}")))?;
+        if stub {
+            return self.stub_files(dir, &path, &data);
+        }
+        let mode = if executable { 0o755 } else { 0o644 };
+        self.append(&format!("vendor/{path}"), mode, &data)
+    }
+
+    /// The reduced manifest of a stubbed crate and its empty library.
+    fn stub_files(&mut self, dir: &str, path: &str, manifest: &[u8]) -> Result<(), PayloadError> {
+        let stub = stub_manifest(manifest).map_err(|source| PayloadError::Manifest {
+            package: dir.to_owned(),
+            source,
+        })?;
+        self.append(&format!("vendor/{path}"), 0o644, stub.as_bytes())?;
+        self.append(&format!("vendor/{dir}/src/lib.rs"), 0o644, b"")
+    }
+
+    fn finish(self) -> Result<PayloadStats, PayloadError> {
+        self.builder
+            .into_inner()
+            .and_then(|mut w| w.flush())
+            .map_err(io("finishing the tar"))?;
+        Ok(self.stats)
+    }
+}
+
 /// Writes the payload as a tar stream.
 ///
 /// # Errors
@@ -251,120 +344,26 @@ pub fn write_tar<W: Write>(
     blobs: &BlobStore,
     out: W,
 ) -> Result<PayloadStats, PayloadError> {
-    let mut builder = tar::Builder::new(out);
-    let mut stats = PayloadStats::default();
+    let mut tar = TarWriter {
+        builder: tar::Builder::new(out),
+        stats: PayloadStats::default(),
+    };
     let first = ProbeSpec {
         name: spec.name.clone(),
         version: spec.version.clone(),
         lockfile: spec.lockfile.clone(),
     };
-    let probes = std::iter::once(("probe".to_owned(), &first)).chain(
-        spec.extra_probes
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (format!("probes/{i}"), p)),
-    );
-    for (dir, probe) in probes {
-        let manifest = probe_manifest(&probe.name, &probe.version);
-        for (file, data) in [
-            ("Cargo.toml", manifest.as_bytes()),
-            ("Cargo.lock", probe.lockfile.as_bytes()),
-            ("lib.rs", b"".as_slice()),
-            (".cargo/config.toml", CARGO_CONFIG.as_bytes()),
-        ] {
-            append(
-                &mut builder,
-                &format!("{dir}/{file}"),
-                0o644,
-                data,
-                &mut stats,
-            )?;
-        }
+    tar.probe("probe", &first)?;
+    for (i, probe) in spec.extra_probes.iter().enumerate() {
+        tar.probe(&format!("probes/{i}"), probe)?;
     }
     for (path, data) in &spec.files {
-        append(&mut builder, path, 0o644, data, &mut stats)?;
+        tar.append(path, 0o644, data)?;
     }
     for package in &spec.packages {
-        let dir = format!("{}-{}", package.name, package.version);
-        let stub = spec.stubs.contains(&dir);
-        let tar = blobs
-            .get(&package.blake3, MAX_BLOB_BYTES)
-            .map_err(|source| PayloadError::Blob {
-                package: dir.clone(),
-                source,
-            })?;
-        let mut archive = tar::Archive::new(tar.as_slice());
-        for entry in archive.entries().map_err(io(format!("reading {dir}")))? {
-            let mut entry = entry.map_err(io(format!("reading {dir}")))?;
-            if !entry.header().entry_type().is_file() {
-                continue;
-            }
-            let path = entry
-                .path()
-                .map_err(io(format!("reading {dir}")))?
-                .to_string_lossy()
-                .into_owned();
-            let Some(rest) = path
-                .strip_prefix(dir.as_str())
-                .and_then(|r| r.strip_prefix('/'))
-            else {
-                return Err(PayloadError::Mismatch(dir));
-            };
-            // Cargo trusts this file for vendored sources; only ours counts.
-            if rest == ".cargo-checksum.json" || (stub && rest != "Cargo.toml") {
-                continue;
-            }
-            let executable = entry.header().mode().is_ok_and(|m| m & 0o111 != 0);
-            let mut data = Vec::new();
-            entry
-                .read_to_end(&mut data)
-                .map_err(io(format!("reading {path}")))?;
-            let mode = if executable { 0o755 } else { 0o644 };
-            if stub {
-                let manifest = stub_manifest(&data).map_err(|source| PayloadError::Manifest {
-                    package: dir.clone(),
-                    source,
-                })?;
-                append(
-                    &mut builder,
-                    &format!("vendor/{path}"),
-                    0o644,
-                    manifest.as_bytes(),
-                    &mut stats,
-                )?;
-                append(
-                    &mut builder,
-                    &format!("vendor/{dir}/src/lib.rs"),
-                    0o644,
-                    b"",
-                    &mut stats,
-                )?;
-                continue;
-            }
-            append(
-                &mut builder,
-                &format!("vendor/{path}"),
-                mode,
-                &data,
-                &mut stats,
-            )?;
-        }
-        // Directory sources need a checksum file; `package` must match the
-        // lockfile. File hashes are left out: the payload is read only.
-        let checksum = format!("{{\"files\":{{}},\"package\":\"{}\"}}", package.checksum);
-        append(
-            &mut builder,
-            &format!("vendor/{dir}/.cargo-checksum.json"),
-            0o644,
-            checksum.as_bytes(),
-            &mut stats,
-        )?;
+        tar.package(package, blobs, &spec.stubs)?;
     }
-    builder
-        .into_inner()
-        .and_then(|mut w| w.flush())
-        .map_err(io("finishing the tar"))?;
-    Ok(stats)
+    tar.finish()
 }
 
 /// Starts the image building child, which reads a tar from `stdin` and
@@ -440,6 +439,9 @@ mod tests {
             let mut h = tar::Header::new_gnu();
             h.set_size(data.len() as u64);
             h.set_mode(*mode);
+            if path.ends_with('/') {
+                h.set_entry_type(tar::EntryType::Directory);
+            }
             h.set_cksum();
             builder.append_data(&mut h, path, *data).unwrap();
         }
@@ -506,6 +508,89 @@ mod tests {
             format!("{{\"files\":{{}},\"package\":\"{}\"}}", "ab".repeat(32))
         );
         assert_eq!(stats.files, 7);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_tar_has_a_fixed_order_with_extra_probes_files_and_stubs() {
+        let (dir, blobs, mut spec) = setup(&[
+            ("demo-1.0.0/", b"", 0o755),
+            ("demo-1.0.0/Cargo.toml", b"[package]", 0o644),
+            ("demo-1.0.0/src/lib.rs", b"// lib", 0o600),
+            ("demo-1.0.0/build.sh", b"#!/bin/sh", 0o755),
+            ("demo-1.0.0/.cargo-checksum.json", b"{}", 0o644),
+        ]);
+        let dep_manifest: &[u8] = b"[package]\nname = \"dep\"\nbuild = \"build.rs\"\n";
+        let dep = blobs
+            .put(&blob_tar(&[
+                ("dep-0.3.0/Cargo.toml", dep_manifest, 0o644),
+                ("dep-0.3.0/src/lib.rs", b"pub fn f() {}", 0o644),
+                ("dep-0.3.0/README.md", b"read me", 0o644),
+            ]))
+            .unwrap();
+        spec.packages.push(Package {
+            name: "dep".into(),
+            version: "0.3.0".into(),
+            checksum: "cd".repeat(32),
+            blake3: dep.blake3,
+        });
+        spec.stubs = vec!["dep-0.3.0".into()];
+        spec.extra_probes = vec![ProbeSpec {
+            name: CrateName::parse("extra").unwrap(),
+            version: "0.2.0".parse().unwrap(),
+            lockfile: "# extra\n".into(),
+        }];
+        spec.files = vec![("run.sh".into(), b"echo".to_vec())];
+
+        let mut tar = Vec::new();
+        let stats = write_tar(&spec, &blobs, &mut tar).unwrap();
+        let mut listing = Vec::new();
+        let mut bytes = 0;
+        for entry in tar::Archive::new(tar.as_slice()).entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().into_owned();
+            let mode = entry.header().mode().unwrap();
+            let mut data = String::new();
+            entry.read_to_string(&mut data).unwrap();
+            bytes += data.len() as u64;
+            listing.push(format!("{path} {mode:o} {data}"));
+        }
+
+        let probe = |name: &str, version: &str| {
+            probe_manifest(&CrateName::parse(name).unwrap(), &version.parse().unwrap())
+        };
+        let checksum =
+            |digit: &str| format!("{{\"files\":{{}},\"package\":\"{}\"}}", digit.repeat(32));
+        let expected = [
+            format!("probe/Cargo.toml 644 {}", probe("demo", "1.0.0")),
+            "probe/Cargo.lock 644 # lock\n".to_owned(),
+            "probe/lib.rs 644 ".to_owned(),
+            format!("probe/.cargo/config.toml 644 {CARGO_CONFIG}"),
+            format!("probes/0/Cargo.toml 644 {}", probe("extra", "0.2.0")),
+            "probes/0/Cargo.lock 644 # extra\n".to_owned(),
+            "probes/0/lib.rs 644 ".to_owned(),
+            format!("probes/0/.cargo/config.toml 644 {CARGO_CONFIG}"),
+            "run.sh 644 echo".to_owned(),
+            "vendor/demo-1.0.0/Cargo.toml 644 [package]".to_owned(),
+            "vendor/demo-1.0.0/src/lib.rs 644 // lib".to_owned(),
+            "vendor/demo-1.0.0/build.sh 755 #!/bin/sh".to_owned(),
+            format!(
+                "vendor/demo-1.0.0/.cargo-checksum.json 644 {}",
+                checksum("ab")
+            ),
+            format!(
+                "vendor/dep-0.3.0/Cargo.toml 644 {}",
+                stub_manifest(dep_manifest).unwrap()
+            ),
+            "vendor/dep-0.3.0/src/lib.rs 644 ".to_owned(),
+            format!(
+                "vendor/dep-0.3.0/.cargo-checksum.json 644 {}",
+                checksum("cd")
+            ),
+        ];
+        assert_eq!(listing, expected);
+        assert_eq!(stats.files, expected.len() as u64);
+        assert_eq!(stats.bytes, bytes);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

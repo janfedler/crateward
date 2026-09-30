@@ -299,69 +299,15 @@ impl TraceBuilder {
             p.became_root = true;
         }
         match &event.kind {
-            TraceKind::Fork { child } => {
-                if self.index.len() + self.parents.len() < MAX_PROCESSES * 2 {
-                    self.parents.insert(*child, (pid, ms));
-                }
-                let _ = self.process(pid, ms);
+            TraceKind::Fork { child } => self.fork(pid, ms, *child),
+            TraceKind::Exec { filename, argv } => self.exec(pid, ms, filename, argv),
+            TraceKind::Exit { code } => self.exit(pid, ms, *code),
+            TraceKind::Open { path, flags } => self.open(pid, ms, path, *flags),
+            TraceKind::Connect { sock_type, address } => {
+                self.socket(pid, ms, "connect", *sock_type, address);
             }
-            TraceKind::Exec { filename, argv } => {
-                if let Some(p) = self.process(pid, ms) {
-                    p.exe = render(filename);
-                    p.argv = argv.iter().take(MAX_ARGS).map(|a| render(a)).collect();
-                    p.role = role(&p.exe);
-                }
-            }
-            TraceKind::Exit { code } => {
-                if let Some(p) = self.process(pid, ms) {
-                    p.exit = Some(*code);
-                    p.ended_ms = Some(ms);
-                }
-            }
-            TraceKind::Open { path, flags } => {
-                self.summary.opens += 1;
-                let path = render(path);
-                let writes = flags & O_ACCMODE != 0 || flags & (O_CREAT | O_TRUNC) != 0;
-                let sensitive = is_sensitive(&path, pid);
-                if sensitive || (writes && !is_build_write(&path)) {
-                    let _ = self.process(pid, ms);
-                    let access = FileAccess {
-                        pid,
-                        exe: self.exe(pid),
-                        path,
-                        flags: *flags,
-                        ms,
-                    };
-                    let s = &mut self.summary;
-                    if sensitive {
-                        Self::push(&mut s.sensitive_opens, &mut s.omitted, access);
-                    } else {
-                        Self::push(&mut s.writes_outside_work, &mut s.omitted, access);
-                    }
-                }
-            }
-            TraceKind::Connect { sock_type, address } | TraceKind::Send { sock_type, address } => {
-                let how = if matches!(event.kind, TraceKind::Connect { .. }) {
-                    "connect"
-                } else {
-                    "send"
-                };
-                let address = render_address(address);
-                let _ = self.process(pid, ms);
-                if self.sockets_seen.len() < MAX_LISTED * 4
-                    && self.sockets_seen.insert((pid, address.clone()))
-                {
-                    let use_ = SocketUse {
-                        pid,
-                        exe: self.exe(pid),
-                        how: how.into(),
-                        address,
-                        sock_type: *sock_type,
-                        ms,
-                    };
-                    let s = &mut self.summary;
-                    Self::push(&mut s.sockets, &mut s.omitted, use_);
-                }
+            TraceKind::Send { sock_type, address } => {
+                self.socket(pid, ms, "send", *sock_type, address);
             }
             TraceKind::Bpf { cmd } => self.tamper(pid, format!("bpf cmd {cmd}"), ms),
             TraceKind::Ptrace { target, mode } => {
@@ -371,6 +317,72 @@ impl TraceBuilder {
                 self.tamper(pid, format!("mount {}", render(fstype)), ms);
             }
         }
+    }
+
+    fn fork(&mut self, pid: u32, ms: u32, child: u32) {
+        if self.index.len() + self.parents.len() < MAX_PROCESSES * 2 {
+            self.parents.insert(child, (pid, ms));
+        }
+        let _ = self.process(pid, ms);
+    }
+
+    fn exec(&mut self, pid: u32, ms: u32, filename: &[u8], argv: &[Vec<u8>]) {
+        if let Some(p) = self.process(pid, ms) {
+            p.exe = render(filename);
+            p.argv = argv.iter().take(MAX_ARGS).map(|a| render(a)).collect();
+            p.role = role(&p.exe);
+        }
+    }
+
+    fn exit(&mut self, pid: u32, ms: u32, code: u32) {
+        if let Some(p) = self.process(pid, ms) {
+            p.exit = Some(code);
+            p.ended_ms = Some(ms);
+        }
+    }
+
+    fn open(&mut self, pid: u32, ms: u32, path: &[u8], flags: u32) {
+        self.summary.opens += 1;
+        let path = render(path);
+        let writes = flags & O_ACCMODE != 0 || flags & (O_CREAT | O_TRUNC) != 0;
+        let sensitive = is_sensitive(&path, pid);
+        if !sensitive && !(writes && !is_build_write(&path)) {
+            return;
+        }
+        let _ = self.process(pid, ms);
+        let access = FileAccess {
+            pid,
+            exe: self.exe(pid),
+            path,
+            flags,
+            ms,
+        };
+        let s = &mut self.summary;
+        if sensitive {
+            Self::push(&mut s.sensitive_opens, &mut s.omitted, access);
+        } else {
+            Self::push(&mut s.writes_outside_work, &mut s.omitted, access);
+        }
+    }
+
+    fn socket(&mut self, pid: u32, ms: u32, how: &str, sock_type: u32, address: &SocketAddress) {
+        let address = render_address(address);
+        let _ = self.process(pid, ms);
+        if self.sockets_seen.len() >= MAX_LISTED * 4
+            || !self.sockets_seen.insert((pid, address.clone()))
+        {
+            return;
+        }
+        let used = SocketUse {
+            pid,
+            exe: self.exe(pid),
+            how: how.into(),
+            address,
+            sock_type,
+            ms,
+        };
+        let s = &mut self.summary;
+        Self::push(&mut s.sockets, &mut s.omitted, used);
     }
 
     fn tamper(&mut self, pid: u32, what: String, ms: u32) {
@@ -511,6 +523,214 @@ mod tests {
         assert_eq!(s.sockets.len(), 1);
         assert_eq!(s.tamper[0].what, "bpf cmd 5");
         assert_eq!(s.opens, 3);
+    }
+
+    fn process_entry(pid: u32, ppid: Option<u32>, exe: &str, argv: &[&str], role: Role) -> Process {
+        Process {
+            pid,
+            ppid,
+            exe: exe.into(),
+            argv: argv.iter().map(|a| (*a).into()).collect(),
+            role,
+            started_ms: 0,
+            exit: None,
+            ended_ms: None,
+            became_root: false,
+        }
+    }
+
+    fn access(path: &str, flags: u32, ms: u32) -> FileAccess {
+        FileAccess {
+            pid: 2,
+            exe: "/usr/bin/curl".into(),
+            path: path.into(),
+            flags,
+            ms,
+        }
+    }
+
+    fn socket_use(how: &str, address: &str, sock_type: u32, ms: u32) -> SocketUse {
+        SocketUse {
+            pid: 2,
+            exe: "/usr/bin/curl".into(),
+            how: how.into(),
+            address: address.into(),
+            sock_type,
+            ms,
+        }
+    }
+
+    fn tamper_entry(what: &str) -> Tamper {
+        Tamper {
+            pid: 2,
+            what: what.into(),
+            ms: 6,
+        }
+    }
+
+    #[test]
+    fn every_event_kind_lands_in_the_summary() {
+        let mut b = TraceBuilder::default();
+        let open = |ms: u32, path: &str, flags: u32| {
+            event(
+                2,
+                BUILDER_UID,
+                ms,
+                TraceKind::Open {
+                    path: path.as_bytes().to_vec(),
+                    flags,
+                },
+            )
+        };
+        let connect = |ms: u32, sock_type: u32, address: SocketAddress| {
+            event(
+                2,
+                BUILDER_UID,
+                ms,
+                TraceKind::Connect { sock_type, address },
+            )
+        };
+        let send = |ms: u32, sock_type: u32, address: SocketAddress| {
+            event(2, BUILDER_UID, ms, TraceKind::Send { sock_type, address })
+        };
+        let ip = |text: &str| SocketAddress::Ip(text.parse().unwrap());
+        let aws = format!("{HOME}/.aws/credentials");
+        let events = [
+            event(1, 0, 0, TraceKind::Fork { child: 2 }),
+            exec(2, "/usr/bin/curl", &["curl", "-d", "x"]),
+            open(2, &aws, 0),
+            open(3, "/etc/passwd", O_CREAT | 1),
+            open(3, "/work/target/x", O_CREAT | 1),
+            open(3, "/usr/lib/libc.so", 0),
+            connect(4, 1, ip("192.0.2.1:80")),
+            connect(4, 1, ip("192.0.2.1:80")),
+            send(5, 2, ip("192.0.2.1:80")),
+            send(5, 2, ip("192.0.2.1:53")),
+            send(5, 2, SocketAddress::Unix(b"/run/x.sock".to_vec())),
+            connect(6, 1, SocketAddress::Other(10)),
+            event(2, BUILDER_UID, 6, TraceKind::Bpf { cmd: 5 }),
+            event(
+                2,
+                BUILDER_UID,
+                6,
+                TraceKind::Ptrace {
+                    target: 7,
+                    mode: 0x10,
+                },
+            ),
+            event(
+                2,
+                BUILDER_UID,
+                6,
+                TraceKind::Mount {
+                    fstype: b"tmpfs".to_vec(),
+                },
+            ),
+            event(2, BUILDER_UID, 9, TraceKind::Exit { code: 3 }),
+            event(99, BUILDER_UID, 10, TraceKind::Exit { code: 0 }),
+        ];
+        for event in &events {
+            b.add(event);
+        }
+        let totals = TraceTotals {
+            events: 17,
+            ..TraceTotals::default()
+        };
+        b.end(totals);
+
+        let mut root = process_entry(1, None, "", &[], Role::Unknown);
+        root.became_root = true;
+        let mut curl = process_entry(
+            2,
+            Some(1),
+            "/usr/bin/curl",
+            &["curl", "-d", "x"],
+            Role::Other,
+        );
+        curl.exit = Some(3);
+        curl.ended_ms = Some(9);
+        let mut unknown = process_entry(99, None, "", &[], Role::Unknown);
+        unknown.started_ms = 10;
+        unknown.exit = Some(0);
+        unknown.ended_ms = Some(10);
+        let expected = TraceSummary {
+            complete: true,
+            totals: Some(totals),
+            received: 17,
+            opens: 4,
+            processes: vec![root, curl, unknown],
+            processes_omitted: 0,
+            sensitive_opens: vec![access(&aws, 0, 2)],
+            writes_outside_work: vec![access("/etc/passwd", O_CREAT | 1, 3)],
+            sockets: vec![
+                socket_use("connect", "192.0.2.1:80", 1, 4),
+                socket_use("send", "192.0.2.1:53", 2, 5),
+                socket_use("send", "unix:/run/x.sock", 2, 5),
+                socket_use("connect", "family 10", 1, 6),
+            ],
+            tamper: vec![
+                tamper_entry("bpf cmd 5"),
+                tamper_entry("ptrace 7 mode 0x10"),
+                tamper_entry("mount tmpfs"),
+            ],
+            omitted: 0,
+        };
+        assert_eq!(b.finish(), expected);
+    }
+
+    #[test]
+    fn every_list_is_bounded_and_counts_what_it_drops() {
+        let mut b = TraceBuilder::default();
+        let mut add = |kind: TraceKind| b.add(&event(7, BUILDER_UID, 0, kind));
+        for i in 0..MAX_LISTED + 2 {
+            let path = format!("{HOME}/.ssh/key{i}").into_bytes();
+            add(TraceKind::Open { path, flags: 0 });
+        }
+        for i in 0..MAX_LISTED + 3 {
+            let path = format!("/etc/w{i}").into_bytes();
+            add(TraceKind::Open {
+                path,
+                flags: O_CREAT,
+            });
+        }
+        for _ in 0..MAX_LISTED + 4 {
+            add(TraceKind::Bpf { cmd: 1 });
+        }
+        for i in 0..MAX_LISTED * 4 + 100 {
+            let address = SocketAddress::Unix(format!("s{i}").into_bytes());
+            add(TraceKind::Connect {
+                sock_type: 1,
+                address,
+            });
+        }
+        let s = b.finish();
+        assert_eq!(s.sensitive_opens.len(), MAX_LISTED);
+        assert_eq!(s.writes_outside_work.len(), MAX_LISTED);
+        assert_eq!(s.tamper.len(), MAX_LISTED);
+        assert_eq!(s.sockets.len(), MAX_LISTED);
+        assert_eq!(s.opens, (MAX_LISTED * 2 + 5) as u64);
+        // Sockets are remembered up to four times the listed count.
+        assert_eq!(s.omitted, 2 + 3 + 4 + (MAX_LISTED * 3) as u64);
+        assert_eq!(s.processes.len(), 1);
+    }
+
+    #[test]
+    fn arguments_and_remembered_parents_are_bounded() {
+        let mut b = TraceBuilder::default();
+        let many = vec!["a"; MAX_ARGS + 5];
+        b.add(&exec(3, "/bin/sh", &many));
+        assert_eq!(b.summary.processes[0].argv.len(), MAX_ARGS);
+        for child in 0..MAX_PROCESSES as u32 * 2 + 10 {
+            b.add(&event(
+                1,
+                BUILDER_UID,
+                0,
+                TraceKind::Fork {
+                    child: 1000 + child,
+                },
+            ));
+        }
+        assert_eq!(b.index.len() + b.parents.len(), MAX_PROCESSES * 2);
     }
 
     #[test]

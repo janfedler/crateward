@@ -293,6 +293,65 @@ impl Launch {
             Isolation::Jail(_) => self.jail_root().join(name),
         }
     }
+
+    /// Starts Firecracker as a child of this process.
+    fn spawn_direct(&self, log: &Path) -> Result<Child, VmError> {
+        let log = std::fs::File::create(log).map_err(io_error("creating the log"))?;
+        let log_err = log.try_clone().map_err(io_error("duplicating the log"))?;
+        Command::new(&self.firecracker)
+            .arg("--api-sock")
+            .arg(self.host_created(API))
+            .arg("--id")
+            .arg(&self.id)
+            .stdin(Stdio::null())
+            .stdout(log)
+            .stderr(log_err)
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(io_error(format!("starting {}", self.firecracker.display())))
+    }
+
+    /// What the launcher builds the jail from.
+    fn jail_spec(&self, jail: &JailConfig, files: &[Exposed], log: PathBuf) -> JailSpec {
+        let mut devices = vec![PathBuf::from("/dev/kvm")];
+        if jail.tap.is_some() {
+            devices.push(PathBuf::from("/dev/net/tun"));
+        }
+        JailSpec {
+            id: self.id.clone(),
+            root: self.jail_root(),
+            firecracker: self.firecracker.clone(),
+            mounts: files
+                .iter()
+                .map(|file| BindMount {
+                    source: file.host.clone(),
+                    target: file.name.to_owned(),
+                    writable: file.writable,
+                })
+                .collect(),
+            devices,
+            tap: jail.tap.clone(),
+            sinks: jail.sinks.clone(),
+            cgroup: jail.cgroup.clone(),
+            log,
+            max_open_files: 2048,
+            max_file_size: jail.max_file_size,
+        }
+    }
+
+    /// Starts Firecracker in a jail built by the launcher.
+    async fn spawn_jailed(
+        &self,
+        jail: &JailConfig,
+        files: &[Exposed],
+        log: PathBuf,
+    ) -> Result<Child, VmError> {
+        crate::jail::host::prepare_root(&self.jail_root(), jail.vm_uid)?;
+        let spec = self.jail_spec(jail, files, log);
+        let ids = IdMap::for_slot(jail.vm_uid, jail.vm_gid);
+        Ok(crate::jail::host::spawn(&jail.launcher, &spec, ids).await?)
+    }
 }
 
 impl Vm {
@@ -301,58 +360,12 @@ impl Vm {
         tokio::fs::create_dir_all(&launch.dir)
             .await
             .map_err(io_error(format!("creating {}", launch.dir.display())))?;
-        let log_path = launch.dir.join("firecracker.log");
+        let log = launch.dir.join("firecracker.log");
         let (child, root) = match &launch.isolation {
-            Isolation::Direct => {
-                let log = std::fs::File::create(&log_path).map_err(io_error("creating the log"))?;
-                let log_err = log.try_clone().map_err(io_error("duplicating the log"))?;
-                let child = Command::new(&launch.firecracker)
-                    .arg("--api-sock")
-                    .arg(launch.host_created(API))
-                    .arg("--id")
-                    .arg(&launch.id)
-                    .stdin(Stdio::null())
-                    .stdout(log)
-                    .stderr(log_err)
-                    .process_group(0)
-                    .kill_on_drop(true)
-                    .spawn()
-                    .map_err(io_error(format!(
-                        "starting {}",
-                        launch.firecracker.display()
-                    )))?;
-                (child, None)
-            }
+            Isolation::Direct => (launch.spawn_direct(&log)?, None),
             Isolation::Jail(jail) => {
-                let root = launch.jail_root();
-                crate::jail::host::prepare_root(&root, jail.vm_uid)?;
-                let mut devices = vec![PathBuf::from("/dev/kvm")];
-                if jail.tap.is_some() {
-                    devices.push(PathBuf::from("/dev/net/tun"));
-                }
-                let spec = JailSpec {
-                    id: launch.id.clone(),
-                    root: root.clone(),
-                    firecracker: launch.firecracker.clone(),
-                    mounts: files
-                        .iter()
-                        .map(|file| BindMount {
-                            source: file.host.clone(),
-                            target: file.name.to_owned(),
-                            writable: file.writable,
-                        })
-                        .collect(),
-                    devices,
-                    tap: jail.tap.clone(),
-                    sinks: jail.sinks.clone(),
-                    cgroup: jail.cgroup.clone(),
-                    log: log_path,
-                    max_open_files: 2048,
-                    max_file_size: jail.max_file_size,
-                };
-                let ids = IdMap::for_slot(jail.vm_uid, jail.vm_gid);
-                let child = crate::jail::host::spawn(&jail.launcher, &spec, ids).await?;
-                (child, Some(root))
+                let child = launch.spawn_jailed(jail, files, log).await?;
+                (child, Some(launch.jail_root()))
             }
         };
         let socket = launch.host_created(API);
@@ -363,9 +376,14 @@ impl Vm {
             root,
             vsock_host: launch.host_created(VSOCK),
         };
+        vm.wait_for_socket(&socket).await?;
+        Ok(vm)
+    }
+
+    async fn wait_for_socket(&mut self, socket: &Path) -> Result<(), VmError> {
         let deadline = Instant::now() + API_SOCKET_TIMEOUT;
         while !socket.exists() {
-            if let Some(status) = vm
+            if let Some(status) = self
                 .child
                 .try_wait()
                 .map_err(io_error("polling firecracker"))?
@@ -377,7 +395,7 @@ impl Vm {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        Ok(vm)
+        Ok(())
     }
 
     /// Boots a VM from a kernel and root filesystem.
@@ -394,102 +412,83 @@ impl Vm {
             files.extend(Exposed::drives(drives));
         }
         let vm = Self::spawn(launch, &files).await?;
+        vm.configure(launch, spec).await?;
+        let start = InstanceAction {
+            action_type: "InstanceStart",
+        };
+        vm.api.put("/actions", &start).await?;
+        Ok(vm)
+    }
+
+    /// Sends everything Firecracker needs before the VM starts.
+    async fn configure(&self, launch: &Launch, spec: &BootSpec) -> Result<(), VmError> {
+        let api = &self.api;
         // The serial console carries guest controlled text into our log.
         // Excess output is dropped: 64 KiB burst, then 4 KiB per second.
-        vm.api
-            .put(
-                "/serial",
-                &Serial {
-                    rate_limiter: TokenBucket {
-                        size: 64 * 1024,
-                        refill_time: 16_000,
-                    },
-                },
-            )
-            .await?;
-        vm.api
-            .put(
-                "/boot-source",
-                &BootSource {
-                    kernel_image_path: launch.fc_path(&spec.kernel, KERNEL),
-                    boot_args: spec.boot_args.clone(),
-                },
-            )
-            .await?;
-        vm.api
-            .put(
-                "/machine-config",
-                &MachineConfig {
-                    vcpu_count: spec.vcpus,
-                    mem_size_mib: spec.memory_mib,
-                    smt: false,
-                },
-            )
-            .await?;
-        vm.api
-            .put(
-                "/drives/rootfs",
-                &Drive {
-                    drive_id: "rootfs".into(),
-                    path_on_host: launch.fc_path(&spec.rootfs, ROOTFS),
-                    is_root_device: true,
-                    is_read_only: true,
-                    rate_limiter: None,
-                },
-            )
-            .await?;
+        let serial = Serial {
+            rate_limiter: TokenBucket {
+                size: 64 * 1024,
+                refill_time: 16_000,
+            },
+        };
+        api.put("/serial", &serial).await?;
+        let boot_source = BootSource {
+            kernel_image_path: launch.fc_path(&spec.kernel, KERNEL),
+            boot_args: spec.boot_args.clone(),
+        };
+        api.put("/boot-source", &boot_source).await?;
+        let machine = MachineConfig {
+            vcpu_count: spec.vcpus,
+            mem_size_mib: spec.memory_mib,
+            smt: false,
+        };
+        api.put("/machine-config", &machine).await?;
+        let rootfs = Drive {
+            drive_id: "rootfs".into(),
+            path_on_host: launch.fc_path(&spec.rootfs, ROOTFS),
+            is_root_device: true,
+            is_read_only: true,
+            rate_limiter: None,
+        };
+        api.put("/drives/rootfs", &rootfs).await?;
         if let Some(drives) = &spec.drives {
-            for (id, host, name, read_only) in [
-                ("payload", &drives.payload, PAYLOAD, true),
-                ("scratch", &drives.scratch, SCRATCH, false),
-                ("warm", &drives.warm, WARM, true),
-            ] {
-                vm.api
-                    .put(
-                        &format!("/drives/{id}"),
-                        &Drive {
-                            drive_id: id.into(),
-                            path_on_host: launch.fc_path(host, name),
-                            is_root_device: false,
-                            is_read_only: read_only,
-                            rate_limiter: Some(DRIVE_LIMIT),
-                        },
-                    )
-                    .await?;
-            }
+            self.put_job_drives(launch, drives).await?;
         }
         if spec.network {
-            vm.api
-                .put(
-                    "/network-interfaces/eth0",
-                    &NetworkInterface {
-                        iface_id: "eth0".into(),
-                        host_dev_name: TAP.into(),
-                        guest_mac: GUEST_MAC.into(),
-                        rx_rate_limiter: NETWORK_LIMIT,
-                        tx_rate_limiter: NETWORK_LIMIT,
-                    },
-                )
-                .await?;
+            let interface = NetworkInterface {
+                iface_id: "eth0".into(),
+                host_dev_name: TAP.into(),
+                guest_mac: GUEST_MAC.into(),
+                rx_rate_limiter: NETWORK_LIMIT,
+                tx_rate_limiter: NETWORK_LIMIT,
+            };
+            api.put("/network-interfaces/eth0", &interface).await?;
         }
-        vm.api
-            .put(
-                "/vsock",
-                &Vsock {
-                    guest_cid: GUEST_CID,
-                    uds_path: launch.fc_created(VSOCK),
-                },
-            )
-            .await?;
-        vm.api
-            .put(
-                "/actions",
-                &InstanceAction {
-                    action_type: "InstanceStart",
-                },
-            )
-            .await?;
-        Ok(vm)
+        let vsock = Vsock {
+            guest_cid: GUEST_CID,
+            uds_path: launch.fc_created(VSOCK),
+        };
+        api.put("/vsock", &vsock).await?;
+        Ok(())
+    }
+
+    /// Attaches the job drives; a restore points them at the job's files.
+    async fn put_job_drives(&self, launch: &Launch, drives: &JobDrives) -> Result<(), VmError> {
+        for (id, host, name, read_only) in [
+            ("payload", &drives.payload, PAYLOAD, true),
+            ("scratch", &drives.scratch, SCRATCH, false),
+            ("warm", &drives.warm, WARM, true),
+        ] {
+            let drive = Drive {
+                drive_id: id.into(),
+                path_on_host: launch.fc_path(host, name),
+                is_root_device: false,
+                is_read_only: read_only,
+                rate_limiter: Some(DRIVE_LIMIT),
+            };
+            self.api.put(&format!("/drives/{id}"), &drive).await?;
+        }
+        Ok(())
     }
 
     /// Restores a VM from a full snapshot and resumes it. The VM gets its
