@@ -5,6 +5,7 @@
 //! run, and deletes the per job files. The job holds its lease for the
 //! whole run (`SandboxStarted` keeps it), and a heartbeat renews it.
 
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,8 +25,9 @@ use crateward_fake_internet::server::{Event, EventKind, unhex};
 use crateward_fake_internet::sniff::Sniffed;
 
 use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
+use crate::canary::Canary;
 use crate::firecracker::vm::JobDrives;
-use crate::honeytokens::{HOME, Honeytokens};
+use crate::honeytokens::{HOME, Honeytokens, Token};
 use crate::payload::{PROBE_DIR, Package, PayloadSpec, PayloadStats, build_image};
 use crate::scratch::{ScanSpec, ScratchReport};
 use crate::trace::TraceSummary;
@@ -55,20 +57,24 @@ pub struct Failure {
 }
 
 impl Failure {
-    fn infrastructure(message: impl std::fmt::Display) -> Self {
+    fn new(class: FailureClass, message: impl std::fmt::Display) -> Self {
         Self {
-            class: FailureClass::Infrastructure,
+            class,
             message: message.to_string(),
             escalation: None,
         }
     }
 
+    fn infrastructure(message: impl std::fmt::Display) -> Self {
+        Self::new(FailureClass::Infrastructure, message)
+    }
+
     fn permanent(message: impl std::fmt::Display) -> Self {
-        Self {
-            class: FailureClass::Permanent,
-            message: message.to_string(),
-            escalation: None,
-        }
+        Self::new(FailureClass::Permanent, message)
+    }
+
+    fn compromise(message: impl std::fmt::Display) -> Self {
+        Self::new(FailureClass::SuspectedCompromise, message)
     }
 }
 
@@ -177,41 +183,37 @@ const MAX_NETWORK_LOG: u64 = 64 * 1024 * 1024;
 /// Reads the fake internet's log and looks for the job's honeytokens in
 /// everything the guest sent. Unparsable lines are skipped: the log is
 /// written by a process that handles guest input.
-fn analyze_network(
-    path: &Path,
-    tokens: &[crate::honeytokens::Token],
-) -> (NetworkSummary, Vec<Leak>) {
-    use std::io::{BufRead, Read};
-    let mut summary = NetworkSummary::default();
-    let mut leaked = Vec::new();
-    let Ok(file) = std::fs::File::open(path) else {
-        return (summary, leaked);
+fn analyze_network(path: &Path, tokens: &[Token]) -> (NetworkSummary, Vec<Leak>) {
+    let mut log = NetworkLog {
+        tokens,
+        summary: NetworkSummary::default(),
+        leaked: Vec::new(),
     };
-    let mut leak = |haystack: &[u8], via: &str| {
-        for token in Honeytokens::found_in(tokens, haystack) {
-            if !leaked
-                .iter()
-                .any(|l: &Leak| l.kind == token.kind && l.via == via)
-            {
-                leaked.push(Leak {
-                    kind: token.kind.to_owned(),
-                    via: via.to_owned(),
-                });
+    if let Ok(file) = std::fs::File::open(path) {
+        for line in BufReader::new(file.take(MAX_NETWORK_LOG)).lines() {
+            let Ok(line) = line else { break };
+            if let Ok(event) = serde_json::from_str::<Event>(&line) {
+                log.record(event.kind);
             }
         }
-    };
-    for line in std::io::BufReader::new(file.take(MAX_NETWORK_LOG)).lines() {
-        let Ok(line) = line else {
-            break;
-        };
-        let Ok(event) = serde_json::from_str::<Event>(&line) else {
-            continue;
-        };
-        match event.kind {
+    }
+    (log.summary, log.leaked)
+}
+
+/// What is known of the network log so far.
+struct NetworkLog<'a> {
+    tokens: &'a [Token],
+    summary: NetworkSummary,
+    leaked: Vec<Leak>,
+}
+
+impl NetworkLog<'_> {
+    fn record(&mut self, kind: EventKind) {
+        match kind {
             EventKind::Dns { name, .. } => {
-                leak(name.as_bytes(), &name);
-                if !summary.dns.contains(&name) && summary.dns.len() < MAX_LISTED {
-                    summary.dns.push(name);
+                self.leak(name.as_bytes(), &name);
+                if !self.summary.dns.contains(&name) && self.summary.dns.len() < MAX_LISTED {
+                    self.summary.dns.push(name);
                 }
             }
             EventKind::Tcp {
@@ -222,48 +224,66 @@ fn analyze_network(
                 inner,
                 decrypted,
             } => {
-                // Every name resolves to the sink, so the name the guest
-                // asked for says more than the address.
-                let via = match &sniffed {
-                    Sniffed::Http {
-                        host: Some(host), ..
-                    } => format!("http://{host}"),
-                    Sniffed::Tls { sni: Some(sni) } => format!("tls://{sni}"),
-                    _ => dst.clone(),
-                };
-                leak(&unhex(&data).unwrap_or_default(), &via);
+                let via = route(&dst, &sniffed);
+                self.leak(&unhex(&data).unwrap_or_default(), &via);
                 if let Some(plain) = decrypted.as_deref().and_then(unhex) {
-                    leak(&plain, &via.replacen("tls://", "https://", 1));
+                    self.leak(&plain, &via.replacen("tls://", "https://", 1));
                 }
-                if summary.connections.len() < MAX_LISTED {
-                    summary.connections.push(Connection {
+                if self.summary.connections.len() < MAX_LISTED {
+                    let connection = Connection {
                         dst,
                         sniffed,
                         bytes,
                         inner,
-                    });
+                    };
+                    self.summary.connections.push(connection);
                 }
             }
             EventKind::Udp { data, .. } => {
-                leak(&unhex(&data).unwrap_or_default(), "udp");
-                summary.udp_datagrams = summary.udp_datagrams.saturating_add(1);
+                self.leak(&unhex(&data).unwrap_or_default(), "udp");
+                self.summary.udp_datagrams = self.summary.udp_datagrams.saturating_add(1);
             }
-            EventKind::Packet {
-                summary: what,
-                data,
-                ..
-            } => {
-                leak(&unhex(&data).unwrap_or_default(), "packet");
-                if summary.packets.len() < MAX_LISTED {
-                    summary.packets.push(what);
+            EventKind::Packet { summary, data, .. } => {
+                self.leak(&unhex(&data).unwrap_or_default(), "packet");
+                if self.summary.packets.len() < MAX_LISTED {
+                    self.summary.packets.push(summary);
                 }
             }
-            EventKind::PacketLimit => summary.packets_truncated = true,
-            EventKind::Refused { .. } => summary.refused = summary.refused.saturating_add(1),
-            EventKind::Truncated => summary.truncated = true,
+            EventKind::PacketLimit => self.summary.packets_truncated = true,
+            EventKind::Refused { .. } => {
+                self.summary.refused = self.summary.refused.saturating_add(1);
+            }
+            EventKind::Truncated => self.summary.truncated = true,
         }
     }
-    (summary, leaked)
+
+    /// Notes the honeytokens in `haystack`, once per token and route.
+    fn leak(&mut self, haystack: &[u8], via: &str) {
+        for token in Honeytokens::found_in(self.tokens, haystack) {
+            let known = self
+                .leaked
+                .iter()
+                .any(|l| l.kind == token.kind && l.via == via);
+            if !known {
+                self.leaked.push(Leak {
+                    kind: token.kind.to_owned(),
+                    via: via.to_owned(),
+                });
+            }
+        }
+    }
+}
+
+/// Where a connection went. Every name resolves to the sink, so the name
+/// the guest asked for says more than the address.
+fn route(dst: &str, sniffed: &Sniffed) -> String {
+    match sniffed {
+        Sniffed::Http {
+            host: Some(host), ..
+        } => format!("http://{host}"),
+        Sniffed::Tls { sni: Some(sni) } => format!("tls://{sni}"),
+        _ => dst.to_owned(),
+    }
 }
 
 fn tail(bytes: &[u8]) -> String {
@@ -362,50 +382,42 @@ impl SandboxWorker {
         if quarantined {
             return Ok(());
         }
-        for canary in crate::canary::ALL {
-            let setup = &self.sandbox.setup;
-            let files = JobFiles {
-                payload: setup.work_dir.join(format!("{}.payload", canary.name)),
-                scratch: setup.work_dir.join(format!("{}.scratch", canary.name)),
-                network: setup.work_dir.join(format!("{}.network", canary.name)),
-                warm: setup.warm.clone(),
-                warm_placeholder: setup.warm_placeholder.clone(),
-            };
-            let result = async {
-                let spec = canary
-                    .payload(&self.sandbox.blobs)
-                    .map_err(Failure::infrastructure)?;
-                let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
-                let plan = RunPlan::check(setup.check_timeout);
-                self.sandbox.execute(0, spec, &tokens, &files, &plan).await
-            }
-            .await;
-            for file in [&files.payload, &files.scratch, &files.network] {
-                let _ = std::fs::remove_file(file);
-            }
-            let (passed, detail) = match result {
-                Ok(report) => {
-                    let problems = canary.check(&report);
-                    let detail = serde_json::json!({
-                        "problems": problems,
-                        "outcome": report.outcome,
-                        "run_ms": report.run_ms,
-                    });
-                    (problems.is_empty(), detail)
-                }
+        for canary in &crate::canary::ALL {
+            let report = match self.run_canary(canary).await {
+                Ok(report) => report,
                 // The run itself failed: that says nothing about verdicts,
-                // so it is recorded but not counted as a wrong result.
+                // so it is logged but not counted as a wrong result.
                 Err(failure) => {
                     tracing::warn!(canary = canary.name, %failure, "canary run failed");
                     continue;
                 }
             };
+            let problems = canary.check(&report);
+            let passed = problems.is_empty();
+            let detail = serde_json::json!({
+                "problems": problems,
+                "outcome": report.outcome,
+                "run_ms": report.run_ms,
+            });
             tracing::info!(canary = canary.name, passed, %detail, "canary finished");
             self.store
                 .record_canary(canary.name, passed, &detail)
                 .await?;
         }
         Ok(())
+    }
+
+    async fn run_canary(&self, canary: &Canary) -> Result<RunReport, Failure> {
+        let setup = &self.sandbox.setup;
+        let spec = canary
+            .payload(&self.sandbox.blobs)
+            .map_err(Failure::infrastructure)?;
+        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let plan = RunPlan::check(setup.check_timeout);
+        let files = JobFiles::named(setup, canary.name);
+        let result = self.sandbox.execute(0, spec, &tokens, &files, &plan).await;
+        files.remove();
+        result
     }
 
     /// Claims and runs one job. Returns `false` when there was none.
@@ -421,15 +433,19 @@ impl SandboxWorker {
         else {
             return Ok(false);
         };
-        let worker = self.worker.clone();
-        let policies = self.policies.clone();
         self.store
-            .complete(job.id, &worker, JobEvent::SandboxStarted, &policies, true)
+            .complete(
+                job.id,
+                &self.worker,
+                JobEvent::SandboxStarted,
+                &self.policies,
+                true,
+            )
             .await?;
         let beat = heartbeat(
             Arc::clone(&self.heartbeats),
             job.id,
-            worker.clone(),
+            self.worker.clone(),
             self.lease,
             self.lease / 4,
         );
@@ -450,57 +466,72 @@ impl SandboxWorker {
             }
             Err(failure) => {
                 tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, %failure, "run failed");
-                if let Some(escalation) = &failure.escalation {
-                    self.store.raise_alert(escalation).await?;
-                    // A KVM error stops the stage at once; the supervisor
-                    // probes again after the cooldown.
-                    if *escalation == HumanEscalation::KvmError {
-                        let now = self.store.now_epoch().await?;
-                        self.store
-                            .set_breaker(
-                                Stage::Sandbox,
-                                BreakerState::Open {
-                                    since: now,
-                                    reopened: 0,
-                                },
-                            )
-                            .await?;
-                    }
-                }
+                self.escalate(&failure).await?;
                 JobEvent::StageFailed {
                     class: failure.class,
                 }
             }
         };
         self.store
-            .complete(job.id, &worker, event, &policies, false)
+            .complete(job.id, &self.worker, event, &self.policies, false)
             .await?;
         Ok(true)
     }
 
-    async fn run(&self, job: &StoredJob) -> Result<RunReport, Failure> {
-        let work = &self.sandbox.setup.work_dir;
-        let payload = work.join(format!("job-{}.payload", job.id.0));
-        let scratch = work.join(format!("job-{}.scratch", job.id.0));
-        let network = work.join(format!("job-{}.network", job.id.0));
-        let result = self.run_with(job, &payload, &scratch, &network).await;
-        for file in [&payload, &scratch, &network] {
-            if let Err(error) = std::fs::remove_file(file)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                tracing::warn!(file = %file.display(), %error, "cannot remove a job file");
-            }
+    /// Raises the alert a failure asks for. A KVM error also stops the stage
+    /// at once; the supervisor probes again after the cooldown.
+    async fn escalate(&mut self, failure: &Failure) -> Result<(), StoreError> {
+        let Some(escalation) = &failure.escalation else {
+            return Ok(());
+        };
+        self.store.raise_alert(escalation).await?;
+        if *escalation == HumanEscalation::KvmError {
+            let since = self.store.now_epoch().await?;
+            let open = BreakerState::Open { since, reopened: 0 };
+            self.store.set_breaker(Stage::Sandbox, open).await?;
         }
+        Ok(())
+    }
+
+    async fn run(&self, job: &StoredJob) -> Result<RunReport, Failure> {
+        let files = JobFiles::named(&self.sandbox.setup, &format!("job-{}", job.id.0));
+        let result = self.run_with(job, &files).await;
+        files.remove();
         result
     }
 
-    async fn run_with(
-        &self,
-        job: &StoredJob,
-        payload: &Path,
-        scratch: &Path,
-        network: &Path,
-    ) -> Result<RunReport, Failure> {
+    async fn run_with(&self, job: &StoredJob, files: &JobFiles) -> Result<RunReport, Failure> {
+        let (spec, missing) = self.payload_spec(job).await?;
+        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        self.store
+            .record_honeytokens(job.id, &tokens.records())
+            .await?;
+        let setup = &self.sandbox.setup;
+        let plan = match job.job.run_kind {
+            RunKind::Check => RunPlan::check(setup.check_timeout),
+            RunKind::Full => RunPlan::full(setup.full_timeout),
+        };
+        let mut report = self
+            .sandbox
+            .execute(job.id.0, spec, &tokens, files, &plan)
+            .await?;
+        report.missing_packages = missing;
+        if !report.leaked.is_empty() {
+            tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, leaked = ?report.leaked, "honeytokens left the VM");
+        }
+        let value = serde_json::to_value(&report).map_err(Failure::infrastructure)?;
+        let outcome_name = serde_json::to_value(report.outcome)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        self.store
+            .record_run(job.id, job.job.run_kind.name(), &outcome_name, &value)
+            .await?;
+        Ok(report)
+    }
+
+    /// The payload of a job, and the locked crates it lacks.
+    async fn payload_spec(&self, job: &StoredJob) -> Result<(PayloadSpec, Vec<String>), Failure> {
         let name = CrateName::parse(&job.name).map_err(Failure::permanent)?;
         let version = semver::Version::parse(&job.version).map_err(Failure::permanent)?;
         let lockfile = self
@@ -508,6 +539,25 @@ impl SandboxWorker {
             .fetch_lockfile(job.id)
             .await?
             .ok_or_else(|| Failure::permanent("the job has no lockfile"))?;
+        let (packages, missing) = self.stored_packages(job).await?;
+        let spec = PayloadSpec {
+            name,
+            version,
+            lockfile,
+            packages,
+            extra_probes: Vec::new(),
+            files: Vec::new(),
+            stubs: Vec::new(),
+        };
+        Ok((spec, missing))
+    }
+
+    /// The locked packages of a job whose crate files are stored, and the
+    /// names of those whose files are not.
+    async fn stored_packages(
+        &self,
+        job: &StoredJob,
+    ) -> Result<(Vec<Package>, Vec<String>), StoreError> {
         let locked: Vec<Locked> = self
             .store
             .fetch_packages(job.id)
@@ -531,49 +581,7 @@ impl SandboxWorker {
                 None => missing.push(format!("{} {}", p.name, p.version)),
             }
         }
-        let spec = PayloadSpec {
-            name,
-            version,
-            lockfile,
-            packages,
-            extra_probes: Vec::new(),
-            files: Vec::new(),
-            stubs: Vec::new(),
-        };
-        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
-        self.store
-            .record_honeytokens(job.id, &tokens.records())
-            .await?;
-        let files = JobFiles {
-            payload: payload.to_path_buf(),
-            scratch: scratch.to_path_buf(),
-            network: network.to_path_buf(),
-            warm: self.sandbox.setup.warm.clone(),
-            warm_placeholder: self.sandbox.setup.warm_placeholder.clone(),
-        };
-        let setup = &self.sandbox.setup;
-        let plan = match job.job.run_kind {
-            RunKind::Check => RunPlan::check(setup.check_timeout),
-            RunKind::Full => RunPlan::full(setup.full_timeout),
-        };
-        let mut report = self
-            .sandbox
-            .execute(job.id.0, spec, &tokens, &files, &plan)
-            .await?;
-        report.missing_packages = missing;
-        if !report.leaked.is_empty() {
-            tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, leaked = ?report.leaked, "honeytokens left the VM");
-        }
-        let outcome = report.outcome;
-        let value = serde_json::to_value(&report).map_err(Failure::infrastructure)?;
-        let outcome_name = serde_json::to_value(outcome)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_owned))
-            .unwrap_or_default();
-        self.store
-            .record_run(job.id, job.job.run_kind.name(), &outcome_name, &value)
-            .await?;
-        Ok(report)
+        Ok((packages, missing))
     }
 }
 
@@ -590,6 +598,39 @@ pub struct JobFiles {
     pub warm: Option<PathBuf>,
     /// An empty file that stands in for the warm image when there is none.
     pub warm_placeholder: PathBuf,
+}
+
+impl JobFiles {
+    /// The files of the job or canary called `stem`, in the work directory.
+    #[must_use]
+    pub fn named(setup: &WorkerSetup, stem: &str) -> Self {
+        let file = |kind: &str| setup.work_dir.join(format!("{stem}.{kind}"));
+        Self {
+            payload: file("payload"),
+            scratch: file("scratch"),
+            network: file("network"),
+            warm: setup.warm.clone(),
+            warm_placeholder: setup.warm_placeholder.clone(),
+        }
+    }
+
+    /// Removes the payload, the scratch disk and the network log. A missing
+    /// file is fine; any other failure is logged.
+    pub fn remove(&self) {
+        for file in [&self.payload, &self.scratch, &self.network] {
+            if let Err(error) = remove_file(file) {
+                tracing::warn!(file = %file.display(), %error, "cannot remove a job file");
+            }
+        }
+    }
+}
+
+/// Removes a file. A missing one is fine.
+fn remove_file(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
 }
 
 /// What runs in the VM.
@@ -649,186 +690,189 @@ impl Sandbox {
         files: &JobFiles,
         plan: &RunPlan,
     ) -> Result<RunReport, Failure> {
+        let stats = self.prepare(spec, files).await?;
+        let input = job_input(job_id, tokens, files, plan, self.setup.scratch_mib);
+        let directories = input.workspace.directories.clone();
+        let run = self
+            .backend
+            .run_job(self.slot, input, plan.timeout + HOST_MARGIN)
+            .await
+            .map_err(Failure::infrastructure)?;
+        let ended = Ended::try_from(&run.end)?;
+        let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
+        let scratch = scan_scratch(&self.setup, files, &directories, tokens).await;
+        let tokens_on_disk = scratch.as_ref().map_or_else(Vec::new, |report| {
+            leaks(tokens, report.tokens_found.iter().cloned())
+        });
+        let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
+        let in_trace = ended.trace.find(&values).into_iter().take(MAX_LISTED);
+        let tokens_in_trace = leaks(tokens, in_trace);
+        Ok(RunReport {
+            scratch,
+            tokens_on_disk,
+            trace: ended.trace,
+            tokens_in_trace,
+            network,
+            leaked,
+            outcome: ended.outcome,
+            end: format!("{:?}", run.end).chars().take(64).collect(),
+            exit: ended.exit,
+            restore_ms: u64::try_from(run.restore.as_millis()).unwrap_or(u64::MAX),
+            run_ms: u64::try_from(run.run.as_millis()).unwrap_or(u64::MAX),
+            stdout_tail: tail(ended.stdout),
+            stderr_tail: tail(ended.stderr),
+            truncated: ended.truncated,
+            payload_files: stats.files,
+            payload_bytes: stats.bytes,
+            missing_packages: Vec::new(),
+        })
+    }
+
+    /// Builds the payload and the scratch disk, and clears the network log.
+    async fn prepare(&self, spec: PayloadSpec, files: &JobFiles) -> Result<PayloadStats, Failure> {
         // The fake internet appends to its log; one left from an earlier run
         // would mix that run's traffic into this one's.
-        match std::fs::remove_file(&files.network) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(Failure::infrastructure(error)),
-        }
+        remove_file(&files.network).map_err(Failure::infrastructure)?;
         let stats = build_payload(&self.setup, &self.blobs, spec, &files.payload).await?;
         make_scratch(self.setup.scratch_mib, &files.scratch).await?;
         crate::jail::acl::grant_user(&files.scratch, self.backend.slot_uid(self.slot))
             .map_err(Failure::infrastructure)?;
+        Ok(stats)
+    }
+}
 
-        let (mounts, mut directories) = job_mounts(files.warm.is_some());
-        directories.extend(tokens.directories.clone());
-        let workspace = Workspace {
-            mounts,
-            directories: directories.clone(),
-            files: tokens.files.clone(),
-        };
-        let mut env: Vec<(String, String)> = [
-            ("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            ("HOME", HOME),
-            ("USER", "builder"),
-            ("CARGO_HOME", "/work/home/.cargo"),
-            ("CARGO_TARGET_DIR", "/work/target"),
-            ("CARGO_TERM_COLOR", "never"),
-            ("LANG", "C.UTF-8"),
-        ]
+/// The environment every job starts with, before its honeytokens.
+const BASE_ENV: [(&str, &str); 7] = [
+    ("PATH", "/usr/local/bin:/usr/bin:/bin"),
+    ("HOME", HOME),
+    ("USER", "builder"),
+    ("CARGO_HOME", "/work/home/.cargo"),
+    ("CARGO_TARGET_DIR", "/work/target"),
+    ("CARGO_TERM_COLOR", "never"),
+    ("LANG", "C.UTF-8"),
+];
+
+/// What the agent runs and prepares for `plan`, with the honeytokens planted.
+fn job_input(
+    job_id: i64,
+    tokens: &Honeytokens,
+    files: &JobFiles,
+    plan: &RunPlan,
+    scratch_mib: u64,
+) -> JobInput {
+    let (mounts, mut directories) = job_mounts(files.warm.is_some());
+    directories.extend(tokens.directories.clone());
+    let env = BASE_ENV
         .iter()
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .chain(tokens.env.clone())
         .collect();
-        env.extend(tokens.env.clone());
-        let timeout = plan.timeout;
-        let input = JobInput {
-            spec: JobSpec {
-                job_id,
-                wall_clock: now(),
-                argv: plan.argv.clone(),
-                env,
-                cwd: plan.cwd.clone(),
-                timeout_secs: u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX),
-                output_limit: OUTPUT_LIMIT,
-            },
-            workspace,
-            drives: Some(JobDrives {
-                payload: files.payload.clone(),
-                scratch: files.scratch.clone(),
-                warm: files
-                    .warm
-                    .clone()
-                    .unwrap_or_else(|| files.warm_placeholder.clone()),
-            }),
-            network_log: Some(files.network.clone()),
-            scratch_mib: self.setup.scratch_mib,
-        };
-        let run = self
-            .backend
-            .run_job(self.slot, input, timeout + HOST_MARGIN)
-            .await
-            .map_err(Failure::infrastructure)?;
-        let (outcome, exit, stdout, stderr, truncated, trace) = match &run.end {
-            JobEnd::Finished(o) => {
-                let outcome = match o.exit {
+    JobInput {
+        spec: JobSpec {
+            job_id,
+            wall_clock: now(),
+            argv: plan.argv.clone(),
+            env,
+            cwd: plan.cwd.clone(),
+            timeout_secs: u32::try_from(plan.timeout.as_secs()).unwrap_or(u32::MAX),
+            output_limit: OUTPUT_LIMIT,
+        },
+        workspace: Workspace {
+            mounts,
+            directories,
+            files: tokens.files.clone(),
+        },
+        drives: Some(JobDrives {
+            payload: files.payload.clone(),
+            scratch: files.scratch.clone(),
+            warm: files
+                .warm
+                .clone()
+                .unwrap_or_else(|| files.warm_placeholder.clone()),
+        }),
+        network_log: Some(files.network.clone()),
+        scratch_mib,
+    }
+}
+
+/// What a run that ended in a result produced.
+#[derive(Debug)]
+struct Ended<'a> {
+    outcome: BuildOutcome,
+    exit: Option<ExitStatus>,
+    stdout: &'a [u8],
+    stderr: &'a [u8],
+    truncated: bool,
+    trace: TraceSummary,
+}
+
+impl Ended<'_> {
+    /// A run that ended without the agent's report.
+    fn silent(outcome: BuildOutcome) -> Self {
+        Self {
+            outcome,
+            exit: None,
+            stdout: &[],
+            stderr: &[],
+            truncated: false,
+            trace: TraceSummary::default(),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a JobEnd> for Ended<'a> {
+    type Error = Failure;
+
+    fn try_from(end: &'a JobEnd) -> Result<Self, Failure> {
+        match end {
+            JobEnd::Finished(o) => Ok(Self {
+                outcome: match o.exit {
                     ExitStatus::Code(0) => BuildOutcome::Succeeded,
                     ExitStatus::TimedOut => BuildOutcome::TimedOut,
                     ExitStatus::Code(_) | ExitStatus::Signal(_) => BuildOutcome::Failed,
-                };
-                (
-                    outcome,
-                    Some(o.exit),
-                    o.stdout.as_slice(),
-                    o.stderr.as_slice(),
-                    o.truncated,
-                    (*o.trace).clone(),
-                )
-            }
-            JobEnd::HostTimeout => (
-                BuildOutcome::TimedOut,
-                None,
-                &[][..],
-                &[][..],
-                false,
-                TraceSummary::default(),
-            ),
-            JobEnd::ResourceLimit => (
-                BuildOutcome::ResourceLimit,
-                None,
-                &[][..],
-                &[][..],
-                false,
-                TraceSummary::default(),
-            ),
+                },
+                exit: Some(o.exit),
+                stdout: &o.stdout,
+                stderr: &o.stderr,
+                truncated: o.truncated,
+                trace: (*o.trace).clone(),
+            }),
+            JobEnd::HostTimeout => Ok(Self::silent(BuildOutcome::TimedOut)),
+            JobEnd::ResourceLimit => Ok(Self::silent(BuildOutcome::ResourceLimit)),
             // Only guest code stops a guest: a result, never retried, so a crate
             // cannot trip the sandbox breaker by crashing its own VM.
-            JobEnd::GuestStopped(_) => (
-                BuildOutcome::GuestStopped,
-                None,
-                &[][..],
-                &[][..],
-                false,
-                TraceSummary::default(),
-            ),
+            JobEnd::GuestStopped(_) => Ok(Self::silent(BuildOutcome::GuestStopped)),
             JobEnd::VmmCrashed(reason) => {
-                return Err(Failure {
-                    class: FailureClass::SuspectedCompromise,
-                    message: format!("the VMM crashed: {reason}"),
-                    escalation: None,
-                });
+                Err(Failure::compromise(format!("the VMM crashed: {reason}")))
             }
-            JobEnd::DecoyTouched => {
-                return Err(Failure {
-                    class: FailureClass::SuspectedCompromise,
-                    message: "something read the decoy in the jail root".to_owned(),
-                    escalation: None,
-                });
-            }
-            JobEnd::KvmError(reason) => {
-                return Err(Failure {
-                    class: FailureClass::Infrastructure,
-                    message: format!("KVM error: {reason}"),
-                    escalation: Some(HumanEscalation::KvmError),
-                });
-            }
+            JobEnd::DecoyTouched => Err(Failure::compromise(
+                "something read the decoy in the jail root",
+            )),
+            JobEnd::KvmError(reason) => Err(Failure {
+                class: FailureClass::Infrastructure,
+                message: format!("KVM error: {reason}"),
+                escalation: Some(HumanEscalation::KvmError),
+            }),
             // A VM that died without a report and without a known reason: ours.
-            JobEnd::UnexpectedExit(reason) => {
-                return Err(Failure::infrastructure(format!(
-                    "the VM ended unexpectedly: {reason}"
-                )));
-            }
-        };
-        let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
-        let scratch = scan_scratch(&self.setup, files, &directories, tokens).await;
-        let tokens_on_disk = scratch
-            .as_ref()
-            .map(|report| {
-                report
-                    .tokens_found
-                    .iter()
-                    .filter_map(|(i, path)| {
-                        tokens.tokens.get(*i).map(|t| Leak {
-                            kind: t.kind.to_owned(),
-                            via: path.clone(),
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
-        let tokens_in_trace = trace
-            .find(&values)
-            .into_iter()
-            .filter_map(|(i, via)| {
-                tokens.tokens.get(i).map(|t| Leak {
-                    kind: t.kind.to_owned(),
-                    via,
-                })
-            })
-            .take(MAX_LISTED)
-            .collect();
-        let report = RunReport {
-            scratch,
-            tokens_on_disk,
-            trace,
-            tokens_in_trace,
-            network,
-            leaked,
-            outcome,
-            end: format!("{:?}", run.end).chars().take(64).collect(),
-            exit,
-            restore_ms: u64::try_from(run.restore.as_millis()).unwrap_or(u64::MAX),
-            run_ms: u64::try_from(run.run.as_millis()).unwrap_or(u64::MAX),
-            stdout_tail: tail(stdout),
-            stderr_tail: tail(stderr),
-            truncated,
-            payload_files: stats.files,
-            payload_bytes: stats.bytes,
-            missing_packages: Vec::new(),
-        };
-        Ok(report)
+            JobEnd::UnexpectedExit(reason) => Err(Failure::infrastructure(format!(
+                "the VM ended unexpectedly: {reason}"
+            ))),
+        }
     }
+}
+
+/// The tokens at the given indexes, each with where it was seen. Indexes
+/// that name no token are dropped.
+fn leaks(tokens: &Honeytokens, found: impl IntoIterator<Item = (usize, String)>) -> Vec<Leak> {
+    found
+        .into_iter()
+        .filter_map(|(i, via)| {
+            tokens.tokens.get(i).map(|t| Leak {
+                kind: t.kind.to_owned(),
+                via,
+            })
+        })
+        .collect()
 }
 
 /// Where the warm image is mounted in the guest, and the overlay's
@@ -980,5 +1024,398 @@ fn now() -> WallClock {
     WallClock {
         secs: since.as_secs(),
         nanos: since.subsec_nanos(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::firecracker::agent::RunOutcome;
+    use crateward_fake_internet::server::hex;
+
+    fn finished(exit: ExitStatus) -> JobEnd {
+        JobEnd::Finished(RunOutcome {
+            exit,
+            stdout: b"out".to_vec(),
+            stderr: b"err".to_vec(),
+            truncated: true,
+            trace: Box::default(),
+        })
+    }
+
+    fn setup(work_dir: PathBuf) -> WorkerSetup {
+        WorkerSetup {
+            exe: PathBuf::from("/nonexistent/exe"),
+            work_dir,
+            scratch_mib: 64,
+            check_timeout: Duration::from_secs(60),
+            full_timeout: Duration::from_secs(120),
+            warm: Some(PathBuf::from("/nonexistent/warm.erofs")),
+            warm_placeholder: PathBuf::from("/nonexistent/none"),
+        }
+    }
+
+    #[test]
+    fn a_finished_run_is_judged_by_its_exit_status() {
+        for (exit, outcome) in [
+            (ExitStatus::Code(0), BuildOutcome::Succeeded),
+            (ExitStatus::Code(101), BuildOutcome::Failed),
+            (ExitStatus::Signal(9), BuildOutcome::Failed),
+            (ExitStatus::TimedOut, BuildOutcome::TimedOut),
+        ] {
+            let end = finished(exit);
+            let ended = Ended::try_from(&end).unwrap();
+            assert_eq!(ended.outcome, outcome);
+            assert_eq!(ended.exit, Some(exit));
+            assert_eq!(ended.stdout, b"out");
+            assert_eq!(ended.stderr, b"err");
+            assert!(ended.truncated);
+        }
+    }
+
+    #[test]
+    fn runs_without_a_report_are_results_without_output() {
+        for (end, outcome) in [
+            (JobEnd::HostTimeout, BuildOutcome::TimedOut),
+            (JobEnd::ResourceLimit, BuildOutcome::ResourceLimit),
+            (
+                JobEnd::GuestStopped("panic".into()),
+                BuildOutcome::GuestStopped,
+            ),
+        ] {
+            let ended = Ended::try_from(&end).unwrap();
+            assert_eq!(ended.outcome, outcome);
+            assert_eq!(ended.exit, None);
+            assert!(ended.stdout.is_empty() && ended.stderr.is_empty());
+            assert!(!ended.truncated);
+        }
+    }
+
+    #[test]
+    fn a_crashed_vmm_or_a_touched_decoy_is_a_suspected_compromise() {
+        for (end, message) in [
+            (
+                JobEnd::VmmCrashed("SIGSYS".into()),
+                "the VMM crashed: SIGSYS",
+            ),
+            (
+                JobEnd::DecoyTouched,
+                "something read the decoy in the jail root",
+            ),
+        ] {
+            let failure = Ended::try_from(&end).unwrap_err();
+            assert_eq!(failure.class, FailureClass::SuspectedCompromise);
+            assert_eq!(failure.message, message);
+            assert_eq!(failure.escalation, None);
+        }
+    }
+
+    #[test]
+    fn a_kvm_error_is_ours_and_raises_an_alert() {
+        let failure = Ended::try_from(&JobEnd::KvmError("no /dev/kvm".into())).unwrap_err();
+        assert_eq!(failure.class, FailureClass::Infrastructure);
+        assert_eq!(failure.message, "KVM error: no /dev/kvm");
+        assert_eq!(failure.escalation, Some(HumanEscalation::KvmError));
+    }
+
+    #[test]
+    fn a_vm_that_vanished_without_a_reason_is_ours() {
+        let failure = Ended::try_from(&JobEnd::UnexpectedExit("exit 3".into())).unwrap_err();
+        assert_eq!(failure.class, FailureClass::Infrastructure);
+        assert_eq!(failure.message, "the VM ended unexpectedly: exit 3");
+        assert_eq!(failure.escalation, None);
+    }
+
+    #[test]
+    fn job_files_live_in_the_work_directory_and_can_be_removed() {
+        let dir = std::env::temp_dir().join(format!("cw-jobfiles-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let setup = setup(dir.clone());
+        let files = JobFiles::named(&setup, "job-7");
+        assert_eq!(files.payload, dir.join("job-7.payload"));
+        assert_eq!(files.scratch, dir.join("job-7.scratch"));
+        assert_eq!(files.network, dir.join("job-7.network"));
+        assert_eq!(files.warm, setup.warm);
+        assert_eq!(files.warm_placeholder, setup.warm_placeholder);
+        std::fs::write(&files.payload, b"x").unwrap();
+        std::fs::write(&files.network, b"x").unwrap();
+        files.remove();
+        assert!(!files.payload.exists() && !files.scratch.exists() && !files.network.exists());
+        // Nothing is left to remove the second time, which is fine.
+        files.remove();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_job_input_carries_the_plan_the_tokens_and_the_drives() {
+        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let plan = RunPlan::check(Duration::from_secs(90));
+        let mut files = JobFiles::named(&setup(PathBuf::from("/work")), "job-1");
+        files.warm = None;
+        let input = job_input(7, &tokens, &files, &plan, 512);
+        assert_eq!(input.spec.job_id, 7);
+        assert_eq!(input.spec.argv, plan.argv);
+        assert_eq!(input.spec.cwd, PROBE_DIR);
+        assert_eq!(input.spec.timeout_secs, 90);
+        assert_eq!(input.spec.output_limit, OUTPUT_LIMIT);
+        let (base, planted) = input.spec.env.split_at(BASE_ENV.len());
+        assert_eq!(
+            base.first(),
+            Some(&("PATH".to_owned(), "/usr/local/bin:/usr/bin:/bin".to_owned()))
+        );
+        assert_eq!(planted, tokens.env);
+        assert_eq!(input.workspace.mounts, job_mounts(false).0);
+        assert_eq!(
+            input.workspace.directories,
+            [job_mounts(false).1, tokens.directories.clone()].concat()
+        );
+        assert_eq!(input.workspace.files, tokens.files);
+        let drives = input.drives.unwrap();
+        assert_eq!(drives.payload, files.payload);
+        assert_eq!(drives.scratch, files.scratch);
+        assert_eq!(drives.warm, files.warm_placeholder);
+        assert_eq!(input.network_log, Some(files.network));
+        assert_eq!(input.scratch_mib, 512);
+    }
+
+    #[test]
+    fn a_warm_image_is_mounted_and_replaces_the_placeholder() {
+        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let plan = RunPlan::full(Duration::from_secs(3600));
+        let files = JobFiles::named(&setup(PathBuf::from("/work")), "job-1");
+        let input = job_input(1, &tokens, &files, &plan, 512);
+        assert_eq!(input.spec.argv[1], "build");
+        assert_eq!(input.spec.timeout_secs, 3600);
+        assert_eq!(input.workspace.mounts, job_mounts(true).0);
+        assert_eq!(input.drives.unwrap().warm, files.warm.unwrap());
+    }
+
+    fn network_log(name: &str, contents: &[u8]) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("cw-netlog-{}-{name}", std::process::id()));
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    fn line(kind: EventKind) -> String {
+        serde_json::to_string(&Event { ms: 0, kind }).unwrap()
+    }
+
+    fn tcp(dst: &str, sniffed: Sniffed, data: &str, decrypted: Option<&str>) -> EventKind {
+        EventKind::Tcp {
+            dst: dst.into(),
+            sniffed,
+            bytes: 10,
+            data: hex(data.as_bytes()),
+            inner: None,
+            decrypted: decrypted.map(|text| hex(text.as_bytes())),
+        }
+    }
+
+    fn connection(dst: &str, sniffed: Sniffed) -> Connection {
+        Connection {
+            dst: dst.into(),
+            sniffed,
+            bytes: 10,
+            inner: None,
+        }
+    }
+
+    fn http(host: Option<&str>) -> Sniffed {
+        Sniffed::Http {
+            method: "GET".into(),
+            target: "/".into(),
+            host: host.map(Into::into),
+            user_agent: None,
+        }
+    }
+
+    fn tokens() -> Vec<Token> {
+        vec![
+            Token {
+                kind: "cargo_registry_token",
+                value: "cioSECRET".into(),
+            },
+            Token {
+                kind: "ssh_key",
+                value: "ssh-SECRET".into(),
+            },
+        ]
+    }
+
+    fn leak(kind: &str, via: &str) -> Leak {
+        Leak {
+            kind: kind.into(),
+            via: via.into(),
+        }
+    }
+
+    #[test]
+    fn the_network_log_becomes_a_summary_and_leaks() {
+        let dns = |name: &str, qtype| EventKind::Dns {
+            name: name.into(),
+            qtype,
+        };
+        let tls = |sni: Option<&str>| Sniffed::Tls {
+            sni: sni.map(Into::into),
+        };
+        let lines: Vec<String> = [
+            dns("a.example", 1),
+            dns("a.example", 28),
+            dns("cioSECRET.evil.example", 1),
+            tcp(
+                "10.0.2.1:8080",
+                http(Some("h.example")),
+                "x cioSECRET x",
+                None,
+            ),
+            tcp(
+                "10.0.2.1:8080",
+                http(Some("h.example")),
+                "x cioSECRET x",
+                None,
+            ),
+            tcp(
+                "10.0.2.1:443",
+                tls(Some("t.example")),
+                "ssh-SECRET",
+                Some("cioSECRET"),
+            ),
+            tcp("1.2.3.4:80", Sniffed::Unknown, "cioSECRET", None),
+            tcp("5.6.7.8:80", http(None), "cioSECRET", None),
+            tcp("9.9.9.9:443", tls(None), "no token", None),
+            EventKind::Udp {
+                bytes: 10,
+                data: hex(b"ssh-SECRET"),
+            },
+            EventKind::Packet {
+                summary: "icmp echo".into(),
+                bytes: 10,
+                data: hex(b"cioSECRET"),
+            },
+            EventKind::PacketLimit,
+            EventKind::Refused { dst: "a".into() },
+            EventKind::Refused { dst: "b".into() },
+            EventKind::Truncated,
+        ]
+        .into_iter()
+        .map(line)
+        .collect();
+        let path = network_log("summary", lines.join("\n").as_bytes());
+        let (summary, leaked) = analyze_network(&path, &tokens());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(summary.dns, ["a.example", "cioSECRET.evil.example"]);
+        assert_eq!(
+            summary.connections,
+            [
+                connection("10.0.2.1:8080", http(Some("h.example"))),
+                connection("10.0.2.1:8080", http(Some("h.example"))),
+                connection("10.0.2.1:443", tls(Some("t.example"))),
+                connection("1.2.3.4:80", Sniffed::Unknown),
+                connection("5.6.7.8:80", http(None)),
+                connection("9.9.9.9:443", tls(None)),
+            ]
+        );
+        assert_eq!(summary.udp_datagrams, 1);
+        assert_eq!(summary.refused, 2);
+        assert_eq!(summary.packets, ["icmp echo"]);
+        assert!(summary.packets_truncated && summary.truncated);
+        // A token is named once per route, however often it is seen.
+        assert_eq!(
+            leaked,
+            [
+                leak("cargo_registry_token", "cioSECRET.evil.example"),
+                leak("cargo_registry_token", "http://h.example"),
+                leak("ssh_key", "tls://t.example"),
+                leak("cargo_registry_token", "https://t.example"),
+                leak("cargo_registry_token", "1.2.3.4:80"),
+                leak("cargo_registry_token", "5.6.7.8:80"),
+                leak("ssh_key", "udp"),
+                leak("cargo_registry_token", "packet"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_lists_of_the_network_summary_are_bounded() {
+        let lines: Vec<String> = (0..MAX_LISTED + 50)
+            .flat_map(|i| {
+                [
+                    EventKind::Dns {
+                        name: format!("{i}.example"),
+                        qtype: 1,
+                    },
+                    tcp("1.2.3.4:80", Sniffed::Unknown, "", None),
+                    EventKind::Packet {
+                        summary: format!("packet {i}"),
+                        bytes: 1,
+                        data: String::new(),
+                    },
+                ]
+            })
+            .map(line)
+            .collect();
+        let path = network_log("bounded", lines.join("\n").as_bytes());
+        let (summary, leaked) = analyze_network(&path, &tokens());
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(summary.dns.len(), MAX_LISTED);
+        assert_eq!(summary.connections.len(), MAX_LISTED);
+        assert_eq!(summary.packets.len(), MAX_LISTED);
+        assert_eq!(
+            summary.dns.last().unwrap(),
+            &format!("{}.example", MAX_LISTED - 1)
+        );
+        assert!(leaked.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_network_log_ends_the_summary() {
+        let read = |name: &str, contents: &[u8]| {
+            let path = network_log(name, contents);
+            let (summary, _) = analyze_network(&path, &tokens());
+            std::fs::remove_file(&path).unwrap();
+            summary
+        };
+        let dns = |name: &str| {
+            line(EventKind::Dns {
+                name: name.into(),
+                qtype: 1,
+            })
+        };
+        // A line that is no event is skipped.
+        let skipped = read(
+            "skipped",
+            format!("{}\nnot json\n{}\n", dns("a"), dns("b")).as_bytes(),
+        );
+        assert_eq!(skipped.dns, ["a", "b"]);
+        // A line that is no text ends the reading.
+        let mut bytes = format!("{}\n", dns("a")).into_bytes();
+        bytes.extend_from_slice(b"\xff\xfe\n");
+        bytes.extend_from_slice(dns("b").as_bytes());
+        assert_eq!(read("binary", &bytes).dns, ["a"]);
+        // A missing log is an empty summary.
+        let missing = std::env::temp_dir().join("cw-netlog-missing");
+        assert_eq!(
+            analyze_network(&missing, &tokens()).0,
+            NetworkSummary::default()
+        );
+    }
+
+    #[test]
+    fn leaks_name_the_token_and_where_it_was_seen() {
+        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let found = leaks(
+            &tokens,
+            [
+                (1, "tls://x.example".to_owned()),
+                (usize::MAX, "nowhere".to_owned()),
+            ],
+        );
+        assert_eq!(
+            found,
+            [Leak {
+                kind: tokens.tokens[1].kind.to_owned(),
+                via: "tls://x.example".to_owned(),
+            }]
+        );
     }
 }

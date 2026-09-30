@@ -172,6 +172,33 @@ fn push<T>(list: &mut Vec<T>, omitted: &mut u64, item: T) {
     }
 }
 
+/// Whether a path is below one of the build areas (or is one).
+fn in_build_area(relative: &str) -> bool {
+    BUILD_AREAS.iter().any(|area| relative.starts_with(area))
+        || matches!(relative, "/target" | "/.warm")
+}
+
+/// Whether a path is cargo's own state in `CARGO_HOME`.
+fn is_cargo_state(relative: &str) -> bool {
+    CARGO_STATE_PREFIXES.iter().any(|p| relative.starts_with(p))
+        || CARGO_STATE_PATHS.contains(&relative)
+}
+
+/// The file name of a compiled unit, if the path is one.
+fn unit_name(relative: &str) -> Option<&str> {
+    let name = relative
+        .strip_prefix("/target/debug/deps/")
+        .or_else(|| relative.strip_prefix("/.warm/upper/debug/deps/"))?;
+    let unit = !name.contains('/') && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e));
+    unit.then_some(name)
+}
+
+/// Whether a link points out of the scratch disk: to an absolute path
+/// elsewhere or up with `..`.
+fn leaves_scratch(target: &str) -> bool {
+    (target.starts_with('/') && !target.starts_with(MOUNT_POINT)) || target.contains("..")
+}
+
 struct Scanner<'a> {
     fs: &'a Ext4,
     spec: &'a ScanSpec,
@@ -226,6 +253,29 @@ impl Scanner<'_> {
         Ok(elf)
     }
 
+    /// The entry as the report lists it. Reads the target of a symbolic link.
+    fn describe(
+        &self,
+        child: &ExtPath,
+        relative: &str,
+        meta: &Metadata,
+    ) -> Result<Entry, Ext4Error> {
+        let file_type = meta.file_type();
+        let target = if file_type == FileType::Symlink {
+            Some(render(self.fs.read_link(child.as_path())?.as_ref()))
+        } else {
+            None
+        };
+        Ok(Entry {
+            path: format!("{MOUNT_POINT}{relative}"),
+            kind: kind(file_type).into(),
+            size: meta.len(),
+            mode: meta.mode(),
+            uid: meta.uid(),
+            target,
+        })
+    }
+
     fn visit(&mut self, path: &ExtPath, depth: usize) -> Result<(), Ext4Error> {
         if depth > MAX_DEPTH {
             self.report.incomplete = true;
@@ -233,8 +283,7 @@ impl Scanner<'_> {
         }
         for entry in self.fs.read_dir(path.as_path())? {
             let entry = entry?;
-            let name = entry.file_name();
-            if matches!(name.as_ref(), b"." | b"..") {
+            if matches!(entry.file_name().as_ref(), b"." | b"..") {
                 continue;
             }
             self.entries += 1;
@@ -244,33 +293,15 @@ impl Scanner<'_> {
             }
             let child = entry.path();
             let relative = render(child.as_ref());
-            let guest = format!("{MOUNT_POINT}{relative}");
             let meta = entry.metadata()?;
             let file_type = meta.file_type();
-            let target = if file_type == FileType::Symlink {
-                Some(render(self.fs.read_link(child.as_path())?.as_ref()))
-            } else {
-                None
-            };
-            let item = Entry {
-                path: guest.clone(),
-                kind: kind(file_type).into(),
-                size: meta.len(),
-                mode: meta.mode(),
-                uid: meta.uid(),
-                target: target.clone(),
-            };
-            let in_build = BUILD_AREAS
-                .iter()
-                .any(|area| relative.starts_with(area) || format!("{relative}/") == *area)
-                || relative == "/target"
-                || relative == "/.warm";
-            let cargo_state = CARGO_STATE_PREFIXES.iter().any(|p| relative.starts_with(p))
-                || CARGO_STATE_PATHS.contains(&relative.as_str());
-            let planted = self.spec.planted.contains(&guest);
-            let created = self.spec.created.contains(&guest);
+            let item = self.describe(&child, &relative, &meta)?;
+            let planted = self.spec.planted.contains(&item.path);
+            let created = self.spec.created.contains(&item.path);
+            let stray =
+                !(in_build_area(&relative) || is_cargo_state(&relative) || planted || created);
             let r = &mut self.report;
-            if !(in_build || cargo_state || planted || created) {
+            if stray {
                 push(&mut r.outside_build, &mut r.omitted, item.clone());
             }
             if item.mode & 0o6000 != 0 && file_type != FileType::Directory {
@@ -283,40 +314,9 @@ impl Scanner<'_> {
                         self.visit(&child, depth + 1)?;
                     }
                 }
-                FileType::Regular => {
-                    r.files += 1;
-                    if let Some(name) = relative
-                        .strip_prefix("/target/debug/deps/")
-                        .or_else(|| relative.strip_prefix("/.warm/upper/debug/deps/"))
-                        && !name.contains('/')
-                        && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e))
-                    {
-                        if r.units.len() < MAX_UNITS {
-                            r.units.push(name.to_owned());
-                        } else {
-                            r.omitted += 1;
-                        }
-                    }
-                    r.bytes = r.bytes.saturating_add(item.size);
-                    let elf = if planted {
-                        false
-                    } else {
-                        self.search(&child, &guest)?
-                    };
-                    let executable = item.mode & 0o111 != 0 || elf;
-                    if executable
-                        && !relative.starts_with("/target/")
-                        && !relative.starts_with("/.warm/upper/")
-                    {
-                        let r = &mut self.report;
-                        push(&mut r.executables_outside_target, &mut r.omitted, item);
-                    }
-                }
+                FileType::Regular => self.regular(&child, &relative, item, planted)?,
                 FileType::Symlink => {
-                    let outside = target.as_deref().is_some_and(|t| {
-                        (t.starts_with('/') && !t.starts_with(MOUNT_POINT)) || t.contains("..")
-                    });
-                    if outside {
+                    if item.target.as_deref().is_some_and(leaves_scratch) {
                         push(&mut r.links_outside, &mut r.omitted, item);
                     }
                 }
@@ -326,6 +326,36 @@ impl Scanner<'_> {
                 FileType::CharacterDevice if relative.starts_with("/.warm/") => {}
                 _ => push(&mut r.special, &mut r.omitted, item),
             }
+        }
+        Ok(())
+    }
+
+    /// Counts a regular file: its unit, its size and, unless the agent
+    /// planted it, its contents. Lists it if it is an executable outside the
+    /// target directory.
+    fn regular(
+        &mut self,
+        child: &ExtPath,
+        relative: &str,
+        item: Entry,
+        planted: bool,
+    ) -> Result<(), Ext4Error> {
+        let r = &mut self.report;
+        r.files += 1;
+        if let Some(unit) = unit_name(relative) {
+            if r.units.len() < MAX_UNITS {
+                r.units.push(unit.to_owned());
+            } else {
+                r.omitted += 1;
+            }
+        }
+        r.bytes = r.bytes.saturating_add(item.size);
+        let elf = !planted && self.search(child, &item.path)?;
+        let executable = item.mode & 0o111 != 0 || elf;
+        if executable && !relative.starts_with("/target/") && !relative.starts_with("/.warm/upper/")
+        {
+            let r = &mut self.report;
+            push(&mut r.executables_outside_target, &mut r.omitted, item);
         }
         Ok(())
     }
@@ -680,6 +710,19 @@ mod tests {
     /// orchestrator formats scratch disks with the same tool.
     fn image(files: &[(&str, &[u8], u32)]) -> Option<Vec<u8>> {
         use std::os::unix::fs::PermissionsExt;
+        build_image(|root| {
+            for (path, data, mode) in files {
+                let full = root.join(path.trim_start_matches('/'));
+                std::fs::create_dir_all(full.parent().unwrap_or(root))?;
+                std::fs::write(&full, data)?;
+                std::fs::set_permissions(&full, std::fs::Permissions::from_mode(*mode))?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Builds an ext4 image of what `populate` puts below the root.
+    fn build_image(populate: impl FnOnce(&Path) -> io::Result<()>) -> Option<Vec<u8>> {
         let dir = std::env::temp_dir().join(format!(
             "cw-scratch-{}-{}",
             std::process::id(),
@@ -688,12 +731,7 @@ mod tests {
         let root = dir.join("root");
         std::fs::create_dir_all(root.join("target/debug")).ok()?;
         std::fs::create_dir_all(root.join("home/.cargo")).ok()?;
-        for (path, data, mode) in files {
-            let full = root.join(path.trim_start_matches('/'));
-            std::fs::create_dir_all(full.parent()?).ok()?;
-            std::fs::write(&full, data).ok()?;
-            std::fs::set_permissions(&full, std::fs::Permissions::from_mode(*mode)).ok()?;
-        }
+        populate(&root).ok()?;
         let out = dir.join("scratch.img");
         let status = Command::new("/usr/sbin/mkfs.ext4")
             .args(["-q", "-F", "-d"])
@@ -777,6 +815,167 @@ mod tests {
         assert!(report.planted_changed.is_empty());
         assert!(report.files >= 7);
         assert_eq!(report.units, ["libx-0123abcd.rmeta"]);
+    }
+
+    fn mkfifo(path: &Path) -> io::Result<()> {
+        let status = Command::new("mkfifo").arg(path).status()?;
+        status
+            .success()
+            .then_some(())
+            .ok_or_else(|| io::Error::other("mkfifo failed"))
+    }
+
+    fn paths(entries: &[Entry]) -> Vec<&str> {
+        let mut paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+        paths.sort_unstable();
+        paths
+    }
+
+    #[test]
+    fn sorts_what_a_job_left_into_the_lists_of_the_report() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        use std::os::unix::net::UnixListener;
+        let Some(data) = build_image(|root| {
+            let write = |path: &str, mode: u32| {
+                let path = root.join(path);
+                std::fs::create_dir_all(path.parent().unwrap_or(root))?;
+                std::fs::write(&path, b"data")?;
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            };
+            write("home/.local/su", 0o4755)?;
+            write(".warm/upper/debug/deps/libw-0123456789abcdef.rlib", 0o755)?;
+            write(".warm/other/tool", 0o755)?;
+            write("target/debug/deps/z.so", 0o644)?;
+            write("target/debug/deps/z.d", 0o644)?;
+            write("target/debug/deps/sub/libq.rlib", 0o644)?;
+            let local = root.join("home/.local");
+            std::fs::create_dir(local.join("sgdir"))?;
+            std::fs::set_permissions(local.join("sgdir"), std::fs::Permissions::from_mode(0o2755))?;
+            symlink("/etc/passwd", local.join("abs"))?;
+            symlink("../../etc", local.join("up"))?;
+            symlink("/work/target/debug/x", local.join("in"))?;
+            symlink("notes", local.join("rel"))?;
+            symlink("/etc/shadow", root.join("target/debug/link"))?;
+            mkfifo(&local.join("pipe"))?;
+            mkfifo(&root.join("target/debug/fifo"))?;
+            UnixListener::bind(local.join("sock"))?;
+            Ok(())
+        }) else {
+            eprintln!("skipping: mkfs.ext4 is not available");
+            return;
+        };
+        let fs = Ext4::load(Box::new(data)).unwrap();
+        let report = scan(&fs, &spec());
+        assert_eq!(report.error, None);
+        assert!(!report.incomplete);
+        assert_eq!(
+            paths(&report.outside_build),
+            [
+                "/work/home/.local",
+                "/work/home/.local/abs",
+                "/work/home/.local/in",
+                "/work/home/.local/pipe",
+                "/work/home/.local/rel",
+                "/work/home/.local/sgdir",
+                "/work/home/.local/sock",
+                "/work/home/.local/su",
+                "/work/home/.local/up",
+            ]
+        );
+        assert_eq!(paths(&report.setid), ["/work/home/.local/su"]);
+        assert_eq!(
+            paths(&report.special),
+            [
+                "/work/home/.local/pipe",
+                "/work/home/.local/sock",
+                "/work/target/debug/fifo",
+            ]
+        );
+        assert_eq!(
+            paths(&report.links_outside),
+            [
+                "/work/home/.local/abs",
+                "/work/home/.local/up",
+                "/work/target/debug/link",
+            ]
+        );
+        assert_eq!(
+            paths(&report.executables_outside_target),
+            ["/work/.warm/other/tool", "/work/home/.local/su"]
+        );
+        let mut units = report.units.clone();
+        units.sort_unstable();
+        assert_eq!(units, ["libw-0123456789abcdef.rlib", "z.so"]);
+        assert_eq!(
+            (report.files, report.bytes, report.directories),
+            (6, 24, 14)
+        );
+        assert_eq!(report.omitted, 0);
+        assert_eq!(
+            report.planted_changed,
+            ["/work/home/.cargo/credentials.toml"]
+        );
+        let link = report
+            .links_outside
+            .iter()
+            .find(|e| e.path.ends_with("/abs"));
+        let link = link.unwrap();
+        assert_eq!(
+            (link.kind.as_str(), link.target.as_deref()),
+            ("symlink", Some("/etc/passwd"))
+        );
+        let su = report.setid.first().unwrap();
+        assert_eq!(
+            (su.kind.as_str(), su.mode & 0o7777, su.size),
+            ("file", 0o4755, 4)
+        );
+    }
+
+    #[test]
+    fn paths_tell_what_they_belong_to() {
+        for build in [
+            "/target",
+            "/target/debug/x",
+            "/.warm",
+            "/.warm/upper/x",
+            "/lost+found",
+        ] {
+            assert!(in_build_area(build), "{build}");
+        }
+        for other in ["/targets", "/home/target", "/.warmer", "/home/.cargo", "/"] {
+            assert!(!in_build_area(other), "{other}");
+        }
+        assert!(is_cargo_state("/home/.cargo/.package-cache-mutate"));
+        assert!(is_cargo_state("/home/.cargo/registry/CACHEDIR.TAG"));
+        assert!(!is_cargo_state("/home/.cargo/registry/src"));
+        assert!(!is_cargo_state("/home/.cargo/config.toml"));
+        assert_eq!(
+            unit_name("/target/debug/deps/libx-1.rlib"),
+            Some("libx-1.rlib")
+        );
+        assert_eq!(unit_name("/.warm/upper/debug/deps/x-1.so"), Some("x-1.so"));
+        assert_eq!(unit_name("/target/debug/deps/x-1.d"), None);
+        assert_eq!(unit_name("/target/debug/deps/sub/x-1.rlib"), None);
+        assert_eq!(unit_name("/target/release/deps/x-1.rlib"), None);
+        assert!(leaves_scratch("/etc/passwd"));
+        assert!(leaves_scratch("a/../b"));
+        assert!(!leaves_scratch("/work/target/x"));
+        assert!(!leaves_scratch("notes.txt"));
+    }
+
+    #[test]
+    fn a_walk_that_goes_too_deep_is_incomplete() {
+        let deep = format!("/deep{}/x", "/d".repeat(MAX_DEPTH + 2));
+        let Some(data) = image(&[(deep.as_str(), b"x", 0o644)]) else {
+            eprintln!("skipping: mkfs.ext4 is not available");
+            return;
+        };
+        let fs = Ext4::load(Box::new(data)).unwrap();
+        let report = scan(&fs, &spec());
+        assert_eq!(report.error, None);
+        assert!(report.incomplete);
+        // The file below the limit is not seen.
+        assert_eq!(report.files, 0);
     }
 
     #[test]

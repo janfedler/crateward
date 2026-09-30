@@ -1,7 +1,7 @@
 //! The fetch stage worker.
 
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,11 +14,11 @@ use crateward_core::name::CrateName;
 use crateward_core::store::{CrateFile, Policies, Store, StoreError, StoredJob, heartbeat};
 use sha2::Digest as _;
 
-use crate::archive::ArchiveLimits;
+use crate::archive::{ArchiveLimits, ArchiveReport};
 use crate::proxy::Index;
-use crate::resolve::{Resolution, locked_packages, resolve};
+use crate::resolve::{LockedPackage, Resolution, locked_packages, resolve};
 use crate::sandboxed::{MAX_CRATE_BYTES, validate_in_sandbox};
-use crateward_core::blobs::BlobStore;
+use crateward_core::blobs::{Blob, BlobStore};
 
 /// How a fetch failed. The class decides the automated response.
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +44,13 @@ impl FetchFailure {
     fn infrastructure(message: impl std::fmt::Display) -> Self {
         Self {
             class: FailureClass::Infrastructure,
+            message: message.to_string(),
+        }
+    }
+
+    fn permanent(message: impl std::fmt::Display) -> Self {
+        Self {
+            class: FailureClass::Permanent,
             message: message.to_string(),
         }
     }
@@ -120,6 +127,12 @@ fn gunzip(bytes: &[u8], limit: u64) -> std::io::Result<Vec<u8>> {
     Ok(tar)
 }
 
+/// Keeps the original `.crate` file, named by its digest.
+fn keep_original(dir: &Path, sha256: &Sha256Digest, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join(format!("{sha256}.crate")), bytes)
+}
+
 impl Fetcher {
     /// A fetcher.
     #[must_use]
@@ -176,10 +189,8 @@ impl Fetcher {
                 }
             }
         };
-        let worker = self.worker.clone();
-        let policies = self.policies.clone();
         self.store
-            .complete(job.id, &worker, event, &policies, false)
+            .complete(job.id, &self.worker, event, &self.policies, false)
             .await?;
         Ok(true)
     }
@@ -190,17 +201,11 @@ impl Fetcher {
     ///
     /// Returns the failure class for the state machine.
     pub async fn fetch(&self, job: &StoredJob) -> Result<FetchResult, FetchFailure> {
-        let name = CrateName::parse(&job.name).map_err(|e| FetchFailure {
-            class: FailureClass::Permanent,
-            message: e.to_string(),
-        })?;
-        let version = semver::Version::parse(&job.version).map_err(|e| FetchFailure {
-            class: FailureClass::Permanent,
-            message: e.to_string(),
-        })?;
-        let keep = self.setup.originals.is_some();
+        let name = CrateName::parse(&job.name).map_err(FetchFailure::permanent)?;
+        let version = semver::Version::parse(&job.version).map_err(FetchFailure::permanent)?;
+        let originals = self.setup.originals.as_deref();
         if self
-            .ensure_crate(&name, &version, &job.cksum, keep)
+            .ensure_crate(&name, &version, &job.cksum, originals)
             .await?
             .is_none()
         {
@@ -218,38 +223,15 @@ impl Fetcher {
         )
         .await
         .map_err(FetchFailure::infrastructure)?;
-        let (lockfile, mut error, packages) = match &resolution {
+        let (lockfile, error, packages) = match &resolution {
             Resolution::Locked(lock) => match locked_packages(lock) {
                 Ok(packages) => (Some(lock.as_str()), None, packages),
                 Err(e) => (Some(lock.as_str()), Some(e.to_string()), Vec::new()),
             },
             Resolution::Failed(message) => (None, Some(message.clone()), Vec::new()),
         };
-        for package in &packages {
-            if package.name == name.as_str() && package.version == version.to_string() {
-                continue;
-            }
-            let (Ok(dep_name), Ok(dep_version), Ok(sha)) = (
-                CrateName::parse(&package.name),
-                semver::Version::parse(&package.version),
-                package.checksum.parse::<Sha256Digest>(),
-            ) else {
-                error.get_or_insert_with(|| format!("invalid locked package {package:?}"));
-                continue;
-            };
-            if self
-                .ensure_crate(&dep_name, &dep_version, &sha, false)
-                .await?
-                .is_none()
-            {
-                error.get_or_insert_with(|| {
-                    format!(
-                        "{} {} is missing on crates.io",
-                        package.name, package.version
-                    )
-                });
-            }
-        }
+        let missing = self.fetch_dependencies(&name, &version, &packages).await?;
+        let error = error.or(missing);
         let packages_json = serde_json::to_value(&packages).unwrap_or_default();
         self.store
             .record_fetch(job.id, lockfile, error.as_deref(), &packages_json)
@@ -265,66 +247,67 @@ impl Fetcher {
         Ok(FetchResult::Fetched)
     }
 
+    /// Fetches the packages of a lockfile, except the crate itself. Returns
+    /// the first problem with a package, which the job records but does not
+    /// fail on.
+    async fn fetch_dependencies(
+        &self,
+        name: &CrateName,
+        version: &semver::Version,
+        packages: &[LockedPackage],
+    ) -> Result<Option<String>, FetchFailure> {
+        let mut problem = None;
+        for package in packages {
+            if package.name == name.as_str() && package.version == version.to_string() {
+                continue;
+            }
+            let (Ok(dep_name), Ok(dep_version), Ok(sha)) = (
+                CrateName::parse(&package.name),
+                semver::Version::parse(&package.version),
+                package.checksum.parse::<Sha256Digest>(),
+            ) else {
+                problem.get_or_insert_with(|| format!("invalid locked package {package:?}"));
+                continue;
+            };
+            if self
+                .ensure_crate(&dep_name, &dep_version, &sha, None)
+                .await?
+                .is_none()
+            {
+                problem.get_or_insert_with(|| {
+                    format!(
+                        "{} {} is missing on crates.io",
+                        package.name, package.version
+                    )
+                });
+            }
+        }
+        Ok(problem)
+    }
+
     /// Makes sure a crate file is downloaded, verified, validated and
-    /// stored. Returns `None` if crates.io no longer has it.
+    /// stored. Returns `None` if crates.io no longer has it. The original
+    /// file is kept in `originals`, if given.
     async fn ensure_crate(
         &self,
         name: &CrateName,
         version: &semver::Version,
         sha256: &Sha256Digest,
-        keep_original: bool,
+        originals: Option<&Path>,
     ) -> Result<Option<CrateFile>, FetchFailure> {
         if let Some(file) = self.store.crate_file(sha256).await? {
             return Ok(Some(file));
         }
-        let url = download_url(&self.setup.dl, name, version);
-        let Some(mut response) = self.downloads.stream(&url).await? else {
+        let Some(bytes) = self.download(name, version, sha256).await? else {
             return Ok(None);
         };
-        let mut bytes = Vec::new();
-        let mut hasher = sha2::Sha256::new();
-        while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
-            if u64::try_from(bytes.len() + chunk.len()).unwrap_or(u64::MAX) > MAX_CRATE_BYTES {
-                return Err(FetchFailure {
-                    class: FailureClass::Permanent,
-                    message: format!("{name} {version} exceeds {MAX_CRATE_BYTES} bytes"),
-                });
-            }
-            hasher.update(&chunk);
-            bytes.extend_from_slice(&chunk);
+        let bytes = Arc::new(bytes);
+        let (report, blob) = self.validate(name, version, Arc::clone(&bytes)).await?;
+        if let Some(dir) = originals
+            && let Err(error) = keep_original(dir, sha256, &bytes)
+        {
+            tracing::warn!(%error, "cannot keep the original crate file");
         }
-        let digest: [u8; 32] = hasher.finalize().into();
-        if &Sha256Digest::from_bytes(digest) != sha256 {
-            tracing::warn!(%name, %version, expected = %sha256, "checksum mismatch");
-            return Err(FetchFailure::checksum_mismatch(name, version));
-        }
-        let exe = self.setup.exe.clone();
-        let (n, v) = (name.to_string(), version.to_string());
-        let blobs = self.setup.blobs.clone();
-        let (report, blob) = tokio::task::spawn_blocking(move || {
-            let report = validate_in_sandbox(&exe, &bytes, &n, &v)?;
-            let blob = if report.is_storable() {
-                let tar = gunzip(&bytes, ArchiveLimits::default().max_unpacked_bytes * 2)?;
-                Some(blobs.put(&tar).map_err(std::io::Error::other)?)
-            } else {
-                None
-            };
-            Ok::<_, std::io::Error>((report, blob, bytes))
-        })
-        .await
-        .map_err(FetchFailure::infrastructure)?
-        .map(|(report, blob, bytes)| {
-            if keep_original && let Some(dir) = &self.setup.originals {
-                let path = dir.join(format!("{sha256}.crate"));
-                if let Err(error) =
-                    std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, &bytes))
-                {
-                    tracing::warn!(%error, "cannot keep the original crate file");
-                }
-            }
-            (report, blob)
-        })
-        .map_err(FetchFailure::infrastructure)?;
         if !report.findings.is_empty() || report.aborted.is_some() {
             tracing::warn!(%name, %version, findings = report.findings.len(), aborted = ?report.aborted, "archive findings");
         }
@@ -341,6 +324,63 @@ impl Fetcher {
         self.store.record_crate_file(&file).await?;
         Ok(Some(file))
     }
+
+    /// Downloads a crate file and checks it against the digest from the
+    /// index. Returns `None` if crates.io no longer has it.
+    async fn download(
+        &self,
+        name: &CrateName,
+        version: &semver::Version,
+        sha256: &Sha256Digest,
+    ) -> Result<Option<Vec<u8>>, FetchFailure> {
+        let url = download_url(&self.setup.dl, name, version);
+        let Some(mut response) = self.downloads.stream(&url).await? else {
+            return Ok(None);
+        };
+        let mut bytes = Vec::new();
+        let mut hasher = sha2::Sha256::new();
+        while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
+            if u64::try_from(bytes.len() + chunk.len()).unwrap_or(u64::MAX) > MAX_CRATE_BYTES {
+                return Err(FetchFailure::permanent(format!(
+                    "{name} {version} exceeds {MAX_CRATE_BYTES} bytes"
+                )));
+            }
+            hasher.update(&chunk);
+            bytes.extend_from_slice(&chunk);
+        }
+        let digest: [u8; 32] = hasher.finalize().into();
+        if &Sha256Digest::from_bytes(digest) != sha256 {
+            tracing::warn!(%name, %version, expected = %sha256, "checksum mismatch");
+            return Err(FetchFailure::checksum_mismatch(name, version));
+        }
+        Ok(Some(bytes))
+    }
+
+    /// Validates a downloaded crate file in the sandbox. A sound archive is
+    /// also unpacked into the blob store.
+    async fn validate(
+        &self,
+        name: &CrateName,
+        version: &semver::Version,
+        bytes: Arc<Vec<u8>>,
+    ) -> Result<(ArchiveReport, Option<Blob>), FetchFailure> {
+        let exe = self.setup.exe.clone();
+        let blobs = self.setup.blobs.clone();
+        let (name, version) = (name.to_string(), version.to_string());
+        tokio::task::spawn_blocking(move || {
+            let report = validate_in_sandbox(&exe, &bytes, &name, &version)?;
+            let blob = if report.is_storable() {
+                let tar = gunzip(&bytes, ArchiveLimits::default().max_unpacked_bytes * 2)?;
+                Some(blobs.put(&tar).map_err(std::io::Error::other)?)
+            } else {
+                None
+            };
+            Ok::<_, std::io::Error>((report, blob))
+        })
+        .await
+        .map_err(FetchFailure::infrastructure)?
+        .map_err(FetchFailure::infrastructure)
+    }
 }
 
 #[cfg(test)]
@@ -355,5 +395,25 @@ mod tests {
         // (`Store::stage_counts`).
         assert_eq!(failure.class, FailureClass::Infrastructure);
         assert_eq!(failure.message, "checksum mismatch for serde 1.0.0");
+    }
+
+    #[test]
+    fn originals_are_named_by_their_digest() {
+        let dir = std::env::temp_dir().join(format!("cw-originals-{}", std::process::id()));
+        let sha256 = Sha256Digest::from_bytes([7; 32]);
+        keep_original(&dir.join("nested"), &sha256, b"crate").unwrap();
+        let path = dir.join("nested").join(format!("{sha256}.crate"));
+        assert_eq!(std::fs::read(path).unwrap(), b"crate");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unpacking_stops_at_the_limit() {
+        use std::io::Write;
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        gz.write_all(&[0; 1000]).unwrap();
+        let bytes = gz.finish().unwrap();
+        assert_eq!(gunzip(&bytes, 1_000_000).unwrap().len(), 1000);
+        assert_eq!(gunzip(&bytes, 10).unwrap().len(), 10);
     }
 }

@@ -389,14 +389,24 @@ pub async fn build(
         files: vec![("warm.sh".into(), script(plan).into_bytes())],
         stubs: plan.stubs.clone(),
     };
-    let work = &sandbox.setup.work_dir;
     let files = JobFiles {
-        payload: work.join("warm.payload"),
-        scratch: work.join("warm.scratch"),
-        network: work.join("warm.network"),
         warm: None,
-        warm_placeholder: sandbox.setup.warm_placeholder.clone(),
+        ..JobFiles::named(&sandbox.setup, "warm")
     };
+    let result = replay(sandbox, config, plan, spec, &files).await;
+    files.remove();
+    result.map(Some)
+}
+
+/// Replays the probes in a VM, packs the target directory they leave and
+/// checks the image with an ordinary job.
+async fn replay(
+    sandbox: &Sandbox,
+    config: &WarmConfig,
+    plan: &Plan,
+    spec: PayloadSpec,
+    files: &JobFiles,
+) -> Result<PathBuf, WarmError> {
     let mut warming = sandbox.clone();
     warming.setup.scratch_mib = scratch_mib(config);
     let run = RunPlan {
@@ -405,60 +415,67 @@ pub async fn build(
         timeout: Duration::from_secs(config.timeout_secs),
     };
     let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
-    let result = async {
-        let report = warming.execute(0, spec, &tokens, &files, &run).await?;
-        tracing::info!(
-            run_ms = report.run_ms,
-            outcome = ?report.outcome,
-            units = report.scratch.as_ref().map_or(0, |s| s.units.len()),
-            stderr = %crate::trace::render(
-                report
-                    .stderr_tail
-                    .as_bytes()
-                    .get(report.stderr_tail.len().saturating_sub(3000)..)
-                    .unwrap_or_default()
-            ),
-            "warm build finished"
-        );
-        if let Some(why) = rejection(&report) {
-            return Err(WarmError::Rejected(why));
-        }
-        let image = work.join("warm-staging.erofs");
-        let exe = sandbox.setup.exe.clone();
-        let scratch = files.scratch.clone();
-        let out = image.clone();
-        let mut excluded: Vec<String> = plan
-            .stubs
-            .iter()
-            .filter_map(|dir| dir.rsplit_once('-').map(|(name, _)| name.to_owned()))
-            .collect();
-        excluded.push("crateward-probe".into());
-        tokio::task::spawn_blocking(move || {
-            crate::scratch::export_to_erofs(&exe, &scratch, &out, &excluded)
-        })
-        .await??;
-        let size = std::fs::metadata(&image).map_err(image_io(&image))?.len();
-        if size > config.max_image_mib.saturating_mul(1024 * 1024) {
-            let _ = std::fs::remove_file(&image);
-            return Err(WarmError::TooLarge(size));
-        }
-        let digest = blake3_file(&image).map_err(image_io(&image))?;
-        let named = work.join(format!(
-            "warm-{}.erofs",
-            digest.get(..16).unwrap_or_default()
-        ));
-        std::fs::rename(&image, &named).map_err(image_io(&image))?;
-        if let Err(error) = promotion_check(sandbox, plan, &named).await {
-            let _ = std::fs::remove_file(&named);
-            return Err(error.into());
-        }
-        Ok::<_, WarmError>(Some(named))
+    let report = warming.execute(0, spec, &tokens, files, &run).await?;
+    tracing::info!(
+        run_ms = report.run_ms,
+        outcome = ?report.outcome,
+        units = report.scratch.as_ref().map_or(0, |s| s.units.len()),
+        stderr = %crate::trace::render(
+            report
+                .stderr_tail
+                .as_bytes()
+                .get(report.stderr_tail.len().saturating_sub(3000)..)
+                .unwrap_or_default()
+        ),
+        "warm build finished"
+    );
+    if let Some(why) = rejection(&report) {
+        return Err(WarmError::Rejected(why));
     }
-    .await;
-    for file in [&files.payload, &files.scratch, &files.network] {
-        let _ = std::fs::remove_file(file);
+    let image = pack(sandbox, config, plan, &files.scratch).await?;
+    if let Err(error) = promotion_check(sandbox, plan, &image).await {
+        let _ = std::fs::remove_file(&image);
+        return Err(error.into());
     }
-    result
+    Ok(image)
+}
+
+/// Packs the target directory of the scratch disk into an image named after
+/// its digest, in the work directory. The stubs and the probe stay out.
+async fn pack(
+    sandbox: &Sandbox,
+    config: &WarmConfig,
+    plan: &Plan,
+    scratch: &Path,
+) -> Result<PathBuf, WarmError> {
+    let work = &sandbox.setup.work_dir;
+    let staging = work.join("warm-staging.erofs");
+    let exe = sandbox.setup.exe.clone();
+    let (disk, out) = (scratch.to_path_buf(), staging.clone());
+    let mut excluded: Vec<String> = plan
+        .stubs
+        .iter()
+        .filter_map(|dir| dir.rsplit_once('-').map(|(name, _)| name.to_owned()))
+        .collect();
+    excluded.push("crateward-probe".into());
+    tokio::task::spawn_blocking(move || {
+        crate::scratch::export_to_erofs(&exe, &disk, &out, &excluded)
+    })
+    .await??;
+    let size = std::fs::metadata(&staging)
+        .map_err(image_io(&staging))?
+        .len();
+    if size > config.max_image_mib.saturating_mul(1024 * 1024) {
+        let _ = std::fs::remove_file(&staging);
+        return Err(WarmError::TooLarge(size));
+    }
+    let digest = blake3_file(&staging).map_err(image_io(&staging))?;
+    let named = work.join(format!(
+        "warm-{}.erofs",
+        digest.get(..16).unwrap_or_default()
+    ));
+    std::fs::rename(&staging, &named).map_err(image_io(&staging))?;
+    Ok(named)
 }
 
 /// Units a job may still compile itself when the warm image covers its
@@ -481,20 +498,14 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
         files: Vec::new(),
         stubs: vec![stub.clone()],
     };
-    let setup = &sandbox.setup;
     let files = JobFiles {
-        payload: setup.work_dir.join("warm-check.payload"),
-        scratch: setup.work_dir.join("warm-check.scratch"),
-        network: setup.work_dir.join("warm-check.network"),
         warm: Some(image.to_path_buf()),
-        warm_placeholder: setup.warm_placeholder.clone(),
+        ..JobFiles::named(&sandbox.setup, "warm-check")
     };
     let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
-    let run = RunPlan::check(setup.check_timeout);
+    let run = RunPlan::check(sandbox.setup.check_timeout);
     let result = sandbox.execute(0, spec, &tokens, &files, &run).await;
-    for file in [&files.payload, &files.scratch, &files.network] {
-        let _ = std::fs::remove_file(file);
-    }
+    files.remove();
     let report = result?;
     let compiled = report
         .scratch
