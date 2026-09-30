@@ -45,9 +45,6 @@ pub fn sha256_file(path: &Path) -> Result<String, TaskError> {
     let mut file = std::fs::File::open(path).map_err(io)?;
     let mut hasher = sha2::Sha256::new();
     std::io::copy(&mut file, &mut hasher).map_err(io)?;
-    Ok(hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
+    let digest = crateward_core::digest::Sha256Digest::from_bytes(hasher.finalize().into());
+    Ok(digest.to_string())
 }

@@ -458,6 +458,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
 
 #[cfg(test)]
 mod tests {
+    use crateward_core::digest::Sha256Digest;
     use sha2::Digest;
 
     use super::*;
@@ -468,9 +469,8 @@ mod tests {
             if pin.is_empty() {
                 continue;
             }
-            let digest = sha2::Sha256::digest(bytes);
-            let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-            assert_eq!(hex, pin, "{name}");
+            let digest = Sha256Digest::from_bytes(sha2::Sha256::digest(bytes).into());
+            assert_eq!(digest.to_string(), pin, "{name}");
         }
     }
 

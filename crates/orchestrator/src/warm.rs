@@ -32,6 +32,7 @@ use crateward_core::digest::Sha256Digest;
 use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::store::Store;
+use crateward_fake_internet::server::hex;
 
 use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
@@ -304,10 +305,6 @@ pub async fn plan_from_store(
     ))
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 /// Size of the warm build's scratch disk: room for the target directory up
 /// to the image limit, plus the rest of what a build writes.
 #[must_use]
@@ -356,7 +353,7 @@ pub enum CheckError {
     #[error(transparent)]
     Run(#[from] Failure),
     /// The check build did not succeed.
-    #[error("the check build ended {outcome:?}: {stderr}")]
+    #[error("the check build ended {}: {stderr}", outcome.name())]
     Ended {
         /// How it ended.
         outcome: BuildOutcome,

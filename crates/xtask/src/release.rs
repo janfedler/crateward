@@ -347,7 +347,7 @@ fn sums(dir: &Path) -> Result<String, TaskError> {
     walk(dir, dir, &mut files)?;
     Ok(files
         .iter()
-        .map(|(path, digest)| format!("{digest}  {path}\n"))
+        .flat_map(|(path, digest)| [digest.as_str(), "  ", path.as_str(), "\n"])
         .collect())
 }
 

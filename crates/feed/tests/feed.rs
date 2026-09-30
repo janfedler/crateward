@@ -84,9 +84,9 @@ async fn start_mock(state: Shared) -> String {
     tokio::spawn(async move {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
-            let state = state.clone();
+            let state = Arc::clone(&state);
             tokio::spawn(async move {
-                let service = hyper::service::service_fn(move |req| serve(state.clone(), req));
+                let service = hyper::service::service_fn(move |req| serve(Arc::clone(&state), req));
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service)
                     .await;
@@ -190,7 +190,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
         return;
     };
     let state: Shared = Arc::default();
-    let base = start_mock(state.clone()).await;
+    let base = start_mock(Arc::clone(&state)).await;
     {
         let mut s = state.lock().unwrap();
         s.files.insert(
@@ -311,7 +311,7 @@ impl World {
         let schema = format!("feed_{test}_{}", std::process::id());
         let store = test_store(&schema).await?;
         let state: Shared = Arc::default();
-        let base = start_mock(state.clone()).await;
+        let base = start_mock(Arc::clone(&state)).await;
         let urls = Urls {
             rss_updates: format!("{base}/rss/updates.xml"),
             rss_new_crates: format!("{base}/rss/crates.xml"),
