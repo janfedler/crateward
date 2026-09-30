@@ -187,38 +187,27 @@ pub fn decode(record: &[u8], start_ns: u64) -> Option<TraceEvent> {
     let uid = u32_at(record, 12)?;
     let time_ns = u64_at(record, 16)?;
     let ms = u32::try_from(time_ns.saturating_sub(start_ns) / 1_000_000).unwrap_or(u32::MAX);
-    let body = record.get(HEADER_LEN..)?;
-    let kind = match kind {
+    let kind = event_kind(kind, record.get(HEADER_LEN..)?)?;
+    Some(TraceEvent {
+        ms,
+        pid,
+        tid,
+        uid,
+        kind,
+    })
+}
+
+/// The body of a record of `kind`, or `None` if it is short or unknown.
+fn event_kind(kind: u32, body: &[u8]) -> Option<TraceKind> {
+    Some(match kind {
         KIND_FORK => TraceKind::Fork {
             child: u32_at(body, 0)?,
         },
-        KIND_EXEC => {
-            let filename_len = i32_at(body, 0)?;
-            let args_len = usize::try_from(u32_at(body, 4)?).ok()?.min(ARGS_LEN);
-            let filename = string(body.get(8..8 + FILENAME_LEN)?, filename_len);
-            let args = body.get(8 + FILENAME_LEN..8 + FILENAME_LEN + ARGS_LEN)?;
-            let args = args.get(..args_len)?;
-            let mut argv: Vec<Vec<u8>> = args.split(|&b| b == 0).map(<[u8]>::to_vec).collect();
-            // The vector ends with a NUL, which leaves one empty piece.
-            if args.last() == Some(&0) {
-                argv.pop();
-            }
-            TraceKind::Exec { filename, argv }
-        }
+        KIND_EXEC => exec(body)?,
         KIND_EXIT => TraceKind::Exit {
             code: u32_at(body, 0)?,
         },
-        KIND_OPEN => {
-            let flags = u32_at(body, 0)?;
-            let path_len = i32_at(body, 4)?;
-            let buffer = body.get(8..8 + PATH_LEN)?;
-            let path = if path_len > 0 {
-                string(buffer, path_len)
-            } else {
-                format!("<unresolved: error {path_len}>").into_bytes()
-            };
-            TraceKind::Open { path, flags }
-        }
+        KIND_OPEN => open(body)?,
         KIND_CONNECT | KIND_SEND => {
             let sock_type = u32_at(body, 0)?;
             let addr_len = u32_at(body, 4)?;
@@ -236,21 +225,37 @@ pub fn decode(record: &[u8], start_ns: u64) -> Option<TraceEvent> {
             target: u32_at(body, 0)?,
             mode: u32_at(body, 4)?,
         },
-        KIND_MOUNT => {
-            let len = i32_at(body, 0)?;
-            TraceKind::Mount {
-                fstype: string(body.get(8..8 + FSTYPE_LEN)?, len),
-            }
-        }
+        KIND_MOUNT => TraceKind::Mount {
+            fstype: string(body.get(8..8 + FSTYPE_LEN)?, i32_at(body, 0)?),
+        },
         _ => return None,
-    };
-    Some(TraceEvent {
-        ms,
-        pid,
-        tid,
-        uid,
-        kind,
     })
+}
+
+fn exec(body: &[u8]) -> Option<TraceKind> {
+    let filename_len = i32_at(body, 0)?;
+    let args_len = usize::try_from(u32_at(body, 4)?).ok()?.min(ARGS_LEN);
+    let filename = string(body.get(8..8 + FILENAME_LEN)?, filename_len);
+    let args = body.get(8 + FILENAME_LEN..8 + FILENAME_LEN + ARGS_LEN)?;
+    let args = args.get(..args_len)?;
+    let mut argv: Vec<Vec<u8>> = args.split(|&b| b == 0).map(<[u8]>::to_vec).collect();
+    // The vector ends with a NUL, which leaves one empty piece.
+    if args.last() == Some(&0) {
+        argv.pop();
+    }
+    Some(TraceKind::Exec { filename, argv })
+}
+
+fn open(body: &[u8]) -> Option<TraceKind> {
+    let flags = u32_at(body, 0)?;
+    let path_len = i32_at(body, 4)?;
+    let buffer = body.get(8..8 + PATH_LEN)?;
+    let path = if path_len > 0 {
+        string(buffer, path_len)
+    } else {
+        format!("<unresolved: error {path_len}>").into_bytes()
+    };
+    Some(TraceKind::Open { path, flags })
 }
 
 /// Estimated encoded size of an event, never below the real one.
@@ -619,5 +624,75 @@ mod tests {
         long[24..28].copy_from_slice(&i32::MAX.to_le_bytes());
         long[28..32].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(decode(&long, 0).is_some());
+    }
+
+    #[test]
+    fn decodes_every_other_kind() {
+        let record = |kind: u32, words: &[u32], tail: &[u8]| {
+            let mut r = header(kind, 1_500_000);
+            for w in words {
+                r.extend_from_slice(&w.to_le_bytes());
+            }
+            r.extend_from_slice(tail);
+            r
+        };
+        let mut fstype = b"overlay\0".to_vec();
+        fstype.resize(FSTYPE_LEN, 0);
+        let cases = [
+            (record(KIND_FORK, &[7], &[]), TraceKind::Fork { child: 7 }),
+            (
+                record(KIND_EXIT, &[256], &[]),
+                TraceKind::Exit { code: 256 },
+            ),
+            (record(KIND_BPF, &[5], &[]), TraceKind::Bpf { cmd: 5 }),
+            (
+                record(KIND_PTRACE, &[42, 2], &[]),
+                TraceKind::Ptrace {
+                    target: 42,
+                    mode: 2,
+                },
+            ),
+            (
+                record(KIND_MOUNT, &[20, 0], &fstype),
+                TraceKind::Mount {
+                    fstype: b"overlay".to_vec(),
+                },
+            ),
+            (
+                record(KIND_OPEN, &[0, (-2_i32).cast_unsigned()], &[0; PATH_LEN]),
+                TraceKind::Open {
+                    path: b"<unresolved: error -2>".to_vec(),
+                    flags: 0,
+                },
+            ),
+            (
+                record(KIND_OPEN, &[0, 0], &[0; PATH_LEN]),
+                TraceKind::Open {
+                    path: b"<unresolved: error 0>".to_vec(),
+                    flags: 0,
+                },
+            ),
+            (
+                record(KIND_SEND, &[2, 0], &[0; ADDR_LEN]),
+                TraceKind::Send {
+                    sock_type: 2,
+                    address: SocketAddress::Other(0),
+                },
+            ),
+        ];
+        for (r, kind) in cases {
+            let event = decode(&r, 0).unwrap();
+            assert_eq!((event.ms, event.kind), (1, kind));
+            for cut in 0..r.len() {
+                assert!(decode(&r[..cut], 0).is_none(), "{cut}");
+            }
+        }
+        // A record from before the job's start counts as its first ms.
+        let fork = record(KIND_FORK, &[7], &[]);
+        assert_eq!(decode(&fork, u64::MAX).unwrap().ms, 0);
+        // Bytes after the layout are ignored.
+        let mut long = fork.clone();
+        long.extend_from_slice(&[0xff; 9]);
+        assert_eq!(decode(&long, 0).unwrap().kind, TraceKind::Fork { child: 7 });
     }
 }

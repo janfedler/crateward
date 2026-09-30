@@ -52,7 +52,42 @@ struct Forwarder<'a, W> {
     totals: Option<TraceTotals>,
 }
 
-impl<W: Write> Forwarder<'_, W> {
+impl<'a, W: Write> Forwarder<'a, W> {
+    fn new(out: &'a mut W, limit: u32) -> Self {
+        Self {
+            out,
+            limit: u64::from(limit),
+            forwarded: 0,
+            truncated: false,
+            open_streams: 2,
+            totals: None,
+        }
+    }
+
+    /// Drains the trace for up to `TRACE_DRAIN` when tracing, then writes
+    /// `TraceEnd` (when tracing) and `Exited`.
+    fn finish(
+        mut self,
+        tracing: bool,
+        events: &mpsc::Receiver<Event>,
+        exit: ExitStatus,
+    ) -> Result<(), AgentError> {
+        let drain_until = Instant::now() + TRACE_DRAIN;
+        while tracing && self.totals.is_none() {
+            let left = drain_until.saturating_duration_since(Instant::now());
+            match events.recv_timeout(left) {
+                Ok(event) => self.handle(event)?,
+                Err(_) => break,
+            }
+        }
+        if tracing {
+            let totals = self.totals.unwrap_or_default();
+            write_message(self.out, &GuestMessage::TraceEnd(totals))?;
+        }
+        write_message(self.out, &GuestMessage::Exited(exit))?;
+        Ok(())
+    }
+
     fn handle(&mut self, event: Event) -> Result<(), AgentError> {
         match event {
             Event::Output(stream, data) => {
@@ -116,39 +151,23 @@ fn kill_group(pid: u32) {
 pub fn run_job<W: Write>(
     spec: &JobSpec,
     options: RunOptions,
-    tracer: Option<&mut Tracer>,
+    mut tracer: Option<&mut Tracer>,
     out: &mut W,
 ) -> Result<(), AgentError> {
     let Some((program, args)) = spec.argv.split_first() else {
         write_message(out, &GuestMessage::Error("empty argv".into()))?;
         return Ok(());
     };
-    let mut command = Command::new(program);
-    command
-        .args(args)
-        .env_clear()
-        .envs(spec.env.iter().map(|(k, v)| (k, v)))
-        .current_dir(&spec.cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    if let Some((uid, gid)) = options.identity {
-        command.uid(uid).gid(gid);
-    }
     let tracing = tracer.is_some();
-    let mut tracer = tracer;
     if let Some(tracer) = tracer.as_deref_mut() {
         tracer.clear();
     }
     let start_ns = monotonic_ns();
-    let mut child = match command.spawn() {
+    let mut child = match command(spec, program, args, options).spawn() {
         Ok(child) => child,
         Err(error) => {
-            write_message(
-                out,
-                &GuestMessage::Error(format!("cannot start {program}: {error}")),
-            )?;
+            let message = format!("cannot start {program}: {error}");
+            write_message(out, &GuestMessage::Error(message))?;
             return Ok(());
         }
     };
@@ -164,14 +183,7 @@ pub fn run_job<W: Write>(
     }
     let stop = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(u64::from(spec.timeout_secs));
-    let mut forwarder = Forwarder {
-        out,
-        limit: u64::from(spec.output_limit),
-        forwarded: 0,
-        truncated: false,
-        open_streams: 2,
-        totals: None,
-    };
+    let mut forwarder = Forwarder::new(out, spec.output_limit);
     std::thread::scope(|scope| {
         if let Some(tracer) = tracer {
             let sender = sender.clone();
@@ -193,21 +205,26 @@ pub fn run_job<W: Write>(
         if options.identity.is_some() {
             rustix::fs::sync();
         }
-        let drain_until = Instant::now() + TRACE_DRAIN;
-        while tracing && forwarder.totals.is_none() {
-            let left = drain_until.saturating_duration_since(Instant::now());
-            match events.recv_timeout(left) {
-                Ok(event) => forwarder.handle(event)?,
-                Err(_) => break,
-            }
-        }
-        if tracing {
-            let totals = forwarder.totals.unwrap_or_default();
-            write_message(forwarder.out, &GuestMessage::TraceEnd(totals))?;
-        }
-        write_message(forwarder.out, &GuestMessage::Exited(exit))?;
-        Ok(())
+        forwarder.finish(tracing, &events, exit)
     })
+}
+
+/// The job's process: its own group, a cleared environment and piped output.
+fn command(spec: &JobSpec, program: &str, args: &[String], options: RunOptions) -> Command {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env_clear()
+        .envs(spec.env.iter().map(|(k, v)| (k, v)))
+        .current_dir(&spec.cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    if let Some((uid, gid)) = options.identity {
+        command.uid(uid).gid(gid);
+    }
+    command
 }
 
 /// Forwards events until the job's streams close and its process exits,
@@ -356,6 +373,37 @@ mod tests {
             Some(&GuestMessage::Exited(ExitStatus::TimedOut))
         );
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn an_empty_argv_is_an_error_message() {
+        let mut job = spec("", 1, 1);
+        job.argv.clear();
+        assert_eq!(run(&job), [GuestMessage::Error("empty argv".into())]);
+    }
+
+    #[test]
+    fn forwards_stderr_and_runs_in_the_given_directory() {
+        let mut job = spec("pwd; echo oops >&2; kill -9 $$", 10, 1024);
+        job.cwd = "/tmp".into();
+        let messages = run(&job);
+        assert_eq!(stdout_of(&messages), "/tmp\n");
+        let stderr: Vec<u8> = messages
+            .iter()
+            .filter_map(|m| match m {
+                GuestMessage::Output {
+                    stream: OutputStream::Stderr,
+                    data,
+                } => Some(data.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(stderr, b"oops\n");
+        assert_eq!(
+            messages.last(),
+            Some(&GuestMessage::Exited(ExitStatus::Signal(9)))
+        );
     }
 
     #[test]
