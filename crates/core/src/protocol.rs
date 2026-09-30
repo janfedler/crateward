@@ -199,6 +199,25 @@ pub enum GuestMessage {
     Error(String),
 }
 
+impl GuestMessage {
+    /// The message's name, without its content, which the guest controls.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Hello { .. } => "hello",
+            Self::Pong => "pong",
+            Self::Prepared => "prepared",
+            Self::Started { .. } => "started",
+            Self::Output { .. } => "output",
+            Self::OutputTruncated => "output_truncated",
+            Self::Trace(_) => "trace",
+            Self::TraceEnd(_) => "trace_end",
+            Self::Exited(_) => "exited",
+            Self::Error(_) => "error",
+        }
+    }
+}
+
 /// Whether the agent's eBPF tracing works.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TracingStatus {

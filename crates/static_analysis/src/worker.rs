@@ -32,7 +32,7 @@ type Reports = BTreeMap<Sha256Digest, StaticReport>;
 
 /// Why a job's static analysis failed.
 #[derive(Debug, thiserror::Error)]
-#[error("{class:?}: {message}")]
+#[error("{}: {message}", class.name())]
 pub struct Failure {
     /// Retry class.
     pub class: FailureClass,

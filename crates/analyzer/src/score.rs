@@ -241,11 +241,7 @@ fn static_points(f: &Finding) -> u32 {
 fn finding_name(kind: &FindingKind) -> String {
     match kind {
         FindingKind::YaraMatch { rule } => format!("yara:{rule}"),
-        FindingKind::UnsafeCode { .. } => "unsafe_code".to_owned(),
-        other => serde_json::to_value(other)
-            .ok()
-            .and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned))
-            .unwrap_or_else(|| format!("{other:?}")),
+        other => other.name().to_owned(),
     }
 }
 
@@ -283,8 +279,10 @@ fn score_static(inputs: &Inputs<'_>, groups: &mut Groups, profile: &mut BTreeSet
                 points,
                 source: EvidenceSource::Static,
                 summary: format!(
-                    "{:?} severity {name} in {:?} code{more}: {}",
-                    f.severity, f.context, f.evidence
+                    "{} severity {name} in {} code{more}: {}",
+                    f.severity.name(),
+                    f.context.name(),
+                    f.evidence
                 ),
                 package: Some(inputs.name.to_owned()),
                 location: Some(match f.line {

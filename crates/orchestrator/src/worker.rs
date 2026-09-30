@@ -46,7 +46,7 @@ const HOST_MARGIN: Duration = Duration::from_secs(60);
 
 /// Why a run could not happen. The job is not at fault for any of these.
 #[derive(Debug, thiserror::Error)]
-#[error("{class:?}: {message}")]
+#[error("{}: {message}", class.name())]
 pub struct Failure {
     /// Retry class.
     pub class: FailureClass,
@@ -520,12 +520,13 @@ impl SandboxWorker {
             tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, leaked = ?report.leaked, "honeytokens left the VM");
         }
         let value = serde_json::to_value(&report).map_err(Failure::infrastructure)?;
-        let outcome_name = serde_json::to_value(report.outcome)
-            .ok()
-            .and_then(|v| v.as_str().map(str::to_owned))
-            .unwrap_or_default();
         self.store
-            .record_run(job.id, job.job.run_kind.name(), &outcome_name, &value)
+            .record_run(
+                job.id,
+                job.job.run_kind.name(),
+                report.outcome.name(),
+                &value,
+            )
             .await?;
         Ok(report)
     }
@@ -715,7 +716,7 @@ impl Sandbox {
             network,
             leaked,
             outcome: ended.outcome,
-            end: format!("{:?}", run.end).chars().take(64).collect(),
+            end: run.end.to_string().chars().take(256).collect(),
             exit: ended.exit,
             restore_ms: u64::try_from(run.restore.as_millis()).unwrap_or(u64::MAX),
             run_ms: u64::try_from(run.run.as_millis()).unwrap_or(u64::MAX),

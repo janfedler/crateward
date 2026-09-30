@@ -22,7 +22,7 @@ use crateward_core::blobs::{Blob, BlobStore};
 
 /// How a fetch failed. The class decides the automated response.
 #[derive(Debug, thiserror::Error)]
-#[error("{class:?}: {message}")]
+#[error("{}: {message}", class.name())]
 pub struct FetchFailure {
     /// Failure class for the state machine.
     pub class: FailureClass,

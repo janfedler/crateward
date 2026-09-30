@@ -72,6 +72,35 @@ impl JobEnd {
     pub fn is_escape_indicator(&self) -> bool {
         matches!(self, Self::VmmCrashed(_) | Self::DecoyTouched)
     }
+
+    /// The lowercase name of the end, without its details.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Finished(_) => "finished",
+            Self::HostTimeout => "host_timeout",
+            Self::ResourceLimit => "resource_limit",
+            Self::GuestStopped(_) => "guest_stopped",
+            Self::VmmCrashed(_) => "vmm_crashed",
+            Self::DecoyTouched => "decoy_touched",
+            Self::KvmError(_) => "kvm_error",
+            Self::UnexpectedExit(_) => "unexpected_exit",
+        }
+    }
+}
+
+/// The name, and the reason for ends that have one.
+impl std::fmt::Display for JobEnd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())?;
+        match self {
+            Self::GuestStopped(reason)
+            | Self::VmmCrashed(reason)
+            | Self::KvmError(reason)
+            | Self::UnexpectedExit(reason) => write!(f, ": {reason}"),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// The result of a run once its slot is stopped and cleaned up.
@@ -697,6 +726,23 @@ mod tests {
             classify_exit(signal(9), "x"),
             JobEnd::UnexpectedExit(_)
         ));
+    }
+
+    #[test]
+    fn an_end_shows_its_name_and_reason() {
+        assert_eq!(JobEnd::HostTimeout.to_string(), "host_timeout");
+        assert_eq!(
+            JobEnd::VmmCrashed("SIGSEGV".into()).to_string(),
+            "vmm_crashed: SIGSEGV"
+        );
+        let finished = JobEnd::Finished(RunOutcome {
+            exit: ExitStatus::Code(1),
+            stdout: b"secret".to_vec(),
+            stderr: vec![],
+            truncated: false,
+            trace: Box::default(),
+        });
+        assert_eq!(finished.to_string(), "finished");
     }
 
     #[tokio::test]

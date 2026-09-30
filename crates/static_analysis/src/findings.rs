@@ -62,6 +62,18 @@ pub enum CodeContext {
 }
 
 impl CodeContext {
+    /// The lowercase name, as serialized.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::BuildScript => "build_script",
+            Self::ProcMacro => "proc_macro",
+            Self::Library => "library",
+            Self::Binary => "binary",
+            Self::Test => "test",
+        }
+    }
+
     /// Whether code in this context runs during `cargo build` or `check`.
     #[must_use]
     pub const fn runs_at_build_time(self) -> bool {
@@ -86,6 +98,18 @@ pub enum Platform {
 }
 
 impl Platform {
+    /// The lowercase name, as serialized.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Linux => "linux",
+            Self::Unix => "unix",
+            Self::Windows => "windows",
+            Self::Apple => "apple",
+        }
+    }
+
     /// Classifies a `cfg` predicate by the platform it names. Negations and
     /// combinations default to the first platform mentioned, which is enough
     /// to flag platform specific code for review.
@@ -166,6 +190,35 @@ pub enum FindingKind {
     UnparsableSource,
 }
 
+impl FindingKind {
+    /// The name of the kind, as serialized in the `kind` field.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::NetworkAccess => "network_access",
+            Self::UrlLiteral => "url_literal",
+            Self::ProcessSpawn => "process_spawn",
+            Self::ShellCommand => "shell_command",
+            Self::DownloaderPattern => "downloader_pattern",
+            Self::CredentialAccess => "credential_access",
+            Self::SecretEnvironmentVariable => "secret_environment_variable",
+            Self::EnvironmentEnumeration => "environment_enumeration",
+            Self::ExfiltrationEndpoint => "exfiltration_endpoint",
+            Self::ObfuscatedData => "obfuscated_data",
+            Self::IncludedBinary => "included_binary",
+            Self::UnsafeCode { .. } => "unsafe_code",
+            Self::InlineAssembly => "inline_assembly",
+            Self::ForeignFunctions => "foreign_functions",
+            Self::WindowsApi => "windows_api",
+            Self::BuildScript => "build_script",
+            Self::ProcMacro => "proc_macro",
+            Self::NativeLink => "native_link",
+            Self::YaraMatch { .. } => "yara_match",
+            Self::UnparsableSource => "unparsable_source",
+        }
+    }
+}
+
 /// One finding with its evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Finding {
@@ -241,6 +294,49 @@ mod tests {
         ] {
             let value = serde_json::to_value(severity).unwrap();
             assert_eq!(value.as_str(), Some(severity.name()));
+        }
+    }
+
+    #[test]
+    fn platform_and_context_names_are_the_serialized_names() {
+        use CodeContext::*;
+        use Platform::*;
+        for platform in [Any, Linux, Unix, Windows, Apple] {
+            assert_eq!(serde_json::to_value(platform).unwrap(), platform.name());
+        }
+        for context in [BuildScript, ProcMacro, Library, Binary, Test] {
+            assert_eq!(serde_json::to_value(context).unwrap(), context.name());
+        }
+    }
+
+    #[test]
+    fn kind_names_are_the_serialized_kinds() {
+        use FindingKind::*;
+        let kinds = [
+            NetworkAccess,
+            UrlLiteral,
+            ProcessSpawn,
+            ShellCommand,
+            DownloaderPattern,
+            CredentialAccess,
+            SecretEnvironmentVariable,
+            EnvironmentEnumeration,
+            ExfiltrationEndpoint,
+            ObfuscatedData,
+            IncludedBinary,
+            UnsafeCode { count: 2 },
+            InlineAssembly,
+            ForeignFunctions,
+            WindowsApi,
+            BuildScript,
+            ProcMacro,
+            NativeLink,
+            YaraMatch { rule: "r".into() },
+            UnparsableSource,
+        ];
+        for kind in kinds {
+            let value = serde_json::to_value(&kind).unwrap();
+            assert_eq!(value["kind"], kind.name());
         }
     }
 

@@ -268,11 +268,27 @@ fn inspect<R: Read>(
         },
         other => ArchiveFinding::SpecialFile {
             path,
-            kind: format!("{other:?}"),
+            kind: entry_kind(other),
         },
     };
     findings.push(finding);
     None
+}
+
+/// The name of a special entry type, stable across `tar` versions.
+fn entry_kind(kind: tar::EntryType) -> String {
+    let name = match kind {
+        tar::EntryType::Char => "Char",
+        tar::EntryType::Block => "Block",
+        tar::EntryType::Fifo => "Fifo",
+        tar::EntryType::GNULongName => "GNULongName",
+        tar::EntryType::GNULongLink => "GNULongLink",
+        tar::EntryType::GNUSparse => "GNUSparse",
+        tar::EntryType::XGlobalHeader => "XGlobalHeader",
+        tar::EntryType::XHeader => "XHeader",
+        other => return format!("type {:#04x}", other.as_byte()),
+    };
+    name.to_owned()
 }
 
 fn link_target<R: Read>(entry: &tar::Entry<'_, R>) -> String {
@@ -522,6 +538,7 @@ mod tests {
         let bytes = archive(&[
             ("demo-1.0.0/pipe", tar::EntryType::Fifo, b"", "", 0o644),
             ("demo-1.0.0/disk", tar::EntryType::Block, b"", "", 0o644),
+            ("demo-1.0.0/odd", tar::EntryType::new(b'A'), b"", "", 0o644),
             (
                 "demo-1.0.0/contiguous",
                 tar::EntryType::Continuous,
@@ -542,9 +559,13 @@ mod tests {
                     path: finding_path("demo-1.0.0/disk"),
                     kind: "Block".to_owned()
                 },
+                ArchiveFinding::SpecialFile {
+                    path: finding_path("demo-1.0.0/odd"),
+                    kind: "type 0x41".to_owned()
+                },
             ]
         );
-        assert_eq!((report.entries, report.files), (3, 1));
+        assert_eq!((report.entries, report.files), (4, 1));
     }
 
     #[test]

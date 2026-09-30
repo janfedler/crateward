@@ -48,6 +48,17 @@ pub enum AutomatedResponse {
 }
 
 impl FailureClass {
+    /// The lowercase name, as serialized.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Transient => "transient",
+            Self::Infrastructure => "infrastructure",
+            Self::Permanent => "permanent",
+            Self::SuspectedCompromise => "suspected_compromise",
+        }
+    }
+
     /// Every class.
     pub const ALL: [Self; 4] = [
         Self::Transient,
@@ -64,6 +75,19 @@ impl FailureClass {
             Self::Infrastructure => AutomatedResponse::RetryAndReportToCircuitBreaker,
             Self::Permanent => AutomatedResponse::FailJob,
             Self::SuspectedCompromise => AutomatedResponse::EnterQuarantine,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_match_the_serialized_form() {
+        use FailureClass::*;
+        for class in [Transient, Infrastructure, Permanent, SuspectedCompromise] {
+            assert_eq!(serde_json::to_value(class).unwrap(), class.name());
         }
     }
 }

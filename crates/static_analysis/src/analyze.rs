@@ -335,9 +335,7 @@ fn manifest_findings(facts: &ManifestFacts) -> Vec<Finding> {
 fn platform_counts(findings: &[Finding]) -> BTreeMap<String, u32> {
     let mut platforms = BTreeMap::new();
     for f in findings.iter().filter(|f| f.platform != Platform::Any) {
-        *platforms
-            .entry(format!("{:?}", f.platform).to_lowercase())
-            .or_insert(0) += 1;
+        *platforms.entry(f.platform.name().to_owned()).or_insert(0) += 1;
     }
     platforms
 }

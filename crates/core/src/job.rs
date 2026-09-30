@@ -242,6 +242,20 @@ pub enum BuildOutcome {
     GuestStopped,
 }
 
+impl BuildOutcome {
+    /// The lowercase name, as serialized and stored with a run.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::TimedOut => "timed_out",
+            Self::ResourceLimit => "resource_limit",
+            Self::GuestStopped => "guest_stopped",
+        }
+    }
+}
+
 /// How a job ended when it reached [`JobState::Done`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "coverage")]
@@ -774,6 +788,14 @@ pub fn mermaid_diagram() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outcome_names_match_the_serialized_form() {
+        use BuildOutcome::*;
+        for outcome in [Succeeded, Failed, TimedOut, ResourceLimit, GuestStopped] {
+            assert_eq!(serde_json::to_value(outcome).unwrap(), outcome.name());
+        }
+    }
 
     const LIMITS: Limits = Limits::uniform(StageLimits {
         max_attempts: 3,

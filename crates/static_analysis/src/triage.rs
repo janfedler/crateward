@@ -59,8 +59,8 @@ pub fn decide(report: &StaticReport, dependencies: &[Dependency]) -> Decision {
         && matches!(report.library_platform, Platform::Windows | Platform::Apple)
     {
         reasons.push(format!(
-            "the library is gated to {:?} and nothing runs at build time",
-            report.library_platform
+            "the library is gated to {} and nothing runs at build time",
+            report.library_platform.name()
         ));
         return Decision {
             triage: Triage::NotApplicableOnLinux,

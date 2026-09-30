@@ -142,7 +142,7 @@ impl AgentConnection {
             GuestMessage::Hello { version, .. } => {
                 Err(ProtocolError::UnsupportedVersion(version).into())
             }
-            other => Err(AgentError::Unexpected(format!("{other:?}"))),
+            other => Err(AgentError::Unexpected(other.name().into())),
         }
     }
 
@@ -202,7 +202,7 @@ impl AgentConnection {
         self.send(&HostMessage::Ping).await?;
         match self.recv().await? {
             GuestMessage::Pong => Ok(()),
-            other => Err(AgentError::Unexpected(format!("{other:?}"))),
+            other => Err(AgentError::Unexpected(other.name().into())),
         }
     }
 
@@ -216,7 +216,7 @@ impl AgentConnection {
         match self.recv().await? {
             GuestMessage::Prepared => Ok(()),
             GuestMessage::Error(message) => Err(AgentError::Agent(message)),
-            other => Err(AgentError::Unexpected(format!("{other:?}"))),
+            other => Err(AgentError::Unexpected(other.name().into())),
         }
     }
 
@@ -266,7 +266,7 @@ impl AgentConnection {
                     return Ok(outcome);
                 }
                 GuestMessage::Error(message) => return Err(AgentError::Agent(message)),
-                other => return Err(AgentError::Unexpected(format!("{other:?}"))),
+                other => return Err(AgentError::Unexpected(other.name().into())),
             }
         }
     }
