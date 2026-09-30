@@ -185,59 +185,24 @@ fn strip_non_prose(line: &str) -> String {
     let mut i = 0;
     while let Some(&c) = chars.get(i) {
         if c == '`' {
-            // Skip a code span delimited by a run of the same length.
-            let run = chars
-                .get(i..)
-                .map_or(0, |s| s.iter().take_while(|&&x| x == '`').count());
-            let body_start = i + run;
-            let mut j = body_start;
-            let mut closed = None;
-            while j < chars.len() {
-                let here = chars
-                    .get(j..)
-                    .map_or(0, |s| s.iter().take_while(|&&x| x == '`').count());
-                if here == run {
-                    closed = Some(j + run);
-                    break;
-                }
-                j += here.max(1);
-            }
-            match closed {
-                Some(end) => {
-                    out.push(' ');
-                    i = end;
-                }
-                None => i = chars.len(),
-            }
-            continue;
-        }
-        if c == ']' && chars.get(i + 1) == Some(&'(') {
-            // Skip a link destination.
-            let end = chars
-                .get(i + 2..)
-                .and_then(|s| s.iter().position(|&x| x == ')'))
-                .map_or(chars.len(), |p| i + 2 + p + 1);
+            // An unclosed code span runs to the end of the line.
+            let Some(end) = code_span_end(&chars, i) else {
+                break;
+            };
             out.push(' ');
             i = end;
-            continue;
+        } else if c == ']' && chars.get(i + 1) == Some(&'(') {
+            out.push(' ');
+            i = link_destination_end(&chars, i);
+        } else if c == '<'
+            && let Some(end) = autolink_end(&chars, i)
+        {
+            out.push(' ');
+            i = end;
+        } else {
+            out.push(c);
+            i += 1;
         }
-        if c == '<' {
-            let rest: String = chars
-                .get(i + 1..)
-                .map(|s| s.iter().collect())
-                .unwrap_or_default();
-            if rest.starts_with("http") || rest.starts_with("mailto:") {
-                let end = chars
-                    .get(i..)
-                    .and_then(|s| s.iter().position(|&x| x == '>'))
-                    .map_or(chars.len(), |p| i + p + 1);
-                out.push(' ');
-                i = end;
-                continue;
-            }
-        }
-        out.push(c);
-        i += 1;
     }
     // Quotations are someone else's words, for example a cited document.
     let out = strip_quotations(&out);
@@ -246,6 +211,46 @@ fn strip_non_prose(line: &str) -> String {
         .filter(|word| !(word.contains("://") || word.starts_with("www.")))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The index after the code span that starts at `start`: a run of backticks
+/// closed by a run of the same length.
+fn code_span_end(chars: &[char], start: usize) -> Option<usize> {
+    let run = backticks(chars, start);
+    let mut at = start + run;
+    while at < chars.len() {
+        let here = backticks(chars, at);
+        if here == run {
+            return Some(at + run);
+        }
+        at += here.max(1);
+    }
+    None
+}
+
+/// The length of the run of backticks at `at`.
+fn backticks(chars: &[char], at: usize) -> usize {
+    chars
+        .get(at..)
+        .map_or(0, |rest| rest.iter().take_while(|&&c| c == '`').count())
+}
+
+/// The index after the link destination that follows the `]` at `start`.
+fn link_destination_end(chars: &[char], start: usize) -> usize {
+    chars
+        .get(start + 2..)
+        .and_then(|rest| rest.iter().position(|&c| c == ')'))
+        .map_or(chars.len(), |p| start + 2 + p + 1)
+}
+
+/// The index after the autolink (`<https://...>`, `<mailto:...>`) at `start`.
+fn autolink_end(chars: &[char], start: usize) -> Option<usize> {
+    let head: String = chars.get(start + 1..)?.iter().take(7).collect();
+    if !(head.starts_with("http") || head.starts_with("mailto:")) {
+        return None;
+    }
+    let close = chars.get(start..)?.iter().position(|&c| c == '>');
+    Some(close.map_or(chars.len(), |p| start + p + 1))
 }
 
 /// Removes text between pairs of straight double quotes.
@@ -342,6 +347,37 @@ mod tests {
     fn toml_comments_are_checked_and_values_are_not() {
         let text = "# a user-agent string\nurl = \"https://hc-ping.com\"\n";
         assert_eq!(lint(text, Kind::TomlComments).len(), 1);
+    }
+
+    /// What is left of a line after the parts that are not prose are removed.
+    #[test]
+    fn non_prose_is_replaced_by_a_space() {
+        let cases = [
+            ("", ""),
+            ("plain words", "plain words"),
+            ("Use `cargo-deny` now", "Use   now"),
+            ("`` a ` b `` tail", "  tail"),
+            ("unclosed `code span with read-only", "unclosed "),
+            ("See [docs](https://x.org/a-b) now", "See [docs  now"),
+            ("A link [x](unclosed destination", "A link [x "),
+            (
+                "<https://a-b.example/x-y> and <mailto:a@b.c> ok",
+                "  and   ok",
+            ),
+            ("a < b and <html> tag", "a < b and <html> tag"),
+            ("unclosed <https://x.org", "unclosed  "),
+            ("trailing <", "trailing <"),
+            (
+                "go to https://c-d.org now and www.x-y.org too",
+                "go to now and too",
+            ),
+            ("say \"a b-c\" done", "say   done"),
+            ("An \"odd quote", "An  odd quote"),
+            ("`a \"b` c\" d", "  c  d"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(strip_non_prose(input), expected, "{input}");
+        }
     }
 
     #[test]

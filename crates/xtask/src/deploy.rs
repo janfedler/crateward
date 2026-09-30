@@ -22,6 +22,9 @@ define SUPERVISOR_UID = 997
 define BUILDER_UID = 998
 ";
 
+/// Where the firewall includes its variables on the server.
+const VARS_PATH: &str = "/etc/crateward/nftables-vars.nft";
+
 fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
     let out = command
         .output()
@@ -45,26 +48,36 @@ fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
 /// Fails if a tool is missing or a check finds a problem.
 pub fn run(root: &Path) -> Result<(), TaskError> {
     let deploy = root.join("deploy");
-    let ansible = deploy.join("ansible");
+    check_playbooks(&deploy.join("ansible"))?;
+    check_install_script(&deploy.join("install.sh"))?;
+    check_units(&deploy.join("systemd"))?;
+    check_firewall(root, &deploy.join("nftables").join("crateward.nft"))
+}
+
+fn check_playbooks(ansible: &Path) -> Result<(), TaskError> {
     for playbook in ["site.yml", "rollback.yml", "uninstall.yml"] {
+        let args = [
+            "-i",
+            "inventory.example.yml",
+            playbook,
+            "-e",
+            "@vars.example.yml",
+        ];
         check(
             Command::new("ansible-playbook")
-                .current_dir(&ansible)
-                .args([
-                    "-i",
-                    "inventory.example.yml",
-                    playbook,
-                    "-e",
-                    "@vars.example.yml",
-                    "--syntax-check",
-                ]),
+                .current_dir(ansible)
+                .args(args)
+                .arg("--syntax-check"),
             &format!("ansible-playbook --syntax-check {playbook}"),
         )?;
         eprintln!("xtask: {playbook} parses");
     }
-    // shellcheck is on the CI runners; a development machine may lack it.
-    let script = deploy.join("install.sh");
-    match Command::new("shellcheck").arg(&script).output() {
+    Ok(())
+}
+
+/// shellcheck is on the CI runners; a development machine may lack it.
+fn check_install_script(script: &Path) -> Result<(), TaskError> {
+    match Command::new("shellcheck").arg(script).output() {
         Ok(out) if out.status.success() => eprintln!("xtask: install.sh passes shellcheck"),
         Ok(out) => {
             return Err(TaskError::Check(format!(
@@ -77,43 +90,57 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         }
         Err(_) => eprintln!("xtask: no shellcheck here; CI runs it on install.sh"),
     }
-    let units = deploy.join("systemd");
-    let mut names: Vec<String> = std::fs::read_dir(&units)
-        .map_err(|e| TaskError::Io(units.clone(), e))?
+    Ok(())
+}
+
+fn check_units(units: &Path) -> Result<(), TaskError> {
+    let mut names: Vec<String> = std::fs::read_dir(units)
+        .map_err(|e| TaskError::Io(units.to_path_buf(), e))?
         .filter_map(Result::ok)
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
     for name in &names {
-        // The binaries exist only on the server; every other complaint
-        // counts.
-        let out = Command::new("systemd-analyze")
-            .current_dir(&units)
-            .args(["verify", "--man=no", &format!("./{name}")])
-            .output()
-            .map_err(|e| TaskError::Command(format!("cannot start systemd-analyze: {e}")))?;
-        let problems: Vec<String> = String::from_utf8_lossy(&out.stderr)
-            .lines()
-            .filter(|l| !l.contains("is not executable: No such file or directory"))
-            .filter(|l| !l.trim().is_empty())
-            .map(str::to_owned)
-            .collect();
-        if !problems.is_empty() {
-            return Err(TaskError::Check(format!(
-                "{name}:\n{}",
-                problems.join("\n")
-            )));
-        }
+        verify_unit(units, name)?;
     }
     eprintln!("xtask: {} units verify", names.len());
+    Ok(())
+}
+
+fn verify_unit(units: &Path, name: &str) -> Result<(), TaskError> {
+    let out = Command::new("systemd-analyze")
+        .current_dir(units)
+        .args(["verify", "--man=no", &format!("./{name}")])
+        .output()
+        .map_err(|e| TaskError::Command(format!("cannot start systemd-analyze: {e}")))?;
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let problems = unit_problems(&stderr);
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(TaskError::Check(format!(
+        "{name}:\n{}",
+        problems.join("\n")
+    )))
+}
+
+/// The binaries exist only on the server; every other complaint counts.
+fn unit_problems(stderr: &str) -> Vec<&str> {
+    stderr
+        .lines()
+        .filter(|l| !l.contains("is not executable: No such file or directory"))
+        .filter(|l| !l.trim().is_empty())
+        .collect()
+}
+
+fn check_firewall(root: &Path, rules_path: &Path) -> Result<(), TaskError> {
     let dir = root.join("target").join("deploy-check");
     std::fs::create_dir_all(&dir).map_err(|e| TaskError::Io(dir.clone(), e))?;
     let vars = dir.join("nftables-vars.nft");
     std::fs::write(&vars, SAMPLE_VARS).map_err(|e| TaskError::Io(vars.clone(), e))?;
-    let rules_path = deploy.join("nftables").join("crateward.nft");
-    let rules = std::fs::read_to_string(&rules_path)
-        .map_err(|e| TaskError::Io(rules_path.clone(), e))?
-        .replace("/etc/crateward/nftables-vars.nft", &vars.to_string_lossy());
+    let rules = std::fs::read_to_string(rules_path)
+        .map_err(|e| TaskError::Io(rules_path.to_path_buf(), e))?
+        .replace(VARS_PATH, &vars.to_string_lossy());
     let test = dir.join("crateward.nft");
     std::fs::write(&test, rules).map_err(|e| TaskError::Io(test.clone(), e))?;
     // In a new user and network namespace, so no privilege is needed and
@@ -138,6 +165,8 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    use super::*;
 
     fn read(relative: &str) -> String {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -181,5 +210,41 @@ mod tests {
             let stem = name.rsplit_once('.').unwrap().0;
             assert!(playbook.contains(&format!("  - {stem}\n")), "{name}");
         }
+    }
+
+    #[test]
+    fn a_missing_binary_is_no_problem_but_anything_else_is() {
+        let stderr = [
+            "x.service: Command /opt/crateward/bin/x is not executable: No such file or directory",
+            "",
+            "x.service: Unknown key 'Foo' in section [Service]",
+            "   ",
+            "x.service: Failed to create unit",
+        ]
+        .join("\n");
+        assert_eq!(
+            unit_problems(&stderr),
+            [
+                "x.service: Unknown key 'Foo' in section [Service]",
+                "x.service: Failed to create unit",
+            ]
+        );
+        assert!(unit_problems("").is_empty());
+    }
+
+    #[test]
+    fn a_missing_unit_directory_names_the_path() {
+        let path = Path::new("/nonexistent/units");
+        let Err(TaskError::Io(named, _)) = check_units(path) else {
+            panic!("the missing directory was not reported");
+        };
+        assert_eq!(named, path);
+    }
+
+    /// The dry run swaps the variables file for a sample; that only works
+    /// while the rules include the path it replaces.
+    #[test]
+    fn the_firewall_includes_the_variables_file() {
+        assert!(read("deploy/nftables/crateward.nft").contains(VARS_PATH));
     }
 }

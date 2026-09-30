@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 
 use crate::{GUEST_TARGET, TaskError, musl_cc, run};
 
@@ -98,17 +100,54 @@ fn only(dir: &Path, prefix: &str, suffix: &str) -> Result<PathBuf, TaskError> {
 /// Fails if a build fails, a guest artifact is missing, or the fake
 /// internet is not static.
 pub fn run_release(root: &Path) -> Result<(), TaskError> {
+    let version = env!("CARGO_PKG_VERSION");
+    let name = bundle_name(root, version)?;
+    build_binaries()?;
+
+    let target = root.join("target");
+    let out = target.join("release-bundle").join(&name);
+    create_bundle_dir(&out)?;
+    stage_binaries(&target, &out)?;
+    stage_guest(&target, &out)?;
+    stage_deploy(root, &out)?;
+
+    let sbom_path = out.join("sbom.cdx.json");
+    std::fs::write(&sbom_path, sbom(root, version)?).map_err(io(&sbom_path))?;
+    crate::vendor()?;
+    let vendor = "crateward-vendor.tar.gz";
+    copy(&target.join(vendor), &out.join(vendor), 0o644)?;
+
+    let sums_path = out.join("SHA256SUMS");
+    std::fs::write(&sums_path, sums(&out)?).map_err(io(&sums_path))?;
+    let archive = pack(&out)?;
+    eprintln!("xtask: wrote {}", out.display());
+    eprintln!("xtask: wrote {}", archive.display());
+    eprintln!(
+        "xtask: to sign it, run `ssh-keygen -Y sign -f <release key> -n file {}`, \
+         then `cargo xtask pack {}`",
+        sums_path.display(),
+        out.display()
+    );
+    Ok(())
+}
+
+/// `crateward-<version>-<commit>`, with `-dirty` if the working tree has
+/// changes.
+fn bundle_name(root: &Path, version: &str) -> Result<String, TaskError> {
     let commit = output(root, "git", &["rev-parse", "--short=12", "HEAD"])?;
     let dirty = !output(root, "git", &["status", "--porcelain"])?.is_empty();
-    let version = env!("CARGO_PKG_VERSION");
-    let name = format!(
-        "crateward-{version}-{commit}{}",
-        if dirty { "-dirty" } else { "" }
-    );
     if dirty {
         eprintln!("xtask: the working tree has changes; the bundle is marked dirty");
     }
+    Ok(format!(
+        "crateward-{version}-{commit}{}",
+        if dirty { "-dirty" } else { "" }
+    ))
+}
 
+/// Builds the host binaries, and the fake internet as a static binary for
+/// the sandbox.
+fn build_binaries() -> Result<(), TaskError> {
     run(
         "cargo",
         &["build", "--release", "--locked", "--workspace"],
@@ -126,16 +165,24 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
             "crateward_fake_internet",
         ],
         &[("CC_x86_64_unknown_linux_musl", musl_cc())],
-    )?;
+    )
+}
 
-    let target = root.join("target");
-    let out = target.join("release-bundle").join(&name);
+/// An empty directory for the bundle, with the ones that hold binaries and
+/// guest images.
+fn create_bundle_dir(out: &Path) -> Result<(), TaskError> {
     if out.exists() {
-        std::fs::remove_dir_all(&out).map_err(io(&out))?;
+        std::fs::remove_dir_all(out).map_err(io(out))?;
     }
     for dir in ["bin", "sandbox", "guest"] {
-        std::fs::create_dir_all(out.join(dir)).map_err(io(&out))?;
+        std::fs::create_dir_all(out.join(dir)).map_err(io(out))?;
     }
+    Ok(())
+}
+
+/// The service binaries, and the sandbox binaries: the launcher, the fake
+/// internet and Firecracker.
+fn stage_binaries(target: &Path, out: &Path) -> Result<(), TaskError> {
     let release = target.join("release");
     for binary in SERVICES {
         copy(&release.join(binary), &out.join("bin").join(binary), 0o755)?;
@@ -145,6 +192,18 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
         &out.join("sandbox/crateward-vmjail"),
         0o755,
     )?;
+    stage_fake_internet(target, out)?;
+    let firecracker = target.join("guest/bin/firecracker");
+    if !firecracker.is_file() {
+        return Err(TaskError::Check(
+            "no Firecracker; run `cargo xtask firecracker`".into(),
+        ));
+    }
+    copy(&firecracker, &out.join("sandbox/firecracker"), 0o755)
+}
+
+/// The fake internet runs on the bare guest, so it must not need a loader.
+fn stage_fake_internet(target: &Path, out: &Path) -> Result<(), TaskError> {
     let fake = target
         .join(GUEST_TARGET)
         .join("release")
@@ -156,14 +215,11 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
             fake.display()
         )));
     }
-    copy(&fake, &out.join("sandbox/crateward_fake_internet"), 0o755)?;
-    let firecracker = target.join("guest/bin/firecracker");
-    if !firecracker.is_file() {
-        return Err(TaskError::Check(
-            "no Firecracker; run `cargo xtask firecracker`".into(),
-        ));
-    }
-    copy(&firecracker, &out.join("sandbox/firecracker"), 0o755)?;
+    copy(&fake, &out.join("sandbox/crateward_fake_internet"), 0o755)
+}
+
+/// The guest kernel, the root filesystem and the authority it trusts.
+fn stage_guest(target: &Path, out: &Path) -> Result<(), TaskError> {
     let guest = target.join("guest/out");
     copy(
         &only(&guest, "kernel-", ".bzImage")?,
@@ -182,8 +238,11 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
         &target.join("guest/ca/authority.pem"),
         &out.join("guest/authority.pem"),
         0o600,
-    )?;
+    )
+}
 
+/// The playbooks, the units, `install.sh` and the example configuration.
+fn stage_deploy(root: &Path, out: &Path) -> Result<(), TaskError> {
     let deploy = root.join("deploy");
     for dir in ["ansible", "systemd", "nftables"] {
         copy_tree(&deploy.join(dir), &out.join("deploy").join(dir))?;
@@ -194,37 +253,12 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
         0o644,
     )?;
     copy(&deploy.join("install.sh"), &out.join("install.sh"), 0o755)?;
-    std::fs::create_dir_all(out.join("config")).map_err(io(&out))?;
+    std::fs::create_dir_all(out.join("config")).map_err(io(out))?;
     copy(
         &root.join("config/crateward.example.toml"),
         &out.join("config/crateward.example.toml"),
         0o644,
-    )?;
-
-    let sbom = sbom(root, version)?;
-    let sbom_path = out.join("sbom.cdx.json");
-    std::fs::write(&sbom_path, sbom).map_err(io(&sbom_path))?;
-
-    crate::vendor()?;
-    copy(
-        &target.join("crateward-vendor.tar.gz"),
-        &out.join("crateward-vendor.tar.gz"),
-        0o644,
-    )?;
-
-    let sums = sums(&out)?;
-    let sums_path = out.join("SHA256SUMS");
-    std::fs::write(&sums_path, sums).map_err(io(&sums_path))?;
-    let archive = pack(&out)?;
-    eprintln!("xtask: wrote {}", out.display());
-    eprintln!("xtask: wrote {}", archive.display());
-    eprintln!(
-        "xtask: to sign it, run `ssh-keygen -Y sign -f <release key> -n file {}`, \
-         then `cargo xtask pack {}`",
-        sums_path.display(),
-        out.display()
-    );
-    Ok(())
+    )
 }
 
 /// Copies the files below `from` to `to`, readable by everyone.
@@ -353,6 +387,42 @@ struct Pin {
 /// lockfile with its license and checksum, and the pinned third party
 /// parts of the sandbox.
 fn sbom(root: &Path, version: &str) -> Result<String, TaskError> {
+    let mut components = package_components(root)?;
+    components.push(firecracker_component(root)?);
+    components.push(linux_component(root)?);
+    components.push(debian_component(root)?);
+    components.extend(rust_components(root)?);
+    let bom = json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {
+            "component": { "type": "application", "name": "crateward", "version": version },
+        },
+        "components": components,
+    });
+    serde_json::to_string_pretty(&bom).map_err(|e| TaskError::Check(e.to_string()))
+}
+
+/// Reads and parses a TOML file below `root`.
+fn read_toml<T: DeserializeOwned>(root: &Path, path: &str) -> Result<T, TaskError> {
+    let file = root.join(path);
+    let text = std::fs::read_to_string(&file).map_err(io(&file))?;
+    toml::from_str(&text).map_err(|e| TaskError::Check(format!("{path}: {e}")))
+}
+
+/// The string at `key` in `table`, or an empty string.
+fn text(table: Option<&toml::Table>, key: &str) -> String {
+    let value = table.and_then(|t| t.get(key));
+    value
+        .and_then(toml::Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// The packages from crates.io, sorted by package URL. Workspace members
+/// are the product, not components.
+fn package_components(root: &Path) -> Result<Vec<Value>, TaskError> {
     let metadata = output(
         root,
         "cargo",
@@ -367,15 +437,13 @@ fn sbom(root: &Path, version: &str) -> Result<String, TaskError> {
     )?;
     let metadata: Metadata = serde_json::from_str(&metadata)
         .map_err(|e| TaskError::Check(format!("cargo metadata: {e}")))?;
-    let lock_path = root.join("Cargo.lock");
-    let lock: Lock = toml::from_str(&std::fs::read_to_string(&lock_path).map_err(io(&lock_path))?)
-        .map_err(|e| TaskError::Check(format!("Cargo.lock: {e}")))?;
+    let lock: Lock = read_toml(root, "Cargo.lock")?;
     let checksums: BTreeMap<(String, String), String> = lock
         .package
         .into_iter()
         .filter_map(|p| Some(((p.name, p.version), p.checksum?)))
         .collect();
-    let mut components: Vec<serde_json::Value> = metadata
+    let mut components: Vec<Value> = metadata
         .packages
         .iter()
         .filter(|p| {
@@ -383,124 +451,292 @@ fn sbom(root: &Path, version: &str) -> Result<String, TaskError> {
                 .as_deref()
                 .is_some_and(|s| s.starts_with("registry+"))
         })
-        .map(|p| {
-            let mut component = serde_json::Map::new();
-            component.insert("type".into(), "library".into());
-            component.insert("name".into(), p.name.clone().into());
-            component.insert("version".into(), p.version.clone().into());
-            component.insert(
-                "purl".into(),
-                format!("pkg:cargo/{}@{}", p.name, p.version).into(),
-            );
-            if let Some(license) = &p.license {
-                component.insert(
-                    "licenses".into(),
-                    serde_json::json!([{ "expression": license }]),
-                );
-            }
-            if let Some(sum) = checksums.get(&(p.name.clone(), p.version.clone())) {
-                component.insert(
-                    "hashes".into(),
-                    serde_json::json!([{ "alg": "SHA-256", "content": sum }]),
-                );
-            }
-            serde_json::Value::Object(component)
-        })
+        .map(|p| package_component(p, checksums.get(&(p.name.clone(), p.version.clone()))))
         .collect();
     components.sort_by_key(|c| c["purl"].as_str().map(str::to_owned));
-    let pin = |path: &str| -> Result<Pin, TaskError> {
-        let file = root.join(path);
-        toml::from_str(&std::fs::read_to_string(&file).map_err(io(&file))?)
-            .map_err(|e| TaskError::Check(format!("{path}: {e}")))
-    };
-    let firecracker = pin("guest/firecracker.toml")?;
-    components.push(serde_json::json!({
+    Ok(components)
+}
+
+fn package_component(package: &Package, checksum: Option<&String>) -> Value {
+    let (name, version) = (&package.name, &package.version);
+    let mut fields = serde_json::Map::new();
+    fields.insert("type".into(), json!("library"));
+    fields.insert("name".into(), json!(name));
+    fields.insert("version".into(), json!(version));
+    fields.insert("purl".into(), json!(format!("pkg:cargo/{name}@{version}")));
+    if let Some(license) = &package.license {
+        fields.insert("licenses".into(), json!([{ "expression": license }]));
+    }
+    if let Some(sum) = checksum {
+        fields.insert(
+            "hashes".into(),
+            json!([{ "alg": "SHA-256", "content": sum }]),
+        );
+    }
+    Value::Object(fields)
+}
+
+fn firecracker_component(root: &Path) -> Result<Value, TaskError> {
+    let pin: Pin = read_toml(root, "guest/firecracker.toml")?;
+    Ok(json!({
         "type": "application",
         "name": "firecracker",
-        "version": firecracker.version,
-        "hashes": [{ "alg": "SHA-256", "content": firecracker.sha256 }],
-        "externalReferences": [{ "type": "distribution", "url": firecracker.url }],
-    }));
-    let kernel: toml::Table = toml::from_str(
-        &std::fs::read_to_string(root.join("guest/kernel/kernel.toml"))
-            .map_err(io(&root.join("guest/kernel/kernel.toml")))?,
-    )
-    .map_err(|e| TaskError::Check(format!("guest/kernel/kernel.toml: {e}")))?;
+        "version": pin.version,
+        "hashes": [{ "alg": "SHA-256", "content": pin.sha256 }],
+        "externalReferences": [{ "type": "distribution", "url": pin.url }],
+    }))
+}
+
+fn linux_component(root: &Path) -> Result<Value, TaskError> {
+    let kernel: toml::Table = read_toml(root, "guest/kernel/kernel.toml")?;
     let source = kernel.get("source").and_then(toml::Value::as_table);
-    components.push(serde_json::json!({
+    Ok(json!({
         "type": "operating-system",
         "name": "linux",
-        "version": source.and_then(|s| s.get("version")).and_then(toml::Value::as_str).unwrap_or_default(),
+        "version": text(source, "version"),
         "externalReferences": [{
             "type": "vcs",
-            "url": format!(
-                "{}@{}",
-                source.and_then(|s| s.get("repository")).and_then(toml::Value::as_str).unwrap_or_default(),
-                source.and_then(|s| s.get("commit")).and_then(toml::Value::as_str).unwrap_or_default()
-            ),
+            "url": format!("{}@{}", text(source, "repository"), text(source, "commit")),
         }],
-    }));
-    let rootfs: toml::Table = toml::from_str(
-        &std::fs::read_to_string(root.join("guest/rootfs/rootfs.toml"))
-            .map_err(io(&root.join("guest/rootfs/rootfs.toml")))?,
-    )
-    .map_err(|e| TaskError::Check(format!("guest/rootfs/rootfs.toml: {e}")))?;
+    }))
+}
+
+fn debian_component(root: &Path) -> Result<Value, TaskError> {
+    let rootfs: toml::Table = read_toml(root, "guest/rootfs/rootfs.toml")?;
     let debian = rootfs.get("debian").and_then(toml::Value::as_table);
-    let text = |t: Option<&toml::Table>, key: &str| {
-        t.and_then(|t| t.get(key))
-            .and_then(toml::Value::as_str)
-            .unwrap_or_default()
-            .to_owned()
-    };
-    components.push(serde_json::json!({
+    let snapshot = text(debian, "snapshot");
+    Ok(json!({
         "type": "operating-system",
         "name": "debian",
         "version": text(debian, "suite"),
         "externalReferences": [{
             "type": "distribution",
-            "url": format!("https://snapshot.debian.org/archive/debian/{}/", text(debian, "snapshot")),
+            "url": format!("https://snapshot.debian.org/archive/debian/{snapshot}/"),
         }],
-    }));
-    let rust: toml::Table = toml::from_str(
-        &std::fs::read_to_string(root.join("guest/rootfs/rust.toml"))
-            .map_err(io(&root.join("guest/rootfs/rust.toml")))?,
-    )
-    .map_err(|e| TaskError::Check(format!("guest/rootfs/rust.toml: {e}")))?;
-    for part in rust
-        .get("component")
-        .and_then(toml::Value::as_array)
+    }))
+}
+
+fn rust_components(root: &Path) -> Result<Vec<Value>, TaskError> {
+    let rust: toml::Table = read_toml(root, "guest/rootfs/rust.toml")?;
+    let version = text(Some(&rust), "version");
+    let parts = rust.get("component").and_then(toml::Value::as_array);
+    Ok(parts
         .into_iter()
         .flatten()
         .filter_map(toml::Value::as_table)
-    {
-        components.push(serde_json::json!({
-            "type": "application",
-            "name": format!("rust-{}", text(Some(part), "dir")),
-            "version": rust.get("version").and_then(toml::Value::as_str).unwrap_or_default(),
-            "hashes": [{ "alg": "SHA-256", "content": text(Some(part), "sha256") }],
-            "externalReferences": [{ "type": "distribution", "url": text(Some(part), "url") }],
-        }));
-    }
-    let bom = serde_json::json!({
-        "bomFormat": "CycloneDX",
-        "specVersion": "1.6",
-        "version": 1,
-        "metadata": {
-            "component": { "type": "application", "name": "crateward", "version": version },
-        },
-        "components": components,
-    });
-    serde_json::to_string_pretty(&bom).map_err(|e| TaskError::Check(e.to_string()))
+        .map(|part| {
+            json!({
+                "type": "application",
+                "name": format!("rust-{}", text(Some(part), "dir")),
+                "version": version,
+                "hashes": [{ "alg": "SHA-256", "content": text(Some(part), "sha256") }],
+                "externalReferences": [{ "type": "distribution", "url": text(Some(part), "url") }],
+            })
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cw-release-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write(path: &Path, bytes: impl AsRef<[u8]>) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn mode(path: &Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    /// An ELF header, with a `PT_INTERP` program header if `loader` is set.
+    fn elf(loader: bool) -> Vec<u8> {
+        let mut bytes = vec![0; 64];
+        bytes[..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 2;
+        bytes[5] = 1;
+        if loader {
+            bytes[0x20] = 64;
+            bytes[0x36] = 56;
+            bytes[0x38] = 1;
+            bytes.extend([3, 0, 0, 0]);
+            bytes.resize(64 + 56, 0);
+        }
+        bytes
+    }
+
+    /// The build outputs that a bundle is made from.
+    fn fake_target(dir: &Path) -> PathBuf {
+        let target = dir.join("target");
+        for binary in SERVICES.iter().chain(&["crateward-vmjail"]) {
+            write(&target.join("release").join(binary), "binary");
+        }
+        let fake = target.join(GUEST_TARGET).join("release");
+        write(&fake.join("crateward_fake_internet"), elf(false));
+        write(&target.join("guest/bin/firecracker"), "firecracker");
+        write(&target.join("guest/out/kernel-6.1.bzImage"), "kernel");
+        write(&target.join("guest/out/rootfs.erofs"), "rootfs");
+        write(&target.join("guest/ca/authority.pem"), "authority");
+        target
+    }
+
+    #[test]
+    fn the_binaries_are_staged_and_executable() {
+        let dir = scratch("binaries");
+        let target = fake_target(&dir);
+        let out = dir.join("bundle");
+        create_bundle_dir(&out).unwrap();
+        stage_binaries(&target, &out).unwrap();
+        for binary in SERVICES {
+            assert_eq!(mode(&out.join("bin").join(binary)), 0o755, "{binary}");
+        }
+        for file in ["crateward-vmjail", "crateward_fake_internet", "firecracker"] {
+            assert_eq!(mode(&out.join("sandbox").join(file)), 0o755, "{file}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_binary_is_named() {
+        let dir = scratch("missing");
+        let target = fake_target(&dir);
+        std::fs::remove_file(target.join("release/crateward_feed")).unwrap();
+        let out = dir.join("bundle");
+        create_bundle_dir(&out).unwrap();
+        let error = stage_binaries(&target, &out).unwrap_err();
+        assert!(
+            error.to_string().contains("crateward_feed is missing"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_fake_internet_that_needs_a_loader_is_refused() {
+        let dir = scratch("loader");
+        let target = fake_target(&dir);
+        let fake = target
+            .join(GUEST_TARGET)
+            .join("release/crateward_fake_internet");
+        write(&fake, elf(true));
+        let out = dir.join("bundle");
+        create_bundle_dir(&out).unwrap();
+        let error = stage_binaries(&target, &out).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("crateward_fake_internet is not static"),
+            "{error}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_firecracker_names_its_task() {
+        let dir = scratch("firecracker");
+        let target = fake_target(&dir);
+        std::fs::remove_file(target.join("guest/bin/firecracker")).unwrap();
+        let out = dir.join("bundle");
+        create_bundle_dir(&out).unwrap();
+        let error = stage_binaries(&target, &out).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("no Firecracker; run `cargo xtask firecracker`")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_guest_files_are_staged_with_their_modes() {
+        let dir = scratch("guest");
+        let target = fake_target(&dir);
+        let out = dir.join("bundle");
+        create_bundle_dir(&out).unwrap();
+        stage_guest(&target, &out).unwrap();
+        assert_eq!(mode(&out.join("guest/kernel.bzImage")), 0o644);
+        assert_eq!(mode(&out.join("guest/rootfs.erofs")), 0o644);
+        assert_eq!(mode(&out.join("guest/authority.pem")), 0o600);
+        assert_eq!(
+            std::fs::read_to_string(out.join("guest/kernel.bzImage")).unwrap(),
+            "kernel"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_root_filesystem_names_its_task() {
+        let dir = scratch("rootfs");
+        let target = fake_target(&dir);
+        std::fs::remove_file(target.join("guest/out/rootfs.erofs")).unwrap();
+        let out = dir.join("bundle");
+        create_bundle_dir(&out).unwrap();
+        let error = stage_guest(&target, &out).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("no root filesystem; run `cargo xtask rootfs`")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn exactly_one_kernel_image_is_accepted() {
+        let dir = scratch("kernel");
+        let error = only(&dir, "kernel-", ".bzImage").unwrap_err().to_string();
+        assert!(error.contains("no kernel-*.bzImage in"), "{error}");
+        assert!(error.contains("run `cargo xtask guest-kernel`"), "{error}");
+        write(&dir.join("kernel-a.bzImage"), "a");
+        write(&dir.join("kernel-a.config"), "config");
+        assert_eq!(
+            only(&dir, "kernel-", ".bzImage").unwrap(),
+            dir.join("kernel-a.bzImage")
+        );
+        write(&dir.join("kernel-b.bzImage"), "b");
+        let error = only(&dir, "kernel-", ".bzImage").unwrap_err().to_string();
+        assert!(error.contains("several kernel-*.bzImage in"), "{error}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_deploy_files_are_staged() {
+        let dir = scratch("deploy");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        stage_deploy(&root, &dir).unwrap();
+        assert_eq!(mode(&dir.join("install.sh")), 0o755);
+        assert_eq!(mode(&dir.join("deploy/README.md")), 0o644);
+        assert_eq!(mode(&dir.join("config/crateward.example.toml")), 0o644);
+        assert!(dir.join("deploy/nftables/crateward.nft").is_file());
+        assert!(dir.join("deploy/ansible").is_dir());
+        assert!(dir.join("deploy/systemd").is_dir());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_bundle_directory_starts_empty() {
+        let dir = scratch("bundle");
+        write(&dir.join("old.txt"), "old");
+        create_bundle_dir(&dir).unwrap();
+        assert!(!dir.join("old.txt").exists());
+        for sub in ["bin", "sandbox", "guest"] {
+            assert!(dir.join(sub).is_dir(), "{sub}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn the_bill_of_materials_lists_locked_packages_with_checksums() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let bom: serde_json::Value = serde_json::from_str(&sbom(&root, "0.0.0").unwrap()).unwrap();
+        let bom: Value = serde_json::from_str(&sbom(&root, "0.0.0").unwrap()).unwrap();
         let components = bom["components"].as_array().unwrap();
         let serde = components.iter().find(|c| c["name"] == "serde").unwrap();
         assert!(

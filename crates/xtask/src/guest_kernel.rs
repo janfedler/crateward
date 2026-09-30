@@ -10,7 +10,7 @@
 //! survived. Build metadata (timestamp, user, host) is fixed so that two
 //! builds of the same inputs produce the same image.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use serde::Deserialize;
@@ -177,63 +177,89 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     for dir in [&build, &out_dir] {
         std::fs::create_dir_all(dir).map_err(|e| TaskError::Io(dir.clone(), e))?;
     }
-
     fetch(&manifest.source, &src)?;
+    configure(&manifest.config, &inputs, &src, &build)?;
+    compile(&manifest.build, &src, &build)?;
+    publish(&build, &out_dir, &manifest.source.version)
+}
 
-    let base = inputs.join(&manifest.config.base);
-    let fragment = inputs.join(&manifest.config.fragment);
-    let path = |p: &PathBuf| p.to_string_lossy().into_owned();
-    let make_dir = format!("O={}", path(&build));
+/// The `make` argument that names the build directory.
+fn make_dir(build: &Path) -> String {
+    format!("O={}", build.to_string_lossy())
+}
+
+/// Merges the fragment into the base configuration and checks that every
+/// option of the fragment survived.
+fn configure(
+    files: &ConfigFiles,
+    inputs: &Path,
+    src: &Path,
+    build: &Path,
+) -> Result<(), TaskError> {
+    let base = inputs.join(&files.base);
+    let fragment = inputs.join(&files.fragment);
+    let path = |p: &Path| p.to_string_lossy().into_owned();
     run_in(
-        &src,
+        src,
         "scripts/kconfig/merge_config.sh",
-        &["-m", "-O", &path(&build), &path(&base), &path(&fragment)],
+        &["-m", "-O", &path(build), &path(&base), &path(&fragment)],
         &[],
     )?;
-    run_in(&src, "make", &[&make_dir, "olddefconfig"], &[])?;
-
-    let missing = unmet(
-        &requirements(&read(&fragment)?),
+    run_in(src, "make", &[&make_dir(build), "olddefconfig"], &[])?;
+    check_fragment(
+        &files.fragment,
+        &read(&fragment)?,
         &read(&build.join(".config"))?,
-    );
-    if !missing.is_empty() {
-        return Err(TaskError::Check(format!(
-            "the kernel configuration lost options of {}:\n  {}",
-            manifest.config.fragment,
-            missing.join("\n  ")
-        )));
-    }
+    )
+}
 
+fn check_fragment(name: &str, fragment: &str, config: &str) -> Result<(), TaskError> {
+    let missing = unmet(&requirements(fragment), config);
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(TaskError::Check(format!(
+        "the kernel configuration lost options of {name}:\n  {}",
+        missing.join("\n  ")
+    )))
+}
+
+/// Builds the image with the fixed build metadata that makes it reproducible.
+fn compile(build: &Build, src: &Path, dir: &Path) -> Result<(), TaskError> {
     let jobs = format!(
         "-j{}",
         std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
     );
     run_in(
-        &src,
+        src,
         "make",
-        &[&make_dir, &jobs, "bzImage"],
+        &[&make_dir(dir), &jobs, "bzImage"],
         &[
-            ("KBUILD_BUILD_TIMESTAMP", manifest.build.timestamp.as_str()),
-            ("KBUILD_BUILD_USER", manifest.build.user.as_str()),
-            ("KBUILD_BUILD_HOST", manifest.build.host.as_str()),
+            ("KBUILD_BUILD_TIMESTAMP", build.timestamp.as_str()),
+            ("KBUILD_BUILD_USER", build.user.as_str()),
+            ("KBUILD_BUILD_HOST", build.host.as_str()),
         ],
-    )?;
+    )
+}
 
-    let name = format!("kernel-{}", manifest.source.version);
+/// Copies the image and the final configuration to `out_dir`.
+fn publish(build: &Path, out_dir: &Path, version: &str) -> Result<(), TaskError> {
+    let name = format!("kernel-{version}");
     let image = out_dir.join(format!("{name}.bzImage"));
-    let copy = |from: PathBuf, to: &PathBuf| {
-        std::fs::copy(&from, to)
-            .map(|_| ())
-            .map_err(|e| TaskError::Io(from, e))
-    };
-    copy(build.join("arch/x86/boot/bzImage"), &image)?;
+    copy(&build.join("arch/x86/boot/bzImage"), &image)?;
     copy(
-        build.join(".config"),
+        &build.join(".config"),
         &out_dir.join(format!("{name}.config")),
     )?;
     let digest = crate::images::blake3_file(&image)?;
     eprintln!("xtask: wrote {} (blake3 {digest})", image.display());
     Ok(())
+}
+
+fn copy(from: &Path, to: &Path) -> Result<(), TaskError> {
+    std::fs::copy(from, to)
+        .map(|_| ())
+        .map_err(|e| TaskError::Io(from.to_path_buf(), e))
 }
 
 #[cfg(test)]
@@ -265,6 +291,83 @@ mod tests {
                 "CONFIG_D is not set, wanted y".to_owned(),
             ]
         );
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("cw-kernel-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_fragment_that_survived_passes() {
+        let config = "CONFIG_A=y\nCONFIG_B=m\n# CONFIG_C is not set\n";
+        assert!(
+            check_fragment(
+                "f.config",
+                "CONFIG_A=y\nCONFIG_B=m\n# CONFIG_C is not set\n",
+                config
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_lost_option_names_the_fragment_and_each_option() {
+        let error = check_fragment(
+            "crateward.config",
+            "CONFIG_A=y\nCONFIG_B=y\nCONFIG_D=y\n",
+            "CONFIG_A=y\nCONFIG_B=m\n",
+        )
+        .unwrap_err();
+        assert!(matches!(error, TaskError::Check(_)));
+        assert_eq!(
+            error.to_string(),
+            "the kernel configuration lost options of crateward.config:\n  CONFIG_B is m, wanted y\n  CONFIG_D is not set, wanted y"
+        );
+    }
+
+    #[test]
+    fn the_image_and_the_configuration_are_published_under_the_version() {
+        let dir = scratch("publish");
+        let (build, out) = (dir.join("build"), dir.join("out"));
+        std::fs::create_dir_all(build.join("arch/x86/boot")).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(build.join("arch/x86/boot/bzImage"), "image").unwrap();
+        std::fs::write(build.join(".config"), "CONFIG_A=y\n").unwrap();
+        publish(&build, &out, "6.18.51").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(out.join("kernel-6.18.51.bzImage")).unwrap(),
+            "image"
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("kernel-6.18.51.config")).unwrap(),
+            "CONFIG_A=y\n"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_image_names_its_path() {
+        let dir = scratch("no-image");
+        let out = dir.join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let Err(TaskError::Io(path, _)) = publish(&dir.join("build"), &out, "1") else {
+            panic!("the missing image was not reported");
+        };
+        assert_eq!(path, dir.join("build/arch/x86/boot/bzImage"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_real_manifest_parses_and_names_files_that_exist() {
+        let inputs = crate::workspace_root().join("guest/kernel");
+        let manifest: Manifest =
+            toml::from_str(&std::fs::read_to_string(inputs.join("kernel.toml")).unwrap()).unwrap();
+        assert_eq!(manifest.source.commit.len(), 40);
+        assert!(inputs.join(&manifest.config.base).is_file());
+        assert!(inputs.join(&manifest.config.fragment).is_file());
     }
 
     #[test]
