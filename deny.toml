@@ -17,6 +17,11 @@ ignore = [
     # YARA-X does not enable WASI, and the analysis child has no filesystem
     # access (Landlock). Remove with the entry above.
     { id = "RUSTSEC-2026-0269", reason = "WASI is not used; the child has no filesystem access" },
+    # wasmtime 45: dynamic record lifting can allocate beyond the hostcall
+    # fuel limit. Records are lifted only by the component model, and YARA-X
+    # builds wasmtime without the `component-model` feature, so that code is
+    # not compiled in. Remove with the entries above (fixed in 48.0.3).
+    { id = "RUSTSEC-2026-0316", reason = "the wasmtime component model is not compiled in" },
     # bincode 2 is unmaintained. YARA-X uses it only to (de)serialize compiled
     # rules, which Crateward never loads from outside; rules are compiled from
     # source embedded in the binary.
