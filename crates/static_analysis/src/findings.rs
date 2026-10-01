@@ -239,6 +239,40 @@ pub struct Finding {
     pub platform: Platform,
     /// The code or literal that triggered it, truncated.
     pub evidence: String,
+    /// The source lines around [`Finding::line`], for review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<Snippet>,
+}
+
+/// A few lines of a text file around a finding, made safe like
+/// [`evidence`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Snippet {
+    /// Number of the first line, counting from 1.
+    pub start: u32,
+    /// The lines, each escaped and truncated.
+    pub lines: Vec<String>,
+}
+
+/// Lines shown before and after the finding's line.
+pub const SNIPPET_CONTEXT: usize = 3;
+
+impl Snippet {
+    /// The lines around `line` of `text`, or `None` when the file has no
+    /// such line.
+    #[must_use]
+    pub fn around(text: &str, line: u32) -> Option<Self> {
+        let at = usize::try_from(line).ok().filter(|&l| l > 0)?;
+        let first = at.saturating_sub(SNIPPET_CONTEXT).max(1);
+        let lines: Vec<String> = text
+            .lines()
+            .skip(first - 1)
+            .take(at - first + SNIPPET_CONTEXT + 1)
+            .map(|l| evidence(&l.replace('\t', "    ")))
+            .collect();
+        let start = u32::try_from(first).ok()?;
+        (lines.len() > at - first).then_some(Self { start, lines })
+    }
 }
 
 /// Longest evidence text kept.
@@ -283,6 +317,23 @@ pub fn evidence(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snippets_hold_the_lines_around_a_finding() {
+        let text = "1\n2\n3\n4\n5\n6\n7\n8\n9\n";
+        let mid = Snippet::around(text, 5).unwrap();
+        assert_eq!((mid.start, mid.lines.join("")), (2, "2345678".into()));
+        let top = Snippet::around(text, 1).unwrap();
+        assert_eq!((top.start, top.lines.join("")), (1, "1234".into()));
+        let end = Snippet::around(text, 9).unwrap();
+        assert_eq!((end.start, end.lines.join("")), (6, "6789".into()));
+        assert_eq!(Snippet::around(text, 10), None);
+        assert_eq!(Snippet::around(text, 0), None);
+        let bidi = Snippet::around("let a = \"\u{202E}x\";\n", 1).unwrap();
+        assert_eq!(bidi.lines, ["let a = \"\\u{202e}x\";"]);
+        let tab = Snippet::around("\tlet a = 1;\r\n", 1).unwrap();
+        assert_eq!(tab.lines, ["    let a = 1;"]);
+    }
 
     #[test]
     fn severity_names_are_the_serialized_names() {

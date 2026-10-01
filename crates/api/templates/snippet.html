@@ -1,0 +1,5 @@
+{# The source lines around a finding; `snippet` holds number, text and
+   whether it is the finding's line. The text was escaped by the analysis
+   and is escaped again here. #}
+<pre class="code">{% for (n, line, hit) in snippet %}<span class="ln">{{ n }}</span><span class="src{% if *hit %} hit{% endif %}">{{ line }}</span>
+{% endfor %}</pre>

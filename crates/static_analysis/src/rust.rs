@@ -226,6 +226,7 @@ impl Scanner<'_> {
             cfg,
             platform,
             evidence: evidence(text),
+            snippet: None,
         });
     }
 
@@ -578,6 +579,7 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
                     cfg: None,
                     platform: Platform::Any,
                     evidence: evidence(&error.to_string()),
+                    snippet: None,
                 }],
                 ..FileScan::default()
             };
@@ -614,6 +616,7 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
             platform: cfg.as_deref().map_or(Platform::Any, Platform::from_cfg),
             cfg,
             evidence: format!("{} unsafe blocks, functions or impls", scanner.unsafe_count),
+            snippet: None,
         });
     }
     scanner.scan.file_cfg = file_cfg;

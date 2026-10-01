@@ -30,8 +30,9 @@ use crateward_core::failure::FailureClass;
 use crateward_core::job::{Limits, Stage, StageLimits, Triage};
 use crateward_core::retry::RetryPolicy;
 use crateward_core::sandbox;
-use crateward_core::store::{CrateFile, NewJob, Policies, Store, StoredJob};
-use crateward_core::verdict::StaticOnlyReason;
+use crateward_core::store::{CrateFile, NewJob, Policies, Review, Store, StoredJob};
+use crateward_core::verdict::{Coverage, RiskLevel, StaticOnlyReason, Verdict};
+
 use crateward_static_analysis::analyze::{ANALYZER_VERSION, AnalyzeLimits, StaticReport, analyze};
 use crateward_static_analysis::diff::diff;
 use crateward_static_analysis::sandboxed::analyze_in_sandbox;
@@ -681,6 +682,64 @@ async fn old_and_damaged_reports_are_analyzed_again() {
     assert_eq!(version, ANALYZER_VERSION);
     assert_eq!(report, serde_json::to_value(report_of(&dep_tar)).unwrap());
     assert!(lab.report_columns(&dep).await.0);
+    lab.finish().await;
+}
+
+#[tokio::test]
+async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
+    if !sandbox_available() {
+        return;
+    }
+    let Some(mut lab) = Lab::start().await else {
+        return;
+    };
+    let tar = tar_of("app", "1.0.0", true);
+    let waiting = lab.publish("app", "1.0.0", &tar).await;
+    let unscored = lab
+        .publish("lib", "1.0.0", &tar_of("lib", "1.0.0", false))
+        .await;
+    let broken = lab
+        .publish(
+            "bad",
+            "1.0.0",
+            &tar_with("bad", "1.0.0", &[("src/lib.rs", b"")]),
+        )
+        .await;
+    for job in [&waiting, &unscored, &broken] {
+        lab.store_report(job, ANALYZER_VERSION - 1, &json!({}))
+            .await;
+    }
+    let verdict = Verdict {
+        score: 60,
+        level: RiskLevel::High,
+        coverage: Coverage::DynamicLinux,
+        evidence: Vec::new(),
+        profile: Vec::new(),
+        new_behavior: Vec::new(),
+        analyzer_version: 1,
+    };
+    for job in [&waiting, &broken] {
+        lab.store.record_verdict(job.id, &verdict).await.unwrap();
+    }
+    lab.store
+        .set_review(waiting.id, Review::Pending, None)
+        .await
+        .unwrap();
+
+    assert_eq!(lab.analyzer.refresh_some().await.unwrap(), 1);
+    let (version, report) = lab.stored_report(&waiting).await.unwrap();
+    assert_eq!(version, ANALYZER_VERSION);
+    assert_eq!(report, serde_json::to_value(report_of(&tar)).unwrap());
+    assert_eq!(
+        lab.stored_report(&unscored).await.unwrap().0,
+        ANALYZER_VERSION - 1
+    );
+    assert_eq!(
+        lab.stored_report(&broken).await.unwrap().0,
+        ANALYZER_VERSION - 1
+    );
+    // The archive that fails is not tried again.
+    assert_eq!(lab.analyzer.refresh_some().await.unwrap(), 0);
     lab.finish().await;
 }
 

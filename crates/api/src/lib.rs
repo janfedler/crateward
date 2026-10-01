@@ -234,36 +234,105 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
     ))
 }
 
-fn findings(report: &serde_json::Value) -> Vec<FindingView> {
-    let text = |v: &serde_json::Value, key: &str| {
-        v.get(key)
-            .map(|x| x.as_str().map_or_else(|| x.to_string(), str::to_owned))
-            .unwrap_or_default()
+fn text(v: &serde_json::Value, key: &str) -> String {
+    v.get(key)
+        .map(|x| x.as_str().map_or_else(|| x.to_string(), str::to_owned))
+        .unwrap_or_default()
+}
+
+/// A finding's file and line, as evidence names its location.
+fn finding_location(f: &serde_json::Value) -> String {
+    match f.get("line").and_then(serde_json::Value::as_u64) {
+        Some(l) => format!("{}:{l}", text(f, "file")),
+        None => text(f, "file"),
+    }
+}
+
+/// A finding's signal name, as static evidence names it.
+fn finding_signal(f: &serde_json::Value) -> String {
+    match f.get("rule").and_then(serde_json::Value::as_str) {
+        Some(rule) => format!("static:yara:{rule}"),
+        None => format!("static:{}", text(f, "kind")),
+    }
+}
+
+/// The source lines the analysis kept around a finding.
+fn snippet(f: &serde_json::Value) -> Vec<(u64, String, bool)> {
+    let Some(s) = f.get("snippet") else {
+        return Vec::new();
     };
-    report
-        .get("findings")
+    let start = s
+        .get("start")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    let line = f.get("line").and_then(serde_json::Value::as_u64);
+    s.get("lines")
         .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
+        .zip(start..)
+        .map(|(t, n)| {
+            (
+                n,
+                t.as_str().unwrap_or_default().to_owned(),
+                Some(n) == line,
+            )
+        })
+        .collect()
+}
+
+fn report_findings(report: &serde_json::Value) -> &[serde_json::Value] {
+    report
+        .get("findings")
+        .and_then(serde_json::Value::as_array)
+        .map_or(&[], Vec::as_slice)
+}
+
+fn findings(report: &serde_json::Value) -> Vec<FindingView> {
+    report_findings(report)
+        .iter()
         .take(300)
         .map(|f| {
             let kind = match f.get("rule").and_then(serde_json::Value::as_str) {
                 Some(rule) => format!("{} {rule}", text(f, "kind")),
                 None => text(f, "kind"),
             };
-            let line = f.get("line").and_then(serde_json::Value::as_u64);
             FindingView {
                 severity: text(f, "severity"),
                 kind,
                 context: text(f, "context"),
-                location: match line {
-                    Some(l) => format!("{}:{l}", text(f, "file")),
-                    None => text(f, "file"),
-                },
+                location: finding_location(f),
                 evidence: text(f, "evidence"),
+                snippet: snippet(f),
             }
         })
         .collect()
+}
+
+/// Shows the code behind each piece of static evidence: the finding of the
+/// same kind at the same place, or in the same file when the verdict
+/// predates line numbers for that kind.
+fn attach_snippets(evidence: &mut [EvidenceView], report: &serde_json::Value) {
+    let findings = report_findings(report);
+    for e in evidence
+        .iter_mut()
+        .filter(|e| e.source == "static" || e.signal == "new_high_finding")
+    {
+        let same_kind = |f: &&serde_json::Value| {
+            e.signal == "new_high_finding" || finding_signal(f) == e.signal
+        };
+        let found = findings
+            .iter()
+            .filter(same_kind)
+            .find(|f| finding_location(f) == e.location)
+            .or_else(|| {
+                findings
+                    .iter()
+                    .filter(same_kind)
+                    .find(|f| text(f, "file") == e.location)
+            });
+        e.snippet = found.map(snippet).unwrap_or_default();
+    }
 }
 
 fn disclosure_rows(d: Disclosure) -> Vec<(String, String)> {
@@ -316,6 +385,7 @@ fn evidence_view(e: Evidence) -> EvidenceView {
         package: e.package.unwrap_or_default(),
         location: e.location.unwrap_or_default(),
         summary: e.summary,
+        snippet: Vec::new(),
     }
 }
 
@@ -339,8 +409,11 @@ async fn job(
         return Ok((StatusCode::NOT_FOUND, "no such job").into_response());
     };
     let verdict = store.verdict(job.id).await?.map(verdict_view);
-    let verdict = verdict.unwrap_or_default();
-    let static_report = store.static_report(&job.cksum).await?;
+    let mut verdict = verdict.unwrap_or_default();
+    let static_report = store.static_report(&job.cksum).await?.map(|(_, r)| r);
+    if let Some(report) = &static_report {
+        attach_snippets(&mut verdict.evidence, report);
+    }
     let disclosure = store.disclosure(job.id).await?;
     let events = store.events(job.id).await?;
     let runs = store.job_runs(job.id).await?;
@@ -361,7 +434,7 @@ async fn job(
         evidence: verdict.evidence,
         new_behavior: verdict.new_behavior,
         profile: verdict.profile,
-        findings: static_report.map(|(_, r)| findings(&r)).unwrap_or_default(),
+        findings: static_report.as_ref().map(findings).unwrap_or_default(),
         timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
         runs: runs
             .into_iter()

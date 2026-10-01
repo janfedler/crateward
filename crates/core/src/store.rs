@@ -721,6 +721,42 @@ impl Store {
             .map(|r| (r.get(0), r.get(1))))
     }
 
+    /// Crate files of scored jobs whose static report an older analyzer
+    /// wrote, verdicts waiting for review first, then the newest.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn outdated_static_reports(
+        &self,
+        analyzer_version: i32,
+        limit: i64,
+    ) -> Result<Vec<Sha256Digest>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT r.sha256, max(j.id) FROM static_reports r
+                 JOIN jobs j ON j.cksum = r.sha256
+                 JOIN verdicts v ON v.job_id = j.id
+                 WHERE r.analyzer_version < $1
+                 GROUP BY r.sha256
+                 ORDER BY bool_or(v.review = 'pending') DESC, max(j.id) DESC
+                 LIMIT $2",
+                &[&analyzer_version, &limit],
+            )
+            .await?;
+        rows.iter()
+            .map(|r| {
+                let bytes: Vec<u8> = r.get(0);
+                let bytes: [u8; 32] = bytes.try_into().map_err(|_| StoreError::Corrupt {
+                    id: r.get(1),
+                    reason: "checksum is not 32 bytes".into(),
+                })?;
+                Ok(Sha256Digest::from_bytes(bytes))
+            })
+            .collect()
+    }
+
     /// Stores or replaces the static report of a crate file.
     ///
     /// # Errors

@@ -93,7 +93,10 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             stop.clone(),
         ));
         while !stop.is_requested() {
-            if !analyzer.run_once().await.map_err(fatal)? {
+            // Idle time goes to reports an older analyzer wrote.
+            if !analyzer.run_once().await.map_err(fatal)?
+                && analyzer.refresh_some().await.map_err(fatal)? == 0
+            {
                 stop.sleep(Duration::from_secs(1)).await;
             }
         }

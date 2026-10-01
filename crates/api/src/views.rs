@@ -132,6 +132,8 @@ pub struct EvidenceView {
     pub location: String,
     /// Summary.
     pub summary: String,
+    /// The source around it: line number, text, whether it is the line.
+    pub snippet: Vec<(u64, String, bool)>,
 }
 
 /// The parts of a job page that come from its verdict.
@@ -164,6 +166,8 @@ pub struct FindingView {
     pub location: String,
     /// Evidence.
     pub evidence: String,
+    /// The source around it: line number, text, whether it is the line.
+    pub snippet: Vec<(u64, String, bool)>,
 }
 
 /// A job's page.

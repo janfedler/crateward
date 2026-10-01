@@ -88,6 +88,8 @@ pub struct Analyzer {
     pub worker: String,
     /// Lease duration.
     pub lease: Duration,
+    /// Crate files that failed to analyze again, left alone until restart.
+    unrefreshable: BTreeSet<Sha256Digest>,
 }
 
 impl Analyzer {
@@ -112,6 +114,7 @@ impl Analyzer {
             policies,
             worker: format!("static-{}", std::process::id()),
             lease,
+            unrefreshable: BTreeSet::new(),
         }
     }
 
@@ -162,6 +165,36 @@ impl Analyzer {
             .complete(job.id, &worker, event, &policies, false)
             .await?;
         Ok(true)
+    }
+
+    /// Analyzes again, a few per call, the crate files of scored jobs whose
+    /// report an older analyzer wrote, so the dashboard shows what the
+    /// current one adds, such as source snippets. Verdicts waiting for
+    /// review go first. Returns how many reports were written.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if the store fails.
+    pub async fn refresh_some(&mut self) -> Result<usize, StoreError> {
+        let limit = 10 + self.unrefreshable.len();
+        let outdated: Vec<Sha256Digest> = self
+            .store
+            .outdated_static_reports(ANALYZER_VERSION, i64::try_from(limit).unwrap_or(i64::MAX))
+            .await?
+            .into_iter()
+            .filter(|sha| !self.unrefreshable.contains(sha))
+            .take(10)
+            .collect();
+        let reports = match self.ensure_reports(&outdated).await {
+            Ok(reports) => reports,
+            Err(failure) => {
+                tracing::warn!(%failure, "cannot refresh static reports");
+                return Ok(0);
+            }
+        };
+        self.unrefreshable
+            .extend(outdated.iter().filter(|sha| !reports.contains_key(sha)));
+        Ok(reports.len())
     }
 
     /// Analyzes one job and records the decision.

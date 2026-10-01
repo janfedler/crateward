@@ -94,15 +94,28 @@ impl Rules {
                         base
                     },
                     file: file.to_owned(),
-                    line: None,
+                    line: first_line(data, &rule),
                     context,
                     cfg: None,
                     platform: Platform::Any,
                     evidence: evidence(&description),
+                    snippet: None,
                 })
             })
             .collect()
     }
+}
+
+/// The line of the rule's first match, for files that are text.
+fn first_line(data: &[u8], rule: &yara_x::Rule<'_, '_>) -> Option<u32> {
+    std::str::from_utf8(data).ok()?;
+    let offset = rule
+        .patterns()
+        .flat_map(|p| p.matches())
+        .map(|m| m.range().start)
+        .min()?;
+    let breaks = data.get(..offset)?.iter().filter(|&&b| b == b'\n').count();
+    u32::try_from(breaks + 1).ok()
 }
 
 #[cfg(test)]
@@ -155,6 +168,18 @@ mod tests {
             1
         );
         assert_eq!(rules.scan("Makefile", bidi, CodeContext::Library).len(), 1);
+    }
+
+    #[test]
+    fn matches_in_text_files_have_a_line() {
+        let rules = Rules::builtin().unwrap();
+        let source = b"fn main() {\n    // probe\n    std::fs::read(\"/proc/self/cgroup\");\n}\n";
+        let found = rules.scan("build.rs", source, CodeContext::BuildScript);
+        assert_eq!(found[0].line, Some(3));
+        let mut elf = vec![0x7F, b'E', b'L', b'F', 0xFF];
+        elf.extend([0_u8; 60]);
+        let found = rules.scan("lib.so", &elf, CodeContext::Library);
+        assert_eq!(found[0].line, None);
     }
 
     #[test]

@@ -55,7 +55,12 @@ about 10 MB of Rust per second; the largest crate seen (`windows` 0.59.0,
 ## Consequences
 
 * Every finding explains itself with a file, usually a line, the context,
-  the `cfg` and a truncated evidence string.
+  the `cfg` and a truncated evidence string. The first 300 findings with a
+  line also keep the three lines before and after it, escaped like the
+  evidence, so a reviewer reads the code on the job page without unpacking
+  the crate. YARA-X matches in text files get the line of their first match.
+* A report from an older analyzer is written again when a job needs it, and
+  in idle time for scored jobs, verdicts waiting for review first.
 * About half of the sampled jobs are dynamic, more than three VM slots can
   take at busy times; the dynamic deadline turns the rest into static only
   verdicts, labeled with the reason.
