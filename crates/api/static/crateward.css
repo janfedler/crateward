@@ -25,6 +25,8 @@ th { color: var(--muted); font-weight: 600; }
 /* Short values (numbers, states, times) never break: with `anywhere`
    above, a long neighbor would squeeze them to a few characters. */
 .nowrap { white-space: nowrap; }
+/* Identifiers (kinds, signals, crate names) wrap at spaces only. */
+.word { overflow-wrap: normal; }
 .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .level-critical, .level-high { color: var(--bad); font-weight: 700; }
 .level-medium { color: var(--warn); font-weight: 600; }

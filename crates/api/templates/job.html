@@ -33,7 +33,7 @@
 <table>
 <tr><th>Points</th><th>Signal</th><th>Source</th><th>Package</th><th>Where</th><th>What</th></tr>
 {% for e in evidence %}
-<tr><td class="nowrap">{{ e.points }}</td><td>{{ e.signal }}</td><td>{{ e.source }}</td><td>{{ e.package }}</td><td>{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
+<tr><td class="nowrap">{{ e.points }}</td><td class="word">{{ e.signal }}</td><td class="word">{{ e.source }}</td><td class="word">{{ e.package }}</td><td>{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
 {% endfor %}
 </table>
 {% endif %}
@@ -51,7 +51,7 @@
 <table>
 <tr><th>Severity</th><th>Kind</th><th>Context</th><th>Where</th><th>Evidence</th></tr>
 {% for f in findings %}
-<tr><td class="nowrap">{{ f.severity }}</td><td>{{ f.kind }}</td><td>{{ f.context }}</td><td><a href="{{ f.code_url }}" rel="noreferrer noopener" target="_blank">{{ f.location }}</a></td><td>{{ f.evidence }}</td></tr>
+<tr><td class="nowrap">{{ f.severity }}</td><td class="word">{{ f.kind }}</td><td class="word">{{ f.context }}</td><td><a href="{{ f.code_url }}" rel="noreferrer noopener" target="_blank">{{ f.location }}</a></td><td>{{ f.evidence }}</td></tr>
 {% endfor %}
 </table>
 {% endif %}
