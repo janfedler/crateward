@@ -8,7 +8,7 @@
 //! access policy limits API use to one request per second, so a larger value
 //! is a configuration error, not a tuning choice.
 //!
-//! Secrets (database URL, ntfy topic, heartbeat URL) are [`SecretString`]s.
+//! Secrets (database URL, ntfy topic) are [`SecretString`]s.
 //! Their `Debug` output is redacted, so logging a configuration never leaks
 //! them. They are only needed on the host; nothing here is ever sent to a
 //! guest.
@@ -57,8 +57,6 @@ pub struct Config {
     pub supervisor: SupervisorConfig,
     /// Where alerts go.
     pub notifier: NotifierConfig,
-    /// The external dead man's switch.
-    pub heartbeat: HeartbeatConfig,
     /// The admin dashboard.
     pub web: WebConfig,
     /// Where the public site is pushed (ADR 0009). Without this table the
@@ -419,17 +417,6 @@ pub enum NotifierConfig {
         /// password, so it must be long and random.
         topic: SecretString,
     },
-}
-
-/// The external dead man's switch.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HeartbeatConfig {
-    /// Ping URL of the healthchecks.io check. Secret, since anyone holding
-    /// it can fake a heartbeat.
-    pub ping_url: SecretString,
-    /// Seconds between pings.
-    pub interval_secs: u64,
 }
 
 /// The admin dashboard.
@@ -793,19 +780,6 @@ impl Config {
         v.absolute(&self.fetcher.cargo_bin, "fetcher.cargo_bin");
         self.validate_supervisor(v);
         self.validate_notifier(v);
-        let ping_ok = Url::parse(self.heartbeat.ping_url.expose_secret())
-            .is_ok_and(|url| url.scheme() == "https");
-        v.check(
-            ping_ok,
-            "heartbeat.ping_url",
-            "must be an https URL (value not shown, it is secret)",
-        );
-        v.between(
-            self.heartbeat.interval_secs,
-            10,
-            600,
-            "heartbeat.interval_secs",
-        );
         v.check(
             self.web.listen.ip().is_loopback(),
             "web.listen",
@@ -905,7 +879,10 @@ mod tests {
     fn debug_output_redacts_secrets() {
         let config = Config::from_toml(EXAMPLE).unwrap();
         let debug = format!("{config:?}");
-        assert!(!debug.contains(config.heartbeat.ping_url.expose_secret()));
+        let NotifierConfig::Ntfy { topic, .. } = &config.notifier else {
+            panic!("the example uses ntfy");
+        };
+        assert!(!debug.contains(topic.expose_secret()));
         assert!(!debug.contains(config.database.url.expose_secret()));
     }
 
@@ -1500,7 +1477,7 @@ mod tests {
     }
 
     #[test]
-    fn notifier_heartbeat_and_web_rules() {
+    fn notifier_and_web_rules() {
         accepted(|c| c.notifier = NotifierConfig::Log);
         let ntfy = |server_url: Url, topic: &str| NotifierConfig::Ntfy {
             server_url,
@@ -1531,21 +1508,6 @@ mod tests {
         ] {
             accepted(|c| secure(c, &topic));
         }
-        for url in ["http://hc-ping.com/x", "not a url", ""] {
-            let message = "must be an https URL (value not shown, it is secret)";
-            rule(
-                |c| c.heartbeat.ping_url = url.into(),
-                "heartbeat.ping_url",
-                message,
-            );
-        }
-        limits(
-            |c, n| c.heartbeat.interval_secs = n,
-            &[10, 600],
-            &[9, 601],
-            "heartbeat.interval_secs",
-            "must be between 10 and 600",
-        );
         for listen in ["127.0.0.1:8080", "[::1]:8080", "127.5.5.5:1"] {
             accepted(|c| c.web.listen = listen.parse().unwrap());
         }
@@ -1609,8 +1571,6 @@ mod tests {
             server_url: http(),
             topic: "short".into(),
         };
-        c.heartbeat.ping_url = "http://x".into();
-        c.heartbeat.interval_secs = 0;
         c.web.listen = "0.0.0.0:1".parse().unwrap();
         let export = c.export.as_mut().unwrap();
         export.repository = "x".into();
@@ -1685,7 +1645,7 @@ mod tests {
         "supervisor.breaker_failure_percent supervisor.breaker_window_secs ",
         "supervisor.breaker_cooldown_secs supervisor.alert_repeat_hours ",
         "supervisor.integrity_interval_minutes supervisor.decoys supervisor.decoys ",
-        "notifier.server_url notifier.topic heartbeat.ping_url heartbeat.interval_secs ",
+        "notifier.server_url notifier.topic ",
         "web.listen",
     );
 

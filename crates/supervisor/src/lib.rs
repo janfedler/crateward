@@ -26,10 +26,8 @@
 //!   through the notifier, repeating the same alert at most every
 //!   `supervisor.alert_repeat_hours`.
 //!
-//! A separate task pings healthchecks.io while rounds succeed, so a dead
-//! server, a dead supervisor or an unreachable database all end in the
-//! heartbeat alert. Quarantine is set in the same transaction as the
-//! suspected compromise (see `Store::complete`) and only a human lifts it.
+//! Quarantine is set in the same transaction as the suspected compromise
+//! (see `Store::complete`) and only a human lifts it.
 
 #![forbid(unsafe_code)]
 
@@ -38,8 +36,6 @@ pub mod integrity;
 pub mod notify;
 
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use crateward_core::app::{self, ComponentError, Stop};
@@ -246,38 +242,6 @@ fn usage(path: &Path) -> Option<u8> {
     ))
 }
 
-/// Pings the heartbeat URL while rounds keep succeeding.
-async fn heartbeat(
-    client: reqwest::Client,
-    url: String,
-    interval: Duration,
-    last_ok: Arc<AtomicI64>,
-    stop: Stop,
-) {
-    let placeholder = checks::is_placeholder_ping(&url);
-    if placeholder {
-        tracing::warn!("heartbeat.ping_url is the example placeholder; not pinging");
-    }
-    while !stop.is_requested() {
-        let fresh = now_secs().saturating_sub(last_ok.load(Ordering::SeqCst))
-            <= i64::try_from(interval.as_secs().saturating_mul(3)).unwrap_or(i64::MAX);
-        if fresh && !placeholder {
-            match client.get(&url).send().await {
-                Ok(response) if response.status().is_success() => {}
-                Ok(response) => tracing::warn!(status = %response.status(), "heartbeat refused"),
-                Err(error) => tracing::warn!(error = %error.without_url(), "heartbeat failed"),
-            }
-        }
-        stop.sleep(interval).await;
-    }
-}
-
-fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-}
-
 /// Runs the component until shutdown.
 ///
 /// # Errors
@@ -314,21 +278,11 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         };
 
         let stop = Stop::install().map_err(fatal)?;
-        let last_ok = Arc::new(AtomicI64::new(0));
-        tokio::spawn(heartbeat(
-            client,
-            config.heartbeat.ping_url.expose_secret().to_owned(),
-            Duration::from_secs(config.heartbeat.interval_secs),
-            Arc::clone(&last_ok),
-            stop.clone(),
-        ));
 
         let interval = Duration::from_secs(config.supervisor.interval_secs);
         while !stop.is_requested() {
-            match supervisor.round().await {
-                Ok(()) => last_ok.store(now_secs(), Ordering::SeqCst),
-                // The heartbeat stops by itself; the next round retries.
-                Err(error) => tracing::error!(%error, "supervisor round failed"),
+            if let Err(error) = supervisor.round().await {
+                tracing::error!(%error, "supervisor round failed");
             }
             stop.sleep(interval).await;
         }

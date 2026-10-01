@@ -1,6 +1,6 @@
 # 0020: Autonomy: breakers, quarantine, canaries and alerts
 
-* Status: Accepted
+* Status: Accepted; the heartbeat (item 8) superseded by [0027](0027-no-external-heartbeat.md)
 * Date: 2026-09-25
 
 ## Context

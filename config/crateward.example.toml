@@ -5,8 +5,8 @@
 # Values below are the defaults for the production server: an Intel Core
 # i7-7700 with SMT disabled (4 cores), 64 GiB RAM and two HDDs.
 #
-# Secrets (database.url, notifier.topic, heartbeat.ping_url) belong in the
-# deployed copy only, which Ansible installs readable by the service users.
+# Secrets (database.url, notifier.topic) belong in the deployed copy only,
+# which Ansible installs readable by the service users.
 
 [instance]
 # Name used in alerts and in the public export.
@@ -211,11 +211,6 @@ server_url = "https://ntfy.sh"
 # Without access control the topic name is the password. Replace with the
 # output of `openssl rand -hex 24`.
 topic = "example_topic_replace_with_48_random_hex_chars"
-
-[heartbeat]
-# Ping URL of the healthchecks.io check. Replace the placeholder.
-ping_url = "https://hc-ping.com/00000000-0000-0000-0000-000000000000"
-interval_secs = 60
 
 # The public site (ADR 0009), a static export of aggregate statistics
 # pushed to GitHub Pages. Leave this table out to only write it locally.

@@ -50,13 +50,6 @@ pub fn should_send(seconds_since_sent: Option<i64>, repeat_hours: u64) -> bool {
     seconds_since_sent.is_none_or(|since| since >= repeat)
 }
 
-/// Whether a ping URL is the placeholder of the example configuration.
-#[must_use]
-pub fn is_placeholder_ping(url: &str) -> bool {
-    url.trim_end_matches('/')
-        .ends_with("00000000-0000-0000-0000-000000000000")
-}
-
 /// A process on the host, from `/proc/<pid>/status`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostProcess {
@@ -235,15 +228,5 @@ mod tests {
         assert!(should_send(None, 24));
         assert!(!should_send(Some(3600), 24));
         assert!(should_send(Some(24 * 3600), 24));
-    }
-
-    #[test]
-    fn the_example_ping_url_is_recognized() {
-        assert!(is_placeholder_ping(
-            "https://hc-ping.com/00000000-0000-0000-0000-000000000000"
-        ));
-        assert!(!is_placeholder_ping(
-            "https://hc-ping.com/5d3f9a2e-1c4b-4e8a-9f0d-2b7c6a1e3f40"
-        ));
     }
 }

@@ -2,8 +2,8 @@
 
 # A release bundle from `cargo xtask release`: bin/, sandbox/, guest/.
 crateward_release_dir: /path/to/crateward-release
-# The deployed configuration with its secrets (database URL, ntfy topic,
-# heartbeat URL). Start from config/crateward.example.toml.
+# The deployed configuration with its secrets (database URL, ntfy topic).
+# Start from config/crateward.example.toml.
 crateward_config_file: /path/to/crateward.toml
 # The deploy key of the site repository; leave out until it exists.
 # site_deploy_key_file: /path/to/site-deploy-key

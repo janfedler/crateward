@@ -7,10 +7,9 @@
 #   ./install.sh uninstall           remove the software, keep all state
 #   ./install.sh uninstall --purge   remove the state as well
 #
-# The first install asks for the ntfy topic, the healthchecks.io ping URL
-# and the dashboard address, and writes the configuration. Without a
-# terminal it reads CRATEWARD_NTFY_TOPIC, CRATEWARD_PING_URL and
-# CRATEWARD_WEB_LISTEN instead.
+# The first install asks for the ntfy topic and the dashboard address, and
+# writes the configuration. Without a terminal it reads CRATEWARD_NTFY_TOPIC
+# and CRATEWARD_WEB_LISTEN instead.
 #
 # Everything the maintainer owns stays in CRATEWARD_STATE (default
 # /root/crateward), mode 0700:
@@ -118,20 +117,16 @@ write_config() {
         say "keeping $config"
         return
     fi
-    local topic url listen
+    local topic listen
     topic="$(ask CRATEWARD_NTFY_TOPIC "ntfy topic (openssl rand -hex 24)" "")"
     [[ "$topic" =~ ^[A-Za-z0-9_-]{32,64}$ && "$topic" != example_* ]] ||
         die "the ntfy topic must be 32 to 64 characters of [A-Za-z0-9_-]"
-    url="$(ask CRATEWARD_PING_URL "healthchecks.io ping URL" "")"
-    [[ "$url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9/_.-]+$ && "$url" != */00000000-* ]] ||
-        die "the ping URL must look like https://hc-ping.com/<uuid>"
     listen="$(ask CRATEWARD_WEB_LISTEN "dashboard address, loopback only" "$(default_listen)")"
     [[ "$listen" =~ ^(127\.0\.0\.1|\[::1\]):[0-9]{1,5}$ ]] ||
         die "the dashboard address must be 127.0.0.1:<port> or [::1]:<port>"
 
     local draft="$STATE/crateward.toml.new"
     sed -e "s|^topic = .*|topic = \"$topic\"|" \
-        -e "s|^ping_url = .*|ping_url = \"$url\"|" \
         -e "s|^listen = .*|listen = \"$listen\"|" \
         "$BUNDLE/config/crateward.example.toml" > "$draft"
     "$BUNDLE/bin/crateward" config check --config "$draft" ||

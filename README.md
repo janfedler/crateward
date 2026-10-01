@@ -41,8 +41,8 @@ and trace evidence.
   evidence, and every verdict states its coverage: "dynamic on Linux",
   "static only" with the reason, or "not applicable". Never "clean".
 * **Runs without a human.** Retries with backoff, per stage circuit
-  breakers, hourly canary crates, quarantine on any escape indicator, an
-  external heartbeat, and alerts only for what really needs the maintainer.
+  breakers, hourly canary crates, quarantine on any escape indicator, and
+  alerts only for what really needs the maintainer.
 * **Defense in depth.** Rootless jailer, cgroup limits, seccomp, Landlock
   sandboxed parsers for every piece of hostile input, no secrets in the
   guest, a host integrity manifest, and 13 fuzz targets.
@@ -72,7 +72,7 @@ flowchart LR
         vm -- vsock events --> orch --> pg --> an --> pg --> web
     end
     cio --> feed
-    sup -- ntfy, heartbeat --> ext[healthchecks.io, ntfy.sh]
+    sup -- alerts --> ext[ntfy.sh]
     web -. static export .-> pages[crateward.com<br/>GitHub Pages]
 ```
 
@@ -218,7 +218,7 @@ Deploying to the production server is the remaining step.
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
 | M4 | Dynamic analysis: guest agent, eBPF trace, fake internet, honeytokens, ground truth | done |
-| M5 | Autonomy: retries, breakers, quarantine, canaries, deadlines, alerts, heartbeat | done |
+| M5 | Autonomy: retries, breakers, quarantine, canaries, deadlines, alerts | done |
 | M6 | Analyzer and web: scoring, review inbox, dashboard, public export | done |
 | M7 | Hardening and storage: security checklist, fuzzing, escape detection, retention | done; the offsite backup target is open |
 | M8 | Launch: Ansible, hardened units, firewall, release bundles with SBOM, disclosure workflow, write up | built, not deployed |

@@ -27,7 +27,7 @@ public site at crateward.com.
 
 Out of scope: denial of service by volume, reports from automated scanners
 without a demonstrated impact, and the third party services Crateward uses
-(crates.io, GitHub, healthchecks.io, ntfy.sh). Report those to their
+(crates.io, GitHub, ntfy.sh). Report those to their
 operators.
 
 ### Safe harbor

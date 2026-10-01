@@ -43,14 +43,14 @@ and a unit test checks that only the guest executes crate code.
 |------|------------|---------------------|----------|
 | Trusted | feed, fetcher, static analysis | never | crates.io hosts only (fetcher) |
 | Untrusted | orchestrator, warmer, fake internet | only inside microVMs | none |
-| Control plane | analyzer, api, supervisor, cli, Postgres | never | alert and heartbeat services, GitHub (export) |
+| Control plane | analyzer, api, supervisor, cli, Postgres | never | the alert service, GitHub (export) |
 | Guest | guest agent, crate under analysis | yes | none; the fake internet only |
 
 ```mermaid
 flowchart LR
     subgraph internet[Internet]
         cio[crates.io<br/>index, CDN, RSS, dump]
-        ext[healthchecks.io<br/>ntfy.sh<br/>GitHub Pages]
+        ext[ntfy.sh<br/>GitHub Pages]
     end
     subgraph trusted[Trusted zone]
         feed[feed]
@@ -314,7 +314,7 @@ dropped.
 | fetcher | `index.crates.io`, `static.crates.io`, `cloudfront-static.crates.io` | index, crate files, dump |
 | feed | `static.crates.io`, `index.crates.io` | RSS feeds, index files |
 | image builder (weekly) | `static.rust-lang.org`, `snapshot.debian.org`, kernel source | guest image, pinned by hash |
-| supervisor | `ntfy.sh`, `hc-ping.com` | alerts and heartbeat |
+| supervisor | `ntfy.sh` | alerts |
 | exporter | `github.com` | one way push of the public site |
 | everything else | none | |
 

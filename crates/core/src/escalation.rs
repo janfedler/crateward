@@ -4,9 +4,6 @@
 //! never pushed to a phone. Keeping the list as an enum means a new alert
 //! cannot be added without editing this file, the notifier and
 //! `docs/RUNBOOK.md` together.
-//!
-//! The external heartbeat check (healthchecks.io) is the one alert that does
-//! not originate here, because it has to work when this server is down.
 
 use serde::{Deserialize, Serialize};
 

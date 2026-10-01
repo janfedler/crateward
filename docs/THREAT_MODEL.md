@@ -19,7 +19,7 @@ test. Nothing is marked Built before the code exists.
 | A5 | Shared build cache and warm snapshot | Poisoning them would affect every later job. |
 | A6 | Admin access: SSH keys | Full control of the system. |
 | A7 | Deploy key of the public site repository | Allows defacing crateward.com. |
-| A8 | ntfy topic and healthchecks.io ping URL | Allow reading or forging alerts and heartbeats. |
+| A8 | ntfy topic | Allows reading or forging alerts. |
 | A9 | Availability of the pipeline | Crateward is only useful if it keeps up. |
 | A10 | Reputation with crates.io | Violating the data access policy would get Crateward blocked. |
 
@@ -32,7 +32,7 @@ test. Nothing is marked Built before the code exists.
 | T3 | VM escape attacker | T1 plus exploits against the virtio device model, KVM, or CPU side channels. |
 | T4 | Cache poisoner | T1 targeting the build cache or warm snapshot so that a later job trusts poisoned artifacts. |
 | T5 | Network attacker or compromised CDN | Tampers with downloads from crates.io. |
-| T6 | Compromised external service | GitHub Pages, ntfy.sh or healthchecks.io behaving maliciously. |
+| T6 | Compromised external service | GitHub Pages or ntfy.sh behaving maliciously. |
 | T7 | Supply chain attack on Crateward itself | A malicious dependency of Crateward's own code. |
 | T8 | Internet scanner | Probes the server's public address. |
 

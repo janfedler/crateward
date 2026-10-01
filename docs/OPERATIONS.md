@@ -88,7 +88,6 @@ publishes the share of versions with dynamic results.
 | Guest kernel rebuild | only when its version or configuration changes |
 | Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every supervisor round |
 | Integrity manifest check | every `supervisor.integrity_interval_minutes` (60) |
-| Heartbeat | every minute |
 
 ## Host setup
 
@@ -153,7 +152,6 @@ other unit sets `RestrictNamespaces=yes`.
 | Service | Purpose | Secret |
 |---------|---------|--------|
 | GitHub Pages (`janfedler/crateward-site`) | public site at crateward.com | deploy key for that repository only |
-| healthchecks.io | dead man's switch | ping URL |
 | ntfy.sh | alerts | topic name |
 
 ## Deploying a new build

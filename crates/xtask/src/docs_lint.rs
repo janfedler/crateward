@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn toml_comments_are_checked_and_values_are_not() {
-        let text = "# a user-agent string\nurl = \"https://hc-ping.com\"\n";
+        let text = "# a user-agent string\nurl = \"https://ntfy.sh\"\n";
         assert_eq!(lint(text, Kind::TomlComments).len(), 1);
     }
 

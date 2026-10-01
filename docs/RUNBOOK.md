@@ -108,7 +108,7 @@ running is failed and will not be retried automatically.
    An integrity finding right after a deploy usually means the manifest was
    not recorded again; confirm the deploy changed exactly those files.
 4. If anything is confirmed, treat the host as compromised: rotate the
-   SSH keys, the deploy key, the ntfy topic and the heartbeat URL,
+   SSH keys, the deploy key and the ntfy topic,
    then reinstall from the Ansible playbooks and restore data from backup.
 5. Report a Firecracker or KVM escape to the respective project's security
    contact.
@@ -124,19 +124,6 @@ The disks are not encrypted (ADR 0013), so before the server is cancelled
 or a disk is replaced:
 
 1. Revoke the GitHub deploy key and the read token, and rotate the ntfy
-   topic and the healthchecks.io ping URL.
+   topic.
 2. Boot the Hetzner rescue system and overwrite both disks completely, for
    example with `blkdiscard` where supported, otherwise `shred -n 1`.
-
-## Heartbeat lost
-
-**Meaning.** healthchecks.io did not receive a ping in time. The server is
-down, cannot reach the internet, or the supervisor stopped. This alert is
-sent by healthchecks.io, not by Crateward.
-
-**What to do.**
-1. Try SSH.
-2. If unreachable, check the Hetzner Robot panel for the server status and
-   use the rescue system or a KVM console request if needed.
-3. After a reboot, check `crateward status`: pauses and breakers survive a
-   restart, and the orchestrator runs the canaries again on start.

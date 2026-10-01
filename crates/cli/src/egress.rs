@@ -13,7 +13,6 @@ use std::fmt::Write as _;
 use std::net::{IpAddr, ToSocketAddrs as _};
 
 use crateward_core::config::{Config, NotifierConfig};
-use secrecy::ExposeSecret as _;
 
 /// Hosts the weekly image build downloads from: the pinned Rust toolchain,
 /// the Debian snapshot the root filesystem is built from, and the kernel
@@ -63,7 +62,6 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
     if let NotifierConfig::Ntfy { server_url, .. } = &config.notifier {
         supervisor.extend(host(server_url.as_str()));
     }
-    supervisor.extend(host(config.heartbeat.ping_url.expose_secret()));
     // `git@github.com:owner/name.git`
     let api = config
         .export
@@ -169,8 +167,8 @@ mod tests {
         );
         assert_eq!(host("https://ntfy.sh").as_deref(), Some("ntfy.sh"));
         assert_eq!(
-            host("https://user@Hc-Ping.com:443/x").as_deref(),
-            Some("hc-ping.com")
+            host("https://user@Ntfy.SH:443/x").as_deref(),
+            Some("ntfy.sh")
         );
         assert_eq!(host("https:///x"), None);
     }
@@ -212,7 +210,7 @@ mod tests {
         };
         assert_eq!(get("fetcher"), ["index.crates.io", "static.crates.io"]);
         assert_eq!(get("feed"), ["index.crates.io", "static.crates.io"]);
-        assert_eq!(get("supervisor"), ["hc-ping.com", "ntfy.sh"]);
+        assert_eq!(get("supervisor"), ["ntfy.sh"]);
         assert_eq!(get("api"), ["github.com"]);
     }
 }
