@@ -1,14 +1,14 @@
 //! Dashboard (M6).
 //!
 //! Zone: control plane. The admin view listens on loopback and is reached
-//! through an SSH tunnel (ADR 0022);
+//! through an SSH tunnel (ADR 0009);
 //! the public view is a static export (`crate::export`), never served here.
 //!
 //! Why it looks the way it does:
 //!
 //! * Server rendered HTML with htmx and server sent events needs no
 //!   JavaScript build chain and allows a strict Content Security Policy
-//!   (ADR 0005). htmx and its server sent events extension are vendored
+//!   (ADR 0009). htmx and its server sent events extension are vendored
 //!   and pinned by SHA-256.
 //! * Templates escape by default at compile time (askama), and crate
 //!   supplied text is never rendered as HTML.

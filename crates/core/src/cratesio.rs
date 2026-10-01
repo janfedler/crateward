@@ -450,7 +450,7 @@ fn feed_item(name: Option<String>, version: Option<String>) -> Option<FeedItem> 
 }
 
 /// The manifest of the consumer probe: a package that depends on exactly
-/// one version, the way a victim would pull it in (ADR 0014). The fetcher
+/// one version, the way a victim would pull it in (ADR 0004). The fetcher
 /// resolves it and the microVM builds it, so both see the same dependency
 /// graph. The dependency is renamed to a fixed key so that no crate name is
 /// ever interpreted as manifest syntax beyond a quoted string, and the

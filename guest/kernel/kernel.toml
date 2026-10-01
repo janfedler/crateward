@@ -1,4 +1,4 @@
-# Pinned source of the guest kernel. See docs/adr/0011-guest-kernel-source.md.
+# Pinned source of the guest kernel. See docs/adr/0002-firecracker-rootless-jail.md.
 #
 # Firecracker validates its 6.18 guest configuration against Amazon Linux
 # microVM kernels. The public `microvm-kernel-6.18.*` tags lag far behind

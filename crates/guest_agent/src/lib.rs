@@ -20,7 +20,7 @@
 //! * Jobs run as an unprivileged user in their own process group, with a
 //!   cleared environment, bounded output and a guest side timeout. The host
 //!   enforces its own limits independently.
-//! * eBPF programs (ADR 0006, ADR 0017), loaded at boot, trace every process
+//! * eBPF programs (ADR 0007), loaded at boot, trace every process
 //!   of the job. They live in a separate package because they build for
 //!   the BPF target with a pinned nightly toolchain.
 

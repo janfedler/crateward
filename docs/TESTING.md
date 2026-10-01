@@ -90,7 +90,7 @@ scan of the scratch disk must find both.
 
 The same test also runs the known good canary, which must come out with
 nothing flagged. The orchestrator runs both canaries on a schedule
-(ADR 0020); their fixtures live in `crates/orchestrator/src/canary.rs`.
+(ADR 0008); their fixtures live in `crates/orchestrator/src/canary.rs`.
 
 The eBPF programs themselves only run in the guest kernel. On the host,
 tests cover the agent's record decoder (including every truncation of a

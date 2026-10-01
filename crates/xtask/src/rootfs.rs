@@ -460,7 +460,7 @@ fn base_bundle(base: &Path) -> Result<String, TaskError> {
 }
 
 /// Moves the Debian snapshot pin of the root filesystem to today (UTC), the
-/// first step of the image refresh (ADR 0024). The build, the canary and
+/// first step of the image refresh (ADR 0002). The build, the canary and
 /// the commit that follow stay deliberate steps.
 ///
 /// # Errors

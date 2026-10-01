@@ -1,4 +1,4 @@
-//! eBPF programs that trace a build inside the guest (ADR 0006).
+//! eBPF programs that trace a build inside the guest (ADR 0007).
 //!
 //! The guest agent loads these programs once at boot, before the base
 //! snapshot is taken, so every restored VM starts with them attached. They

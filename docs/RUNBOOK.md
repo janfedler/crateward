@@ -67,7 +67,7 @@ pass again (they run every `sandbox.canary_interval_minutes`).
 1. Compare the canary run with the last passing run on the Operations page.
 2. If a deploy just changed the guest version, roll it back:
    `./install.sh rollback` in the bundle that was installed, as root
-   ([ADR 0024](adr/0024-guest-image-versions-and-rollback.md)). The
+   ([ADR 0002](adr/0002-firecracker-rootless-jail.md)). The
    orchestrator restarts on the previous version and runs the canaries
    first.
 3. If the rollback restored passing canaries, investigate the new image
@@ -91,7 +91,7 @@ Firecracker exited after a forbidden system call or a fatal signal,
 something read the decoy in a jail root (the job ends as a suspected
 compromise), something opened a decoy on the host, a process runs with a
 slot UID that the jail did not start, or a file of the integrity manifest
-changed ([ADR 0023](adr/0023-host-escape-detection-and-retention.md)). The
+changed ([ADR 0008](adr/0008-autonomy-and-escape-detection.md)). The
 pause detail in `crateward status` lists the findings. A guest that merely
 stopped itself is not an escape indicator; it is recorded as a result.
 
@@ -120,7 +120,7 @@ running is failed and will not be retried automatically.
 
 ## Decommissioning the server
 
-The disks are not encrypted (ADR 0013), so before the server is cancelled
+The disks are not encrypted (ADR 0003), so before the server is cancelled
 or a disk is replaced:
 
 1. Revoke the GitHub deploy key and the read token, and rotate the ntfy

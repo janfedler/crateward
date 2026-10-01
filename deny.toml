@@ -49,7 +49,7 @@ unused-allowed-license = "allow"
 
 [licenses.private]
 # Workspace packages are not published. They are MIT OR Apache-2.0, except
-# crateward_guest_ebpf, which is GPL-2.0-only (ADR 0025).
+# crateward_guest_ebpf, which is GPL-2.0-only (ADR 0010).
 ignore = true
 
 [bans]

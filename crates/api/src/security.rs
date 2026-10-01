@@ -3,14 +3,14 @@
 //! * **Host check.** A page on another site could point its own name at the
 //!   dashboard's address (DNS rebinding) and read responses as same origin.
 //!   The dashboard listens on loopback and is reached through an SSH tunnel
-//!   (ADR 0022), so requests are answered only when `Host` is a loopback
+//!   (ADR 0009), so requests are answered only when `Host` is a loopback
 //!   name with the dashboard's port.
 //! * **Cross site writes.** A page the maintainer has open elsewhere could
 //!   post forms to the dashboard. Every request other than `GET` and `HEAD`
 //!   must come from the dashboard itself: `Sec-Fetch-Site: same-origin`, or
 //!   an `Origin` equal to the dashboard's own.
 //! * **Headers.** A Content Security Policy that allows only the
-//!   dashboard's own scripts and styles (ADR 0005), no framing, no referrer,
+//!   dashboard's own scripts and styles (ADR 0009), no framing, no referrer,
 //!   no sniffing, no caching of pages.
 
 use axum::body::Body;

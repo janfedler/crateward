@@ -161,7 +161,7 @@ pub struct Launch {
 
 /// The per job drives: the read only payload (`/dev/vdb` in the guest),
 /// the writable scratch disk (`/dev/vdc`) and the read only warm build
-/// cache (`/dev/vdd`, ADR 0008).
+/// cache (`/dev/vdd`, ADR 0006).
 #[derive(Debug, Clone)]
 pub struct JobDrives {
     /// EROFS image with the job's sources.

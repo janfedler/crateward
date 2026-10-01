@@ -1,4 +1,4 @@
--- One row per crate version, from discovery to verdict (ADR 0004).
+-- One row per crate version, from discovery to verdict (ADR 0001).
 -- The pipeline state machine lives in crateward_core::job; the row stores
 -- its value as JSON next to the columns the queue needs for claiming.
 

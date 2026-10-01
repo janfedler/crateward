@@ -23,12 +23,12 @@ consequences shape everything below.
   documentation calls `mds=full,nosmt` "the complete mitigation" and states
   that preventing the SMT issues of L1TF "might" require disabling SMT
   completely. With SMT off the server has 4 cores: 1 for host services and 3
-  for microVMs. See [ADR 0010](adr/0010-smt-off-and-ram-hot-path.md).
+  for microVMs. See [ADR 0002](adr/0002-firecracker-rootless-jail.md).
 * **The hot path lives in RAM.** Spinning disks cannot serve the random reads
   of snapshot memory files or the writes of scratch disks. Promoted images
   and per job scratch disks live in tmpfs; the HDDs hold durable data.
 * **No ECC, plain ext4.** The disks are an md RAID1 with ext4, unencrypted
-  ([ADR 0013](adr/0013-ext4-on-md-raid-without-encryption.md)). Neither
+  ([ADR 0003](adr/0003-debian-ansible-ssh.md)). Neither
   checksums data, so Crateward does: content addressed blobs are verified
   by their BLAKE3 digest on every read, images by BLAKE3 manifests, crate
   files by the index SHA-256, and PostgreSQL pages by data checksums.
@@ -92,7 +92,7 @@ flowchart LR
 One Postgres row per crate version tracks the whole pipeline. Every stage
 claims rows in its input state with `SELECT ... FOR UPDATE SKIP LOCKED`,
 holds a lease renewed by heartbeats, performs an idempotent step, and reports
-an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
+an event to the state machine. See [ADR 0001](adr/0001-one-server-postgres-queue.md).
 
 1. **feed** sees a new version in the RSS feeds, confirms it in the sparse
    index, and creates the job. The daily database dump reconciles anything
@@ -102,26 +102,26 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    resolves all dependencies for all targets with `cargo generate-lockfile`
    on a generated consumer probe (sandboxed, no compiler), fetches and
    validates every locked crate, and stores them as content addressed blobs
-   ([ADR 0014](adr/0014-resolve-fetch-validate.md)).
+   ([ADR 0004](adr/0004-resolve-fetch-validate.md)).
 3. **static analysis** parses every Rust file with `syn` across all `cfg`
    branches in a sandboxed child, runs detectors and YARA-X rules, diffs
    against the previous version, and decides the triage: dynamic, static
    only, or not applicable on Linux
-   ([ADR 0015](adr/0015-static-analysis-and-triage.md)).
+   ([ADR 0005](adr/0005-static-analysis-and-triage.md)).
 4. The job becomes ready for the sandbox, or goes straight to scoring.
 5. **orchestrator** claims the job when a VM slot is free, builds the job's
    read only payload image and scratch disk, restores the base snapshot,
    points its placeholder drives at them, and has the agent mount them and
    plant fresh honeytokens
-   ([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)).
+   ([ADR 0006](adr/0006-dynamic-runs.md)).
 6. **guest agent** runs `cargo check` as an unprivileged user and streams
    its output and an eBPF trace (processes, file opens, connections, tamper
-   attempts; [ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)) over the
+   attempts; [ADR 0007](adr/0007-guest-agent-ebpf.md)) over the
    single vsock connection. The fake internet records every network attempt
    as host side ground truth, including frames no proxy sees
-   ([ADR 0018](adr/0018-frames-the-proxies-do-not-see.md)), and after the
+   ([ADR 0006](adr/0006-dynamic-runs.md)), and after the
    run the host reads the scratch disk in a sandboxed child
-   ([ADR 0019](adr/0019-scratch-disk-scan.md)). Planned: cross target
+   ([ADR 0006](adr/0006-dynamic-runs.md)). Planned: cross target
    checks where the crate has platform specific code.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
@@ -129,8 +129,8 @@ an event to the state machine. See [ADR 0004](adr/0004-postgres-as-queue.md).
    you" inbox of the dashboard (**api**), the **supervisor** raises alerts
    from the closed escalation list, and the api exports aggregate numbers
    to the public site
-   ([ADR 0021](adr/0021-explainable-scoring.md),
-   [ADR 0022](adr/0022-dashboard-and-public-export.md)).
+   ([ADR 0009](adr/0009-scoring-and-dashboard.md),
+   [ADR 0009](adr/0009-scoring-and-dashboard.md)).
 
 ## Job state machine
 
@@ -194,12 +194,12 @@ Notes on the design:
   or a pause (quarantine, a failed canary, a full scratch filesystem) stops
   claiming in the affected stages only. The supervisor decides from the job
   events and delivers alerts
-  ([ADR 0020](adr/0020-autonomy-breakers-quarantine-canaries-alerts.md)).
+  ([ADR 0008](adr/0008-autonomy-and-escape-detection.md)).
 * Escape tripwires outside the VM also quarantine the pipeline: a read of
   the decoy in a jail root ends the job as a suspected compromise, and the
   supervisor watches decoys on the host, processes with a slot UID and the
   integrity manifest of the binaries and images
-  ([ADR 0023](adr/0023-host-escape-detection-and-retention.md)).
+  ([ADR 0008](adr/0008-autonomy-and-escape-detection.md)).
 * Each supervisor round trims the raw data of old unflagged run reports;
   verdicts and evidence stay.
 * A crate that fails to build is a result (`BuildOutcome::Failed`), not a
@@ -217,7 +217,7 @@ vCPUs cannot run all of them, so:
 * a version gets a VM run only if it has build time code of its own (a build
   script, `proc-macro = true`, or `links`), has a high severity finding, or
   locks an unfamiliar dependency with build time code
-  ([ADR 0015](adr/0015-static-analysis-and-triage.md));
+  ([ADR 0005](adr/0005-static-analysis-and-triage.md));
 * new crates and updates of popular crates get a higher priority, so they
   run first;
 * a job that waits longer than `triage.dynamic_deadline_hours` for a slot is
@@ -232,7 +232,7 @@ versions.
 ## MicroVM lifecycle
 
 The orchestrator drives Firecracker 1.17 through its API socket and always
-starts it in a rootless jail ([ADR 0012](adr/0012-rootless-jail.md)).
+starts it in a rootless jail ([ADR 0002](adr/0002-firecracker-rootless-jail.md)).
 
 * **No root.** A single threaded launcher, `crateward-vmjail`, joins the
   slot's cgroup, creates a user namespace in which the slot's own
@@ -276,7 +276,7 @@ connection and UDP datagram to the fake internet, which recovers the
 intended TCP destination with `SO_ORIGINAL_DST` and logs each attempt with
 its first 64 KiB. That log is read after the run as ground truth and
 searched for the job's honeytokens
-([ADR 0016](adr/0016-dynamic-runs-payload-fake-internet-honeytokens.md)).
+([ADR 0006](adr/0006-dynamic-runs.md)).
 TLS is terminated with Crateward's own authority, which the guest image
 trusts, so the content of HTTPS requests is logged too. IPv6 logging is
 still open.
@@ -291,7 +291,7 @@ versions Crateward has stored for two weeks, seen in several jobs and found
 without high severity static findings enter it; the warm build is analyzed
 like a job and a promotion check guards its use. In the measurement, run
 time fell by 28 percent. See
-[ADR 0008](adr/0008-prewarmed-snapshot-and-shared-sccache.md).
+[ADR 0006](adr/0006-dynamic-runs.md).
 
 ## Storage layout
 
@@ -319,7 +319,7 @@ dropped.
 | everything else | none | |
 
 The only inbound path is SSH with keys only. See
-[ADR 0026](adr/0026-ssh-without-wireguard.md).
+[ADR 0003](adr/0003-debian-ansible-ssh.md).
 
 ## Package map
 

@@ -1,4 +1,4 @@
-//! Canaries: two inert fixture crates with known behavior (ADR 0020).
+//! Canaries: two inert fixture crates with known behavior (ADR 0008).
 //!
 //! The known bad canary's build script does what a stealer does: it reads
 //! the cargo token and posts it over HTTP, copies it into its build output,

@@ -1,4 +1,4 @@
-//! Host escape detection (ADR 0023): the integrity manifest, decoy files
+//! Host escape detection (ADR 0008): the integrity manifest, decoy files
 //! watched with inotify, and processes running as a slot UID that the jail
 //! did not start. Each check returns findings; the supervisor quarantines
 //! the pipeline and raises a sandbox escape alert on any.

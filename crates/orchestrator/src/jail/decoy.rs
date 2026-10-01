@@ -1,4 +1,4 @@
-//! A decoy in every jail root (ADR 0023).
+//! A decoy in every jail root (ADR 0008).
 //!
 //! Firecracker never looks at its jail root beyond the files it was told
 //! about. A process that broke out of the VM and looks around does. Each

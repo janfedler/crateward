@@ -1,4 +1,4 @@
-//! Circuit breakers per stage (ADR 0020).
+//! Circuit breakers per stage (ADR 0008).
 //!
 //! Infrastructure failures are retried without consuming a job's attempts,
 //! so a broken dependency of one stage (crates.io unreachable, KVM failing)

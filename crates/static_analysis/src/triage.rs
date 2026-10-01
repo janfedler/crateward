@@ -2,7 +2,7 @@
 //!
 //! Dynamic analysis observes what happens while a crate builds, so it only
 //! adds evidence when building runs code that nobody vetted. The rules, in
-//! order (ADR 0015):
+//! order (ADR 0005):
 //!
 //! 1. A library gated to Windows or Apple platforms, with no build script
 //!    and no proc macro, compiles to nothing on Linux: not applicable.

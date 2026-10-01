@@ -1,4 +1,4 @@
-//! Builds the eBPF programs of `crates/guest_ebpf` (ADR 0006, ADR 0017).
+//! Builds the eBPF programs of `crates/guest_ebpf` (ADR 0007).
 //!
 //! The package has its own workspace and toolchain file: it builds for
 //! `bpfel-unknown-none` with the nightly that the pinned `bpf-linker` was

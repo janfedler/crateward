@@ -253,7 +253,7 @@ uninstall() {
     say "$STATE, SSH and the kernel command line are unchanged"
 }
 
-# Switches the guest files back to the previous version (ADR 0024,
+# Switches the guest files back to the previous version (ADR 0002,
 # RUNBOOK.md "Canary failure").
 rollback() {
     (($# == 0)) || usage 2

@@ -1,4 +1,4 @@
-//! The analysis and finalize stages (ADR 0021).
+//! The analysis and finalize stages (ADR 0009).
 //!
 //! Analysis loads what the earlier stages stored (the static report of the
 //! crate's own file, the diff, the VM runs, the previous version's profile),

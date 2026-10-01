@@ -3,7 +3,7 @@
 //! The release archive's SHA-256 is pinned in `guest/firecracker.toml`.
 //! Only after the digest matches is the `firecracker` binary extracted to
 //! `target/guest/bin`. Crateward does not use Firecracker's jailer
-//! (ADR 0012).
+//! (ADR 0002).
 
 use std::path::Path;
 

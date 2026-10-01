@@ -2,7 +2,7 @@
 # The guest files of a release bundle, versioned by the root filesystem's
 # digest under `guest_root`, with `current` and `previous` links. The
 # version in use becomes `previous`; older ones are removed. rollback.yml
-# swaps the two links (ADR 0024). The authority belongs to the image that
+# swaps the two links (ADR 0002). The authority belongs to the image that
 # trusts it, so it is versioned with it.
 #
 # Sets `guest_switched`, which restarts the orchestrator.

@@ -6,7 +6,7 @@
 //! Why it looks the way it does:
 //!
 //! * Firecracker is driven through its API socket and always started in a
-//!   rootless jail (ADR 0012): its own subordinate UID, private namespaces,
+//!   rootless jail (ADR 0002): its own subordinate UID, private namespaces,
 //!   `pivot_root` into a root with only the needed files, no capabilities.
 //!   No process runs as root for the sandbox.
 //! * Jobs start by restoring a warm snapshot. Identity, honeytokens and the
@@ -130,7 +130,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
 /// snapshot. Returns the backend and the work directory.
 async fn boot(config: &Config) -> Result<(Arc<FirecrackerBackend>, PathBuf), ComponentError> {
     let sandbox = &config.sandbox;
-    // A deploy switches the guest files by moving a link (ADR 0024).
+    // A deploy switches the guest files by moving a link (ADR 0002).
     // Resolving them once keeps a running orchestrator on the files its
     // base snapshot was made from.
     let kernel = resolve(&sandbox.kernel_image)?;
@@ -186,7 +186,7 @@ fn firecracker_config(sandbox: &SandboxConfig, authority: PathBuf) -> Firecracke
 }
 
 /// A jail has no dynamic loader, so everything executed in one must be
-/// static. Its decoys rely on reads updating the access time (ADR 0023).
+/// static. Its decoys rely on reads updating the access time (ADR 0008).
 fn check_host(sandbox: &SandboxConfig) -> Result<(), ComponentError> {
     let bin = &sandbox.fake_internet_bin;
     let elf = std::fs::read(bin).map_err(|e| fatal(format!("{}: {e}", bin.display())))?;
@@ -241,7 +241,7 @@ fn boot_spec(
     })
 }
 
-/// Builds the warm build cache (ADR 0008) and returns its image. Any
+/// Builds the warm build cache (ADR 0006) and returns its image. Any
 /// failure means cold builds, never a failed start. A stop request during
 /// the build ends its VM through reconciliation.
 async fn warm_cache(
@@ -300,7 +300,7 @@ async fn spawn_slots(
     let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
     let canary_every = Duration::from_secs(config.sandbox.canary_interval_minutes * 60);
     // No slot claims a job before the first canaries ran on these guest
-    // files: a new version must pass them first (ADR 0024). A failure
+    // files: a new version must pass them first (ADR 0002). A failure
     // pauses the stage, which the workers then honor.
     let ran = Arc::new(watch::channel(canary_every.is_zero()).0);
     let mut tasks = Vec::new();

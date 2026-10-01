@@ -1,4 +1,4 @@
--- Crate files the fetcher has downloaded and validated (ADR 0014). Keyed by
+-- Crate files the fetcher has downloaded and validated (ADR 0004). Keyed by
 -- the SHA-256 that the crates.io index publishes, so a crate shared by many
 -- jobs is fetched and validated once.
 CREATE TABLE crate_files (

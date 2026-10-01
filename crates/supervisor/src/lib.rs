@@ -1,4 +1,4 @@
-//! Keeps the pipeline healthy without a human (ADR 0020).
+//! Keeps the pipeline healthy without a human (ADR 0008).
 //!
 //! Zone: control plane.
 //!
@@ -16,7 +16,7 @@
 //!   filesystem is too full;
 //! * it trims the raw data (process lists, output tails) of unflagged runs
 //!   older than `storage.raw_log_retention_days`;
-//! * it looks for signs of a host escape (ADR 0023): files that differ
+//! * it looks for signs of a host escape (ADR 0008): files that differ
 //!   from the integrity manifest, any access to a decoy file, and
 //!   processes running as a slot UID that the jail did not start; any of
 //!   them quarantines the pipeline;

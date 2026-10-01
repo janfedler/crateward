@@ -1,6 +1,6 @@
 ---
 # Switches the guest files back to the previous version and restarts the
-# orchestrator on them (ADR 0024, RUNBOOK.md "Canary failure"). Running it
+# orchestrator on them (ADR 0002, RUNBOOK.md "Canary failure"). Running it
 # again switches forward again.
 #
 #   ansible-playbook -i inventory.yml rollback.yml

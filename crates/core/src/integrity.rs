@@ -1,4 +1,4 @@
-//! The host integrity manifest (ADR 0023).
+//! The host integrity manifest (ADR 0008).
 //!
 //! After every deploy the maintainer records the BLAKE3 digests of the
 //! files the sandbox trusts: the Crateward binaries, Firecracker, the jail

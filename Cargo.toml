@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*"]
 # Builds for the BPF target with its own nightly toolchain and lockfile
-# (ADR 0006); `cargo xtask guest-ebpf` builds it.
+# (ADR 0007); `cargo xtask guest-ebpf` builds it.
 exclude = ["crates/guest_ebpf"]
 
 [workspace.package]
@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.98"
 # Nothing in this workspace is published to crates.io. `crates/guest_ebpf`
-# has its own license (ADR 0025).
+# has its own license (ADR 0010).
 license = "MIT OR Apache-2.0"
 publish = false
 repository = "https://github.com/janfedler/crateward"

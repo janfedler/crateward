@@ -14,7 +14,7 @@ default = []
 # Process harness for host services: command line parsing, tracing setup,
 # the runtime and the stop signal. The guest agent does not enable it.
 app = ["dep:clap", "dep:tokio", "dep:tracing", "dep:tracing-subscriber"]
-# The Postgres job store (ADR 0004). Host services only.
+# The Postgres job store (ADR 0001). Host services only.
 store = ["dep:tokio-postgres", "dep:tokio", "cratesio", "dep:tracing"]
 # Parsers for crates.io data: sparse index lines and RSS feeds.
 cratesio = ["dep:serde_json", "dep:semver", "dep:quick-xml"]
@@ -22,9 +22,9 @@ cratesio = ["dep:serde_json", "dep:semver", "dep:quick-xml"]
 http = ["dep:reqwest", "dep:tokio", "dep:bytes"]
 # Namespaces, resource limits and Landlock for workers handling hostile input.
 sandbox = ["dep:rustix", "dep:landlock"]
-# The content addressed blob store of crate archives (ADR 0014).
+# The content addressed blob store of crate archives (ADR 0004).
 blobs = ["dep:blake3", "dep:zstd"]
-# The host integrity manifest (ADR 0023).
+# The host integrity manifest (ADR 0008).
 integrity = ["dep:blake3"]
 
 [dependencies]

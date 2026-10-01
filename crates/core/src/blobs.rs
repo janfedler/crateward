@@ -1,10 +1,10 @@
-//! Content addressed blob store for crate archives (ADR 0014).
+//! Content addressed blob store for crate archives (ADR 0004).
 //!
 //! A blob is the unpacked tar of a crate, zstd compressed, stored at
 //! `<root>/blobs/<ab>/<cd>/<blake3>.tar.zst` where the name is the BLAKE3
 //! digest of the unpacked tar. Shared dependencies are therefore stored
 //! once. Every read recomputes the digest: the server has no ECC memory and
-//! ext4 does not checksum data (ADR 0013), so a blob that changed on disk
+//! ext4 does not checksum data (ADR 0003), so a blob that changed on disk
 //! is detected instead of being analyzed.
 //!
 //! Writes go to a temporary file in the same directory and are renamed into

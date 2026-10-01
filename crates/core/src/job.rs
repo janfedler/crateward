@@ -194,7 +194,7 @@ pub enum RunKind {
     /// specific code. The default for every dynamic job.
     Check,
     /// `cargo build` in a fresh VM, the confirmation run after a verdict of
-    /// medium or above (ADR 0021). Tests would need the crate's dev
+    /// medium or above (ADR 0009). Tests would need the crate's dev
     /// dependencies, which the consumer probe does not resolve.
     Full,
 }
@@ -238,7 +238,7 @@ pub enum BuildOutcome {
     /// The guest stopped before the agent reported an end: it shut down,
     /// restarted or panicked, or its agent stopped answering. Something in
     /// the guest did that, so it is a result about the crate, not a failure
-    /// of the pipeline, and it is not retried (ADR 0020).
+    /// of the pipeline, and it is not retried (ADR 0008).
     GuestStopped,
 }
 

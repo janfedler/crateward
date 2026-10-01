@@ -27,7 +27,7 @@ asks not to be the first recipient.
    that write outside `OUT_DIR`.
 3. **Confirmation.** A high or critical verdict from `cargo check` has
    already been confirmed automatically by a full build in a fresh VM
-   (ADR 0021), unless the finding came from a sandbox escape indicator;
+   (ADR 0009), unless the finding came from a sandbox escape indicator;
    such crates are never executed again without a deliberate decision.
    After the review, mark the verdict confirmed on the dashboard, then
    write the evidence pack: `crateward evidence <job> --out <dir>`. It

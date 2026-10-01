@@ -1,4 +1,4 @@
--- Autonomy (M5, ADR 0020): breakers, pauses, alerts, canaries.
+-- Autonomy (M5, ADR 0008): breakers, pauses, alerts, canaries.
 
 -- One circuit breaker per stage. A missing row means closed.
 CREATE TABLE stage_breakers (

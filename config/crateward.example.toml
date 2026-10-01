@@ -130,7 +130,7 @@ images_tmpfs_mib = 14336
 check_timeout_secs = 900
 full_timeout_secs = 2700
 firecracker_bin = "/usr/local/lib/crateward/firecracker"
-# The rootless jail launcher (ADR 0012).
+# The rootless jail launcher (ADR 0002).
 vmjail_bin = "/usr/local/lib/crateward/crateward-vmjail"
 # The fake internet, started in every slot's network namespace.
 fake_internet_bin = "/usr/local/lib/crateward/crateward_fake_internet"
@@ -138,7 +138,7 @@ fake_internet_bin = "/usr/local/lib/crateward/crateward_fake_internet"
 # also makes the guest image trust the certificate. Mode 0600.
 fake_internet_authority = "/usr/local/lib/crateward/guest/current/authority.pem"
 # Guest images, from `cargo xtask guest-kernel` and `cargo xtask rootfs`.
-# `current` is a link that a deploy or a rollback moves (ADR 0024); the
+# `current` is a link that a deploy or a rollback moves (ADR 0002); the
 # orchestrator resolves it once at startup.
 kernel_image = "/usr/local/lib/crateward/guest/current/kernel.bzImage"
 rootfs_image = "/usr/local/lib/crateward/guest/current/rootfs.erofs"
@@ -149,10 +149,10 @@ slots_dir = "/run/crateward/slots"
 slot_uid_base = 200000
 slot_gid_base = 200000
 # Minutes between canary runs: a known bad and a known good inert crate
-# must produce the expected results (ADR 0020). 0 turns them off.
+# must produce the expected results (ADR 0008). 0 turns them off.
 canary_interval_minutes = 60
 
-# The warm build cache (ADR 0008): the orchestrator replays the dependency
+# The warm build cache (ADR 0006): the orchestrator replays the dependency
 # builds of recent jobs in a VM and mounts the result read only under every
 # job's target directory. Leave this table out to build every job cold.
 [sandbox.warm]
@@ -212,7 +212,7 @@ server_url = "https://ntfy.sh"
 # output of `openssl rand -hex 24`.
 topic = "example_topic_replace_with_48_random_hex_chars"
 
-# The public site (ADR 0009), a static export of aggregate statistics
+# The public site (ADR 0001), a static export of aggregate statistics
 # pushed to GitHub Pages. Leave this table out to only write it locally.
 [export]
 repository = "git@github.com:janfedler/crateward-site.git"
@@ -223,5 +223,5 @@ interval_hours = 24
 
 [web]
 # Loopback only: the maintainer reaches the dashboard through an SSH tunnel,
-# `ssh -L 8080:127.0.0.1:8080 <server>` (ADR 0022).
+# `ssh -L 8080:127.0.0.1:8080 <server>` (ADR 0009).
 listen = "127.0.0.1:8080"

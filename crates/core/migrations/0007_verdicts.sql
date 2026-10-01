@@ -1,4 +1,4 @@
--- Verdicts (M6, ADR 0021).
+-- Verdicts (M6, ADR 0009).
 
 -- One verdict per job: the score, the evidence behind every point, and the
 -- version's behavior profile. `review` tracks the "needs you" inbox.

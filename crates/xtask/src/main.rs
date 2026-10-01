@@ -67,7 +67,7 @@ enum Task {
     /// Build the guest root filesystem image from the pins in guest/rootfs.
     Rootfs,
     /// Move the root filesystem's Debian snapshot pin to today (image
-    /// refresh, ADR 0024).
+    /// refresh, ADR 0002).
     BumpDebianSnapshot,
     /// Run sequential jailed jobs on this host and check for leaked resources.
     Soak {

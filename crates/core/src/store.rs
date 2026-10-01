@@ -1,4 +1,4 @@
-//! The Postgres job store: the queue and the state of every job (ADR 0004).
+//! The Postgres job store: the queue and the state of every job (ADR 0001).
 //!
 //! Workers claim rows with `SELECT ... FOR UPDATE SKIP LOCKED`, hold a lease
 //! that they renew with heartbeats, and finish by reporting a
@@ -831,7 +831,7 @@ impl Store {
 
     /// Recent fetch records that have a lockfile, newest first: job, crate
     /// name, version, lockfile and locked packages. The warm build replays
-    /// them (ADR 0008).
+    /// them (ADR 0006).
     ///
     /// # Errors
     ///
@@ -889,7 +889,7 @@ impl Store {
     /// Of the given crate files (SHA-256), those Crateward stored at least
     /// `min_age_secs` ago that have a static report and no report with a
     /// high severity finding, with the BLAKE3 name of their blob. This is the
-    /// gate of the warm build cache (ADR 0008).
+    /// gate of the warm build cache (ADR 0006).
     ///
     /// # Errors
     ///

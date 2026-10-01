@@ -7,7 +7,7 @@ applies it as root; nothing here runs automatically.
 |------|------|
 | `install.sh` | Installs, updates or removes Crateward from an unpacked release bundle. It verifies the bundle, writes the configuration on the first run, installs `ansible-core` and runs the playbooks below on the server itself |
 | `ansible/components.yml` | The service users, services and timers, shared by the playbooks |
-| `ansible/rollback.yml` | Switches the guest files back to the previous version and restarts the orchestrator ([ADR 0024](../docs/adr/0024-guest-image-versions-and-rollback.md)) |
+| `ansible/rollback.yml` | Switches the guest files back to the previous version and restarts the orchestrator ([ADR 0002](../docs/adr/0002-firecracker-rootless-jail.md)) |
 | `ansible/uninstall.yml` | Removes the software and keeps the state; with `purge=true` it removes the state too |
 | `ansible/site.yml` | The whole host: kernel command line, swap and KSM, packages, users, directories, the sandbox tmpfs, PostgreSQL with data checksums, the release bundle, the configuration, SSH, the firewall, the units, the integrity manifest |
 | `ansible/vars.example.yml` | Every variable of the playbook |

@@ -32,7 +32,7 @@ use crate::payload::spawn_mkfs;
 pub const SCAN: &str = "sandbox-scratch";
 
 /// First argument of the child that exports `/target` as a tar (the warm
-/// build, ADR 0008).
+/// build, ADR 0006).
 pub const EXPORT: &str = "sandbox-scratch-export";
 
 /// Bounds of an export.
@@ -138,7 +138,7 @@ pub struct ScratchReport {
     /// File names of compiled units in `target/debug/deps` (for example
     /// `libserde-0123456789abcdef.rmeta`). The hash in each name identifies
     /// the unit exactly (version, features, dependencies, profile), which
-    /// measures what a shared build cache could reuse (ADR 0008).
+    /// measures what a shared build cache could reuse (ADR 0006).
     #[serde(default)]
     pub units: Vec<String>,
     /// Entries dropped from the lists above.

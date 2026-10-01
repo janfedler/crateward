@@ -1,6 +1,6 @@
 //! Finds member offsets of kernel structures in the kernel's BTF.
 //!
-//! The eBPF programs read a few fields of kernel structures (ADR 0006). The
+//! The eBPF programs read a few fields of kernel structures (ADR 0007). The
 //! agent looks their offsets up in `/sys/kernel/btf/vmlinux` at load time,
 //! so the programs follow the running kernel. Only the parts of the format
 //! needed for that are decoded: type records are walked to know where each

@@ -1,4 +1,4 @@
-//! Dependency resolution through a consumer probe (ADR 0014).
+//! Dependency resolution through a consumer probe (ADR 0004).
 //!
 //! For a version under analysis, the fetcher writes a small package that
 //! depends on exactly that version, the way a victim would pull it in, and

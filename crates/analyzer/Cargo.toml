@@ -12,7 +12,7 @@ license.workspace = true
 [dependencies]
 crateward_core = { workspace = true, features = ["app", "store"] }
 # The report types the other stages store; only types are used, nothing of
-# these packages runs in the analyzer (ADR 0021).
+# these packages runs in the analyzer (ADR 0009).
 crateward_orchestrator.workspace = true
 crateward_static_analysis.workspace = true
 secrecy.workspace = true

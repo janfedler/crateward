@@ -1,4 +1,4 @@
-//! Scoring: every point of a verdict comes with its evidence (ADR 0021).
+//! Scoring: every point of a verdict comes with its evidence (ADR 0009).
 //!
 //! The score is a sum of points from independent signals, capped per group
 //! so that one noisy source cannot dominate, and capped at 100 in total.

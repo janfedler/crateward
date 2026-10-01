@@ -59,7 +59,7 @@ pub struct Config {
     pub notifier: NotifierConfig,
     /// The admin dashboard.
     pub web: WebConfig,
-    /// Where the public site is pushed (ADR 0009). Without this table the
+    /// Where the public site is pushed (ADR 0001). Without this table the
     /// site is only written below `instance.run_dir`.
     #[serde(default)]
     pub export: Option<ExportConfig>,
@@ -290,7 +290,7 @@ pub struct SandboxConfig {
     pub full_timeout_secs: u64,
     /// The Firecracker binary.
     pub firecracker_bin: PathBuf,
-    /// The `crateward-vmjail` launcher (ADR 0012).
+    /// The `crateward-vmjail` launcher (ADR 0002).
     pub vmjail_bin: PathBuf,
     /// The `crateward_fake_internet` binary, started in every slot.
     pub fake_internet_bin: PathBuf,
@@ -310,9 +310,9 @@ pub struct SandboxConfig {
     pub slot_uid_base: u32,
     /// First subordinate GID for slots, from `/etc/subgid`.
     pub slot_gid_base: u32,
-    /// Minutes between two canary runs (ADR 0020); 0 turns them off.
+    /// Minutes between two canary runs (ADR 0008); 0 turns them off.
     pub canary_interval_minutes: u64,
-    /// The warm build cache (ADR 0008). Without this table, jobs build
+    /// The warm build cache (ADR 0006). Without this table, jobs build
     /// cold.
     #[serde(default)]
     pub warm: Option<WarmConfig>,
@@ -375,7 +375,7 @@ impl SupervisorConfig {
     }
 }
 
-/// Breakers, deadlines and alert delivery (ADR 0020).
+/// Breakers, deadlines and alert delivery (ADR 0008).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SupervisorConfig {
@@ -394,7 +394,7 @@ pub struct SupervisorConfig {
     pub breaker_max_cooldown_secs: u64,
     /// The same alert is sent again at most this often.
     pub alert_repeat_hours: u64,
-    /// Minutes between two checks of the integrity manifest (ADR 0023).
+    /// Minutes between two checks of the integrity manifest (ADR 0008).
     pub integrity_interval_minutes: u64,
     /// Decoy files on the host. The supervisor plants each one that is
     /// missing and treats any open of one as a sign of compromise. Backups
@@ -424,7 +424,7 @@ pub enum NotifierConfig {
 #[serde(deny_unknown_fields)]
 pub struct WebConfig {
     /// Listen address. Must be a loopback address: the dashboard is reached
-    /// through an SSH tunnel (ADR 0022).
+    /// through an SSH tunnel (ADR 0009).
     pub listen: SocketAddr,
 }
 
@@ -783,7 +783,7 @@ impl Config {
         v.check(
             self.web.listen.ip().is_loopback(),
             "web.listen",
-            "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0022)",
+            "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0009)",
         );
     }
 
@@ -1512,7 +1512,7 @@ mod tests {
             accepted(|c| c.web.listen = listen.parse().unwrap());
         }
         for listen in ["0.0.0.0:8080", "10.77.0.1:8080", "[::]:8080"] {
-            let message = "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0022)";
+            let message = "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0009)";
             rule(
                 |c| c.web.listen = listen.parse().unwrap(),
                 "web.listen",

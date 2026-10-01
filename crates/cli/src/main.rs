@@ -73,7 +73,7 @@ enum Command {
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
-    /// The host integrity manifest (ADR 0023).
+    /// The host integrity manifest (ADR 0008).
     Integrity {
         #[command(subcommand)]
         command: integrity::Command,

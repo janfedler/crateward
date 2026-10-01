@@ -1,4 +1,4 @@
-//! The public site: a static export of aggregate statistics (ADR 0009).
+//! The public site: a static export of aggregate statistics (ADR 0001).
 //!
 //! The server never serves the public. It renders a few static files and,
 //! when `[export]` is configured, pushes them to the site repository with a

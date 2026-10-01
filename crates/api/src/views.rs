@@ -1,4 +1,4 @@
-//! Page templates. askama escapes every value at compile time (ADR 0005);
+//! Page templates. askama escapes every value at compile time (ADR 0009);
 //! nothing here marks text as safe HTML.
 
 use askama::Template;

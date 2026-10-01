@@ -1,4 +1,4 @@
-//! The warm build cache (ADR 0008).
+//! The warm build cache (ADR 0006).
 //!
 //! Most of a job's `cargo check` time goes into dependencies that other
 //! jobs compiled already, with the same versions and features. The warm

@@ -36,11 +36,11 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `yara-x` | static analysis | VirusTotal's Rust rewrite of YARA for byte patterns in any file; default features off, only the rule compiler options it needs. |
 | `rustls` | fake internet | Terminates the guest's TLS connections; pure Rust, with the `ring` provider so the static musl build needs no C library. |
 | `rcgen` | fake internet, xtask | Issues the fake internet's certificates per server name and creates its authority; from the rustls project. |
-| `aya` | guest agent | Loads and attaches the eBPF programs and reads their ring buffer; pure Rust, no libbpf ([ADR 0006](adr/0006-ebpf-over-ptrace.md)). |
+| `aya` | guest agent | Loads and attaches the eBPF programs and reads their ring buffer; pure Rust, no libbpf ([ADR 0007](adr/0007-guest-agent-ebpf.md)). |
 | `aya-ebpf` | guest eBPF programs | The Rust side of aya for writing the programs themselves; the only dependency of `crateward_guest_ebpf`, which has its own lockfile. |
 | `ext4-view` | orchestrator | Reads the guest written scratch disk in a sandboxed child; read only, no unsafe code, designed not to panic on invalid data. |
 | `axum` | api | The dashboard's HTTP server, from the tokio project; default features off. |
-| `askama` | api | Compile time templates that escape HTML by default (ADR 0005). |
+| `askama` | api | Compile time templates that escape HTML by default (ADR 0009). |
 | `futures-util` | api | The stream behind the dashboard's server sent events. |
 | `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
 
@@ -66,8 +66,8 @@ All pinned by commit SHA.
 
 | Binary | Why |
 |--------|-----|
-| Firecracker 1.17 | The microVM monitor ([ADR 0002](adr/0002-firecracker-over-cloud-hypervisor-and-cratera.md)); jailed without its jailer ([ADR 0012](adr/0012-rootless-jail.md)). |
+| Firecracker 1.17 | The microVM monitor ([ADR 0002](adr/0002-firecracker-rootless-jail.md)); jailed without its jailer ([ADR 0002](adr/0002-firecracker-rootless-jail.md)). |
 | `newuidmap`, `newgidmap` (Debian `uidmap`) | Write the ID maps of each jail's user namespace. |
-| PostgreSQL | Job queue and result store ([ADR 0004](adr/0004-postgres-as-queue.md)). |
-| htmx 2.0.11 and `htmx-ext-sse` 2.2.4 (0BSD) | Vendored in `crates/api/static`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test ([ADR 0022](adr/0022-dashboard-and-public-export.md)). |
-| `bpf-linker` 0.11.1 | Links the eBPF programs; pinned by SHA-256 in `guest/bpf-linker.toml` together with the nightly compiler whose LLVM it matches ([ADR 0017](adr/0017-ebpf-tracing-in-the-guest.md)). |
+| PostgreSQL | Job queue and result store ([ADR 0001](adr/0001-one-server-postgres-queue.md)). |
+| htmx 2.0.11 and `htmx-ext-sse` 2.2.4 (0BSD) | Vendored in `crates/api/static`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test ([ADR 0009](adr/0009-scoring-and-dashboard.md)). |
+| `bpf-linker` 0.11.1 | Links the eBPF programs; pinned by SHA-256 in `guest/bpf-linker.toml` together with the nightly compiler whose LLVM it matches ([ADR 0007](adr/0007-guest-agent-ebpf.md)). |

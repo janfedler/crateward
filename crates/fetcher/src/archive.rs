@@ -1,4 +1,4 @@
-//! Validation of crate archives without extracting them (ADR 0014).
+//! Validation of crate archives without extracting them (ADR 0004).
 //!
 //! A `.crate` file is a gzip compressed tar archive whose entries should all
 //! live under `<name>-<version>/`. Crateward never materializes an archive

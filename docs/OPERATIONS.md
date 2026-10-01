@@ -13,10 +13,10 @@ numbers during milestone M7.
 | Disks | 2 × 2 TB enterprise HDD |
 | OS | Debian 13, stock 6.12 kernel, unattended upgrades |
 | Configuration | Ansible, from this repository (M1 and M8) |
-| Admin access | SSH with keys only ([ADR 0026](adr/0026-ssh-without-wireguard.md)) |
+| Admin access | SSH with keys only ([ADR 0003](adr/0003-debian-ansible-ssh.md)) |
 
 Kernel command line additions: `nosmt`, `mds=full,nosmt` and
-`l1tf=full,force` (see [ADR 0010](adr/0010-smt-off-and-ram-hot-path.md)).
+`l1tf=full,force` (see [ADR 0002](adr/0002-firecracker-rootless-jail.md)).
 KSM disabled, no swap.
 
 ## Storage layout
@@ -83,7 +83,7 @@ publishes the share of versions with dynamic results.
 | Database dump (`crateward-db-dump.timer`, to `/var/backups/crateward`) | daily |
 | Egress allowlist refresh (`crateward-egress.timer`) | every 2 minutes |
 | Canaries | hourly |
-| Image refresh: `cargo xtask bump-debian-snapshot`, rootfs build, canary, release, deploy ([ADR 0024](adr/0024-guest-image-versions-and-rollback.md)) | weekly, by the maintainer |
+| Image refresh: `cargo xtask bump-debian-snapshot`, rootfs build, canary, release, deploy ([ADR 0002](adr/0002-firecracker-rootless-jail.md)) | weekly, by the maintainer |
 | Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs; jobs wait meanwhile); stop and start the orchestrator to refresh it |
 | Guest kernel rebuild | only when its version or configuration changes |
 | Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every supervisor round |
@@ -113,7 +113,7 @@ the development account.
 
 ## Opening the dashboard
 
-The dashboard listens on `127.0.0.1:8080` only (ADR 0022). Open a tunnel
+The dashboard listens on `127.0.0.1:8080` only (ADR 0009). Open a tunnel
 and browse to `http://localhost:8080`:
 
 ```sh
@@ -131,7 +131,7 @@ capabilities and `UMask=0027`. The units are in `deploy/systemd`; all
 score "OK" in `systemd-analyze security`. All users reach PostgreSQL over
 the socket as the one role `crateward`, through a peer map.
 
-The orchestrator user has requirements of its own (ADR 0012):
+The orchestrator user has requirements of its own (ADR 0002):
 
 * its only supplementary group is `kvm`, because every jailed Firecracker
   keeps the orchestrator's supplementary groups;

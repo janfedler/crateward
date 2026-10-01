@@ -1,4 +1,4 @@
--- Static analysis results (ADR 0015).
+-- Static analysis results (ADR 0005).
 --
 -- A report belongs to crate file content, not to a job: analysis of the
 -- same bytes gives the same report, and shared dependencies are analyzed

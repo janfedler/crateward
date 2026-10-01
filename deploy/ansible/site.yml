@@ -54,7 +54,7 @@
           - ansible_facts.distribution == "Debian"
           - ansible_facts.distribution_major_version == "13"
 
-    # Host (OPERATIONS.md, ADR 0010)
+    # Host (OPERATIONS.md, ADR 0002)
 
     - name: Kernel command line without SMT and with full MDS and L1TF mitigations
       ansible.builtin.lineinfile:
@@ -135,7 +135,7 @@
         shell: /usr/sbin/nologin
       loop: "{{ crateward_users }}"
 
-    - name: Subordinate IDs for the slots (ADR 0012), used by no one else
+    - name: Subordinate IDs for the slots (ADR 0002), used by no one else
       ansible.builtin.lineinfile:
         path: "{{ item }}"
         regexp: '^crateward-orchestrator:'
@@ -171,7 +171,7 @@
         - { path: /var/lib/crateward/api/.ssh, owner: crateward-api, mode: "0700" }
         - { path: /var/lib/crateward/decoys, owner: crateward-supervisor, mode: "0750" }
         - { path: /var/backups/crateward, owner: postgres, group: postgres, mode: "0700" }
-        # The home the host decoys pretend to be (ADR 0023).
+        # The home the host decoys pretend to be (ADR 0008).
         - { path: /home/crateward, owner: crateward-supervisor, mode: "0755" }
         - { path: /home/crateward/.aws, owner: crateward-supervisor, mode: "0755" }
         - { path: /home/crateward/.ssh, owner: crateward-supervisor, mode: "0755" }
@@ -261,7 +261,7 @@
       loop: [firecracker, crateward-vmjail, crateward_fake_internet]
 
     # Guest files are versioned by the root filesystem's digest, with
-    # `current` and `previous` links (ADR 0024).
+    # `current` and `previous` links (ADR 0002).
     - name: Guest files
       ansible.builtin.include_tasks: tasks/guest.yml
       vars:
@@ -381,7 +381,7 @@
         enabled: true
         state: started
 
-    - name: Record the integrity manifest of this deploy (ADR 0023)
+    - name: Record the integrity manifest of this deploy (ADR 0008)
       ansible.builtin.command: /usr/local/bin/crateward integrity --config /etc/crateward/crateward.toml record
       changed_when: true
 

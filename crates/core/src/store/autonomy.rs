@@ -1,4 +1,4 @@
-//! Breakers, pauses, alerts and canary results (ADR 0020).
+//! Breakers, pauses, alerts and canary results (ADR 0008).
 //!
 //! The supervisor decides; these functions only store and read. Claiming
 //! (see [`Store::claim`]) consults the breakers and pauses, so a paused

@@ -54,7 +54,7 @@ pub enum JobEnd {
     /// it: a sandbox escape indicator.
     VmmCrashed(String),
     /// Something read the decoy in the jail root, which only a process
-    /// outside the VM can reach (ADR 0023): a sandbox escape indicator.
+    /// outside the VM can reach (ADR 0008): a sandbox escape indicator.
     DecoyTouched,
     /// KVM refused to run the VM. The host is at fault.
     KvmError(String),
@@ -285,7 +285,7 @@ impl FirecrackerBackend {
     }
 
     /// Boots a clean VM in a jail, waits for its agent and writes a full
-    /// snapshot to `out`: the base every job restores (ADR 0008, from a
+    /// snapshot to `out`: the base every job restores (ADR 0006, from a
     /// fresh boot, never from a VM that ran crate code). With
     /// `boot.drives`, the snapshot has placeholder drives that jobs replace.
     /// The spare slot number `config.slots` is used, so no job slot is

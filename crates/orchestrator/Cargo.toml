@@ -28,7 +28,7 @@ http-body-util.workspace = true
 rand.workspace = true
 semver.workspace = true
 tar.workspace = true
-# Rewrites manifests into stubs for the warm build (ADR 0008).
+# Rewrites manifests into stubs for the warm build (ADR 0006).
 toml.workspace = true
 rustix = { workspace = true, features = ["fs", "mount", "process", "system", "thread", "stdio"] }
 hyper.workspace = true

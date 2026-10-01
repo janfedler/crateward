@@ -312,7 +312,7 @@ pub struct WorkerSetup {
     pub check_timeout: Duration,
     /// Guest side limit for the full build after an escalation.
     pub full_timeout: Duration,
-    /// The warm build cache jobs mount, if one was built (ADR 0008).
+    /// The warm build cache jobs mount, if one was built (ADR 0006).
     pub warm: Option<PathBuf>,
     /// The empty file the base snapshot's warm drive points at.
     pub warm_placeholder: PathBuf,
@@ -366,7 +366,7 @@ impl SandboxWorker {
         }
     }
 
-    /// Runs both canaries (ADR 0020) in this worker's slot and records the
+    /// Runs both canaries (ADR 0008) in this worker's slot and records the
     /// results. Nothing runs while the pipeline is quarantined.
     ///
     /// # Errors
@@ -595,7 +595,7 @@ pub struct JobFiles {
     pub scratch: PathBuf,
     /// The fake internet's event log.
     pub network: PathBuf,
-    /// The warm build cache to mount, if there is one (ADR 0008).
+    /// The warm build cache to mount, if there is one (ADR 0006).
     pub warm: Option<PathBuf>,
     /// An empty file that stands in for the warm image when there is none.
     pub warm_placeholder: PathBuf,
@@ -659,7 +659,7 @@ impl RunPlan {
         }
     }
 
-    /// The confirmation run after an escalation (ADR 0021): a full build,
+    /// The confirmation run after an escalation (ADR 0009): a full build,
     /// with code generation and linking, in a fresh VM with fresh
     /// honeytokens.
     #[must_use]
@@ -886,7 +886,7 @@ pub const TARGET_DIR: &str = "/work/target";
 
 /// The mounts of a job, and the directories to create before it runs. With
 /// `warm`, the warm image's target directory lies under the job's own
-/// writable layer at [`TARGET_DIR`] (ADR 0008); without it, the target
+/// writable layer at [`TARGET_DIR`] (ADR 0006); without it, the target
 /// directory is a plain directory on the scratch disk.
 #[must_use]
 pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {

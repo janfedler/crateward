@@ -1,4 +1,4 @@
-//! A registry index proxy for one resolution (ADR 0014).
+//! A registry index proxy for one resolution (ADR 0004).
 //!
 //! `cargo generate-lockfile` runs in a sandbox whose only network path is a
 //! relay to this proxy's Unix socket. The proxy serves:

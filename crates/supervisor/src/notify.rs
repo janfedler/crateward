@@ -1,4 +1,4 @@
-//! Alert delivery (ADR 0009, ADR 0020).
+//! Alert delivery (ADR 0001, ADR 0008).
 //!
 //! Alerts leave the server through a third party, so they carry no crate
 //! names and no details: a category, a short title, and where to look. The

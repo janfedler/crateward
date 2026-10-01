@@ -1,6 +1,6 @@
 //! Loads the eBPF programs and turns their records into trace events.
 //!
-//! The programs live in `crateward_guest_ebpf` (ADR 0006, ADR 0017). The
+//! The programs live in `crateward_guest_ebpf` (ADR 0007). The
 //! agent loads them once at boot, before the base snapshot, so every
 //! restored VM traces from its first instruction. Loading needs the kernel
 //! structure offsets the programs read ([`OFFSETS`]); they come from the

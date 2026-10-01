@@ -1,4 +1,4 @@
-//! Summarizes the guest's eBPF trace (ADR 0017).
+//! Summarizes the guest's eBPF trace (ADR 0007).
 //!
 //! The agent streams events while the job runs. Everything in them is
 //! hostile input: a crate that controls the guest can send any event it

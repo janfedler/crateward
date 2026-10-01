@@ -1,12 +1,12 @@
 [package]
 name = "crateward_guest_ebpf"
-description = "eBPF programs the guest agent loads to trace a build (ADR 0006)."
+description = "eBPF programs the guest agent loads to trace a build (ADR 0007)."
 version = "0.1.0"
 edition = "2024"
 # The kernel only lets GPL compatible programs call the helpers these
 # programs need (Documentation/bpf/bpf_licensing.rst). This package is
 # therefore GPL-2.0-only, while the rest of the project is MIT OR
-# Apache-2.0 (ADR 0025). The full text is in LICENSE next to this file.
+# Apache-2.0 (ADR 0010). The full text is in LICENSE next to this file.
 license = "GPL-2.0-only"
 publish = false
 repository = "https://github.com/janfedler/crateward"

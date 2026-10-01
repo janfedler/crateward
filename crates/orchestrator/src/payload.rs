@@ -2,17 +2,17 @@
 //! every locked crate, mounted at `/cw` in the guest.
 //!
 //! ```text
-//! /cw/probe/Cargo.toml          the probe the fetcher resolved (ADR 0014)
+//! /cw/probe/Cargo.toml          the probe the fetcher resolved (ADR 0004)
 //! /cw/probe/Cargo.lock          the lockfile it produced
 //! /cw/probe/lib.rs              empty
 //! /cw/probe/.cargo/config.toml  crates.io replaced by /cw/vendor, offline
 //! /cw/vendor/<name>-<version>/  each locked crate, from the blob store
 //! ```
 //!
-//! The warm build (ADR 0008) adds further probes under `/cw/probes/<n>/`
+//! The warm build (ADR 0006) adds further probes under `/cw/probes/<n>/`
 //! and a script that runs them.
 //!
-//! Crate archives are never extracted on the host (ADR 0014). The
+//! Crate archives are never extracted on the host (ADR 0004). The
 //! orchestrator writes a new tar from the stored blobs, with its own
 //! headers (root owned, fixed modes and times), and streams it into
 //! `mkfs.erofs --tar=f`, which runs in a sandboxed child: no network,
@@ -137,7 +137,7 @@ pub struct PayloadSpec {
     pub files: Vec<(String, Vec<u8>)>,
     /// Packages (`<name>-<version>`) written as stubs: their manifest with
     /// the build script, binaries and other targets removed, and an empty
-    /// library. The warm build (ADR 0008) replays a job's dependency build
+    /// library. The warm build (ADR 0006) replays a job's dependency build
     /// this way without compiling the crate under analysis.
     pub stubs: Vec<String>,
 }

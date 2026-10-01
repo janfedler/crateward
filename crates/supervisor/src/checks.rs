@@ -64,7 +64,7 @@ pub struct HostProcess {
 }
 
 /// Process IDs that run as a slot UID without being what the jail starts
-/// (ADR 0023). A slot runs exactly one `firecracker`, started by a process
+/// (ADR 0008). A slot runs exactly one `firecracker`, started by a process
 /// outside the slot range, and at most one `fake-internet` below it, with
 /// the same UID. Anything else has no business running as a slot UID: the
 /// jail launcher itself has that name only for the moment before it

@@ -1,4 +1,4 @@
-//! `crateward integrity`: record and check the host manifest (ADR 0023).
+//! `crateward integrity`: record and check the host manifest (ADR 0008).
 
 use std::path::Path;
 

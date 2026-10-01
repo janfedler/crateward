@@ -182,7 +182,7 @@ every decision in an [ADR](docs/adr/README.md).
 * Windows, macOS, iOS and Android guests. Firecracker runs Linux guests, so
   code for other targets is only type checked with `cargo check`.
 * Agentless hypervisor introspection. The trace source sits behind a trait
-  so it can come later ([ADR 0003](docs/adr/0003-guest-agent-now-introspection-later.md)).
+  so it can come later ([ADR 0007](docs/adr/0007-guest-agent-ebpf.md)).
 * Registries other than crates.io.
 * Building every version. Triage decides, and the dashboard shows the
   coverage.
@@ -197,7 +197,7 @@ every decision in an [ADR](docs/adr/README.md).
   hide, not what a dormant one never does.
 * **Host kernel.** Debian 13's 6.12 kernel is outside Firecracker's
   validated host kernels; soak tests and hourly canaries compensate
-  ([ADR 0007](docs/adr/0007-ansible-on-debian.md)).
+  ([ADR 0003](docs/adr/0003-debian-ansible-ssh.md)).
 * **One server, no ECC memory.** No redundancy; durable data has end to end
   checksums, results in flight do not.
 
@@ -214,7 +214,7 @@ Deploying to the production server is the remaining step.
 |-----------|-------|-------|
 | M0 | Foundation: workspace, CI, config, core types, state machine, docs | done |
 | M1 | Firecracker platform: guest kernel and rootfs, orchestrator, rootless jail, limits, cleanup | done |
-| M1.5 | Build cache warmer: prewarmed snapshot | done: 28% less run time measured ([ADR 0008](docs/adr/0008-prewarmed-snapshot-and-shared-sccache.md)) |
+| M1.5 | Build cache warmer: prewarmed snapshot | done: 28% less run time measured ([ADR 0006](docs/adr/0006-dynamic-runs.md)) |
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
 | M4 | Dynamic analysis: guest agent, eBPF trace, fake internet, honeytokens, ground truth | done |
@@ -266,7 +266,7 @@ under the GNU General Public License, version 2 only
 ([`crates/guest_ebpf/LICENSE`](crates/guest_ebpf/LICENSE)), because the
 kernel requires a GPL compatible license for the helpers they call. The
 guest agent loads them as a separate object at run time
-([ADR 0025](docs/adr/0025-license.md)).
+([ADR 0010](docs/adr/0010-license.md)).
 
 ### Contribution
 

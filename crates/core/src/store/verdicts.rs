@@ -1,4 +1,4 @@
-//! Verdicts and what scoring reads (ADR 0021).
+//! Verdicts and what scoring reads (ADR 0009).
 
 use serde_json::Value;
 

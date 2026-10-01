@@ -102,7 +102,7 @@ pub struct MountSpec {
     /// Mount read only.
     pub read_only: bool,
     /// Programs may run from an `erofs` mount. Crate sources never do;
-    /// the warm build cache does (ADR 0008).
+    /// the warm build cache does (ADR 0006).
     pub executable: bool,
     /// For `overlay` only: `lowerdir=…,upperdir=…,workdir=…`.
     pub options: Option<String>,
@@ -227,7 +227,7 @@ pub enum TracingStatus {
     Unavailable(String),
 }
 
-/// One event recorded by the eBPF programs (ADR 0017). Process and user IDs
+/// One event recorded by the eBPF programs (ADR 0007). Process and user IDs
 /// are the guest's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceEvent {

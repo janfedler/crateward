@@ -271,7 +271,7 @@ async fn jailed_restores_the_same_snapshot_twice_with_fresh_state() {
     snapshot_and_restore_twice(true).await;
 }
 
-/// The host runs a kernel outside Firecracker's validated matrix (ADR 0007),
+/// The host runs a kernel outside Firecracker's validated matrix (ADR 0003),
 /// and Firecracker 1.17 fixed a host kernel specific bug that hid eIBRS from
 /// guests. A guest must never report a CPU vulnerability as unmitigated
 /// where the host reports a mitigation.

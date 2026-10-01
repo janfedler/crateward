@@ -1,4 +1,4 @@
-//! Rootless jail for Firecracker (ADR 0012).
+//! Rootless jail for Firecracker (ADR 0002).
 //!
 //! Firecracker's own jailer needs root. Crateward gets the same isolation
 //! from unprivileged user namespaces instead, so no process on the host runs
