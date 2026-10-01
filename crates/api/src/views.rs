@@ -134,8 +134,6 @@ pub struct EvidenceView {
     pub summary: String,
     /// The file in the crates.io code viewer, or empty.
     pub code_url: String,
-    /// The source around it: line number, text, whether it is the line.
-    pub snippet: Vec<(u64, String, bool)>,
 }
 
 /// The parts of a job page that come from its verdict.
@@ -170,8 +168,6 @@ pub struct FindingView {
     pub evidence: String,
     /// The file in the crates.io code viewer, or empty.
     pub code_url: String,
-    /// The source around it: line number, text, whether it is the line.
-    pub snippet: Vec<(u64, String, bool)>,
 }
 
 /// A job's page.

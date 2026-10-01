@@ -99,7 +99,6 @@ impl Rules {
                     cfg: None,
                     platform: Platform::Any,
                     evidence: evidence(&description),
-                    snippet: None,
                 })
             })
             .collect()

@@ -78,7 +78,7 @@ pass again (they run every `sandbox.canary_interval_minutes`).
 ## High risk verdict
 
 **Meaning.** A verdict needs human review. It is in the "needs you" inbox.
-The job page shows the source lines behind each piece of static evidence;
+The job page links each piece of static evidence to its line on crates.io;
 `crateward evidence <job> --out <dir>` writes its evidence pack.
 
 **Already done.** Nothing was published. The verdict stays private.

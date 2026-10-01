@@ -11,17 +11,14 @@ use std::io::Read;
 
 use serde::{Deserialize, Serialize};
 
-use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, Snippet, evidence};
+use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, evidence};
 use crate::manifest::{self, ManifestFacts};
 use crate::rust::{self, Include};
 use crate::yara::Rules;
 
 /// Version of the analysis. A stored report from an older version is
 /// recomputed; bump it whenever detectors or rules change.
-pub const ANALYZER_VERSION: i32 = 4;
-
-/// Findings that get a source snippet, highest severity first.
-const MAX_SNIPPETS: usize = 300;
+pub const ANALYZER_VERSION: i32 = 5;
 
 /// Bounds on the work done for one archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,7 +144,6 @@ fn crate_finding(kind: FindingKind, severity: Severity, file: &str, text: &str) 
         cfg: None,
         platform: Platform::Any,
         evidence: evidence(text),
-        snippet: None,
     }
 }
 
@@ -263,7 +259,6 @@ fn included_binaries(
                 .map_or(Platform::Any, Platform::from_cfg),
             cfg: include.cfg,
             evidence: evidence(&format!("{target} ({} bytes)", data.len())),
-            snippet: None,
         });
     }
     found
@@ -302,7 +297,6 @@ fn downloader_pattern(findings: &[Finding]) -> Option<Finding> {
             execution.file,
             execution.line.unwrap_or(0)
         )),
-        snippet: None,
     })
 }
 
@@ -335,21 +329,6 @@ fn manifest_findings(facts: &ManifestFacts) -> Vec<Finding> {
         ));
     }
     found
-}
-
-/// Adds the source lines around the first findings that have a line in a
-/// text file, so a reviewer sees the code without unpacking the crate.
-fn add_snippets(findings: &mut [Finding], contents: &Files) {
-    for f in findings
-        .iter_mut()
-        .filter(|f| f.line.is_some())
-        .take(MAX_SNIPPETS)
-    {
-        let text = contents
-            .get(&f.file)
-            .and_then(|d| std::str::from_utf8(d).ok());
-        f.snippet = text.zip(f.line).and_then(|(t, l)| Snippet::around(t, l));
-    }
 }
 
 /// Findings per platform, leaving out those that apply everywhere.
@@ -405,7 +384,6 @@ pub fn analyze(
     let dropped = report.findings.len().saturating_sub(limits.max_findings);
     report.findings.truncate(limits.max_findings);
     report.findings_dropped = u32::try_from(dropped).unwrap_or(u32::MAX);
-    add_snippets(&mut report.findings, &contents);
     Ok(report)
 }
 
@@ -461,9 +439,6 @@ mod tests {
         assert!(kinds.contains(&"build_script".to_owned()));
         assert!(report.has_build_time_code());
         assert_eq!(report.rust_files, 2);
-        let snippet = report.findings[0].snippet.as_ref().unwrap();
-        assert_eq!(snippet.start, 1);
-        assert!(snippet.lines[2].contains("https://example.invalid/p"));
     }
 
     #[test]

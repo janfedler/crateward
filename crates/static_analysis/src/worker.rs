@@ -169,7 +169,7 @@ impl Analyzer {
 
     /// Analyzes again, a few per call, the crate files of scored jobs whose
     /// report an older analyzer wrote, so the dashboard shows what the
-    /// current one adds, such as source snippets. Verdicts waiting for
+    /// current one adds, such as line numbers. Verdicts waiting for
     /// review go first. Returns how many reports were written.
     ///
     /// # Errors

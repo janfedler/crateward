@@ -298,31 +298,6 @@ fn finding_signal(f: &serde_json::Value) -> String {
     }
 }
 
-/// The source lines the analysis kept around a finding.
-fn snippet(f: &serde_json::Value) -> Vec<(u64, String, bool)> {
-    let Some(s) = f.get("snippet") else {
-        return Vec::new();
-    };
-    let start = s
-        .get("start")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(1);
-    let line = f.get("line").and_then(serde_json::Value::as_u64);
-    s.get("lines")
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .zip(start..)
-        .map(|(t, n)| {
-            (
-                n,
-                t.as_str().unwrap_or_default().to_owned(),
-                Some(n) == line,
-            )
-        })
-        .collect()
-}
-
 fn report_findings(report: &serde_json::Value) -> &[serde_json::Value] {
     report
         .get("findings")
@@ -346,17 +321,16 @@ fn findings(report: &serde_json::Value, name: &str, version: &str) -> Vec<Findin
                 location: finding_location(f),
                 evidence: text(f, "evidence"),
                 code_url: finding_url(f, name, version),
-                snippet: snippet(f),
             }
         })
         .collect()
 }
 
-/// Shows the code behind each piece of static evidence: the finding of the
-/// same kind at the same place, or in the same file when the verdict
-/// predates line numbers for that kind. The crate's own files link to the
-/// crates.io code viewer.
-fn attach_code(
+/// Links each piece of static evidence to its code in the crates.io code
+/// viewer, at the line of the finding of the same kind at the same place,
+/// or in the same file when the verdict predates line numbers for that
+/// kind.
+fn attach_links(
     evidence: &mut [EvidenceView],
     report: &serde_json::Value,
     name: &str,
@@ -381,7 +355,6 @@ fn attach_code(
                     .find(|f| text(f, "file") == e.location)
             });
         if let Some(f) = found {
-            e.snippet = snippet(f);
             e.code_url = finding_url(f, name, version);
         }
     }
@@ -438,7 +411,6 @@ fn evidence_view(e: Evidence) -> EvidenceView {
         location: e.location.unwrap_or_default(),
         summary: e.summary,
         code_url: String::new(),
-        snippet: Vec::new(),
     }
 }
 
@@ -465,7 +437,7 @@ async fn job(
     let mut verdict = verdict.unwrap_or_default();
     let static_report = store.static_report(&job.cksum).await?.map(|(_, r)| r);
     if let Some(report) = &static_report {
-        attach_code(&mut verdict.evidence, report, &job.name, &job.version);
+        attach_links(&mut verdict.evidence, report, &job.name, &job.version);
     }
     let findings = static_report
         .as_ref()
