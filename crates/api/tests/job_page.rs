@@ -372,11 +372,11 @@ async fn seed_full_job(db: &mut Dashboard) -> JobId {
         .await
         .unwrap();
     store
-        .record_run(job, "full", "completed", &json!({"network": "x"}))
+        .record_run(job, "full", "completed", &run_report())
         .await
         .unwrap();
     store
-        .record_run(job, "check", "completed", &run_report())
+        .record_run(job, "check", "completed", &json!({"network": "x"}))
         .await
         .unwrap();
     let kind = DisclosureKind::Malicious;
@@ -501,13 +501,16 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
         ]
     );
 
-    assert!(html.find("<h2>Run: check</h2>") < html.find("<h2>Run: full</h2>"));
-    let check = run_section(&html, "check");
+    assert!(
+        !html.contains("<h2>Run: check</h2>"),
+        "the full run replaces it"
+    );
+    let full = run_section(&html, "full");
     assert_eq!(
-        text(check, "<ul class=\"alerts\">", "</ul>"),
+        text(full, "<ul class=\"alerts\">", "</ul>"),
         "Honeytoken github_token left the VM through dns:evil.example"
     );
-    assert!(check.contains("<span class=\"badge ok\">succeeded</span>"));
+    assert!(full.contains("<span class=\"badge ok\">succeeded</span>"));
     for (label, value) in [
         ("Ended", "Finished"),
         ("Guest", "exit code 0"),
@@ -516,11 +519,11 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
         ("Files opened", "12"),
     ] {
         assert!(
-            check.contains(&format!("<dt>{label}</dt><dd>{value}</dd>")),
+            full.contains(&format!("<dt>{label}</dt><dd>{value}</dd>")),
             "{label}"
         );
     }
-    let tree = table(check, "<h3>Processes");
+    let tree = table(full, "<h3>Processes");
     assert_eq!(tree.len(), 5);
     assert_eq!(
         tree[4],
@@ -532,22 +535,25 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
             "0"
         ])
     );
-    assert!(check.contains("<tr class=\"role-rustc compiler\">"));
+    assert!(full.contains("<tr class=\"role-rustc compiler\">"));
     assert!(
-        !check.contains("<curl>") && !check.contains("<unused>"),
+        !full.contains("<curl>") && !full.contains("<unused>"),
         "guest text is escaped"
     );
-    assert!(check.contains("<code class=\"chip\">evil.example</code>"));
-    assert!(check.contains("href=\"/jobs/1/runs/check.json\""));
-    // A report without the expected shape still gets its section.
-    assert!(run_section(&html, "full").contains("No processes traced."));
+    assert!(full.contains("<code class=\"chip\">evil.example</code>"));
+    assert!(full.contains("href=\"/jobs/1/runs/full.json\""));
+    assert!(full.contains("<a href=\"/jobs/1/runs/check.json\" download>"));
 
-    let (status, head, body) = db.fetch("/jobs/1/runs/check.json").await;
+    let (status, head, body) = db.fetch("/jobs/1/runs/full.json").await;
     assert_eq!(status, 200);
-    assert!(
-        head.contains("content-disposition: attachment; filename=\"crateward-job-1-check.json\"")
-    );
+    let file = "filename=\"crateward-job-1-full.json\"";
+    assert!(head.contains(&format!("content-disposition: attachment; {file}")));
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), run_report());
+    let (_, _, body) = db.fetch("/jobs/1/runs/check.json").await;
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap(),
+        json!({"network": "x"})
+    );
     assert_eq!(db.fetch("/jobs/1/runs/other.json").await.0, 404);
     assert_eq!(db.fetch("/jobs/1/runs/check").await.0, 404);
     db.drop().await;

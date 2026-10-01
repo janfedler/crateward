@@ -43,9 +43,6 @@ const TOOLCHAIN: [&str; 25] = [
     "objcopy",
 ];
 
-/// Longest argument list shown in a row; the full one is in the tooltip.
-const MAX_ARGS: usize = 240;
-
 /// One process in tree order.
 #[derive(Debug, Clone)]
 pub struct ProcessRow {
@@ -57,10 +54,8 @@ pub struct ProcessRow {
     pub role: String,
     /// The program.
     pub exe: String,
-    /// Arguments after the program, shortened.
+    /// Arguments after the program.
     pub args: String,
-    /// All arguments.
-    pub args_full: String,
     /// Start after the job started.
     pub start: String,
     /// Run time, or empty when its end was not traced.
@@ -138,6 +133,9 @@ pub struct EntryRow {
 pub struct RunView {
     /// `check` or `full`.
     pub kind: String,
+    /// Where the report of a check run downloads that the full run
+    /// replaces on the page, or empty.
+    pub superseded: String,
     /// Where the report downloads.
     pub download: String,
     /// How the build ended.
@@ -262,18 +260,6 @@ fn outcome_class(outcome: &str) -> &'static str {
     }
 }
 
-fn shorten(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_owned();
-    }
-    let mut cut = text
-        .get(..text.floor_char_boundary(max))
-        .unwrap_or("")
-        .to_owned();
-    cut.push('…');
-    cut
-}
-
 /// The processes in tree order: each after its parent, siblings by start.
 /// A process whose parent was not traced starts a tree of its own, and so
 /// does one a parent loop cuts off.
@@ -317,7 +303,6 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
         .skip(1)
         .map(|a| a.as_str().unwrap_or_default().to_owned())
         .collect();
-    let args_full = argv.join(" ");
     let started = u64_of(p, "started_ms").unwrap_or(0);
     let exe = str_of(p, "exe");
     let name = exe.rsplit('/').next().unwrap_or_default();
@@ -331,8 +316,7 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
         pid: u64_of(p, "pid").unwrap_or(0),
         role,
         exe,
-        args: shorten(&args_full, MAX_ARGS),
-        args_full,
+        args: argv.join(" "),
         start: duration(started),
         duration: u64_of(p, "ended_ms")
             .map(|end| duration(end.saturating_sub(started)))
@@ -553,6 +537,24 @@ fn scratch(view: &mut RunView, disk: &Value) {
     }
 }
 
+/// The runs a job page shows: the full run when there is one, since it
+/// repeats what the check run did, with a link to the check run's report.
+#[must_use]
+pub fn run_views(job: i64, runs: &[(String, Value)]) -> Vec<RunView> {
+    let full = runs.iter().any(|(kind, _)| kind == "full");
+    let check = runs.iter().any(|(kind, _)| kind == "check");
+    runs.iter()
+        .filter(|(kind, _)| !(full && kind == "check"))
+        .map(|(kind, report)| {
+            let mut view = run_view(job, kind, report);
+            if kind == "full" && check {
+                view.superseded = format!("/jobs/{job}/runs/check.json");
+            }
+            view
+        })
+        .collect()
+}
+
 /// The view of one stored run report.
 #[must_use]
 pub fn run_view(job: i64, kind: &str, report: &Value) -> RunView {
@@ -733,6 +735,24 @@ mod tests {
             ["The agent did not close the trace; it may be incomplete"]
         );
         assert_eq!(view.entries[0].mode, "644");
+    }
+
+    #[test]
+    fn the_full_run_replaces_the_check_run() {
+        let runs = |kinds: &[&str]| -> Vec<(String, Value)> {
+            kinds.iter().map(|k| ((*k).to_owned(), json!({}))).collect()
+        };
+        let both = run_views(3, &runs(&["check", "full"]));
+        assert_eq!(both.len(), 1);
+        assert_eq!(
+            (both[0].kind.as_str(), both[0].superseded.as_str()),
+            ("full", "/jobs/3/runs/check.json")
+        );
+        let check = run_views(3, &runs(&["check"]));
+        assert_eq!(
+            (check[0].kind.as_str(), check[0].superseded.as_str()),
+            ("check", "")
+        );
     }
 
     #[test]

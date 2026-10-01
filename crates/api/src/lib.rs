@@ -454,10 +454,7 @@ async fn job(
         profile: verdict.profile,
         findings,
         timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
-        runs: runs
-            .into_iter()
-            .map(|(kind, r)| run_view::run_view(id, &kind, &r))
-            .collect(),
+        runs: run_view::run_views(id, &runs),
         disclosure: disclosure.map(disclosure_rows).unwrap_or_default(),
     };
     Ok(Html(page.render()?).into_response())

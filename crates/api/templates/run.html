@@ -5,6 +5,7 @@
   <span class="badge {{ run.outcome_class }}">{{ run.outcome }}</span>
   <a class="button" href="{{ run.download }}" download>Download JSON</a>
 </div>
+{% if !run.superseded.is_empty() %}<p class="muted">The full build covers everything the earlier <code>cargo check</code> run did, so only the full run is shown. <a href="{{ run.superseded }}" download>Download the check run's report</a>.</p>{% endif %}
 
 {% if !run.alerts.is_empty() %}
 <ul class="alerts">{% for a in run.alerts %}<li>{{ a }}</li>{% endfor %}</ul>
@@ -23,7 +24,7 @@
 {% for p in run.processes %}
 <tr class="role-{{ p.role }}{% if p.compiler() %} compiler{% endif %}{% if p.root %} root{% endif %}{% if p.disguised() %} disguised{% endif %}">
 <td class="d{{ p.depth }}">{% if p.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ p.role }}</span> <span class="mono" title="pid {{ p.pid }}">{{ p.exe }}</span></td>
-<td class="mono" title="{{ p.args_full }}">{{ p.args }}</td>
+<td class="mono">{{ p.args }}</td>
 <td class="nowrap muted">{{ p.start }}</td>
 <td class="nowrap">{{ p.duration }}</td>
 <td class="nowrap">{{ p.exit }}</td>
