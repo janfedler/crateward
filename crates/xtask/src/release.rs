@@ -3,7 +3,8 @@
 //! The bundle holds the service binaries (`bin/`), the sandbox binaries
 //! (`sandbox/`), the guest images with the fake internet's authority
 //! (`guest/`), the playbooks and units (`deploy/`), the example
-//! configuration (`config/`), `install.sh`, a CycloneDX software bill of
+//! configuration (`config/`), `install.sh`, the license texts, a CycloneDX
+//! software bill of
 //! materials, the vendored sources of every dependency, and `SHA256SUMS`
 //! over all of it. The bundle directory is packed into a tarball next to
 //! it. Signing the sums file needs the maintainer's key, so this task stops
@@ -241,8 +242,16 @@ fn stage_guest(target: &Path, out: &Path) -> Result<(), TaskError> {
     )
 }
 
-/// The playbooks, the units, `install.sh` and the example configuration.
+/// The playbooks, the units, `install.sh`, the example configuration and
+/// the license texts.
 fn stage_deploy(root: &Path, out: &Path) -> Result<(), TaskError> {
+    for (from, to) in [
+        ("LICENSE-MIT", "LICENSE-MIT"),
+        ("LICENSE-APACHE", "LICENSE-APACHE"),
+        ("crates/guest_ebpf/LICENSE", "LICENSE-GPL-2.0"),
+    ] {
+        copy(&root.join(from), &out.join(to), 0o644)?;
+    }
     let deploy = root.join("deploy");
     for dir in ["ansible", "systemd", "nftables"] {
         copy_tree(&deploy.join(dir), &out.join("deploy").join(dir))?;
@@ -718,6 +727,9 @@ mod tests {
         assert!(dir.join("deploy/nftables/crateward.nft").is_file());
         assert!(dir.join("deploy/ansible").is_dir());
         assert!(dir.join("deploy/systemd").is_dir());
+        for license in ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-GPL-2.0"] {
+            assert_eq!(mode(&dir.join(license)), 0o644, "{license}");
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -3,6 +3,7 @@ name = "crateward_fuzz"
 description = "Fuzz targets for every parser of hostile input (M7)."
 version = "0.0.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 publish = false
 
 [package.metadata]

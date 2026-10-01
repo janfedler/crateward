@@ -48,7 +48,8 @@ confidence-threshold = 0.93
 unused-allowed-license = "allow"
 
 [licenses.private]
-# Workspace packages are not published and have no license yet.
+# Workspace packages are not published. They are MIT OR Apache-2.0, except
+# crateward_guest_ebpf, which is GPL-2.0-only (ADR 0025).
 ignore = true
 
 [bans]
