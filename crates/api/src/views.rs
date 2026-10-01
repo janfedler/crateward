@@ -37,6 +37,8 @@ pub struct Row {
     pub evidence: String,
     /// Relative age.
     pub age: String,
+    /// Whether a report was recorded.
+    pub reported: bool,
 }
 
 impl From<JobRow> for Row {
@@ -51,6 +53,7 @@ impl From<JobRow> for Row {
             review: r.review.unwrap_or_default(),
             evidence: r.top_evidence.unwrap_or_default(),
             age: ago(r.age_secs),
+            reported: r.reported,
         }
     }
 }
@@ -102,6 +105,8 @@ pub struct OverviewBody {
 pub struct InboxPage {
     /// Pending verdicts.
     pub rows: Vec<Row>,
+    /// Confirmed verdicts without a recorded report.
+    pub unreported: Vec<Row>,
 }
 
 /// The job list.
@@ -116,6 +121,10 @@ pub struct JobsPage {
     pub level: String,
     /// Every level, for the select.
     pub levels: Vec<String>,
+    /// The review filter.
+    pub review: String,
+    /// Every review filter, value and label.
+    pub reviews: Vec<(&'static str, &'static str)>,
 }
 
 /// One piece of evidence as shown.

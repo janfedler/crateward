@@ -83,7 +83,10 @@ The job page links each piece of static evidence to its line on crates.io;
 
 **Already done.** Nothing was published. The verdict stays private.
 
-**What to do.** Follow [DISCLOSURE.md](DISCLOSURE.md).
+**What to do.** Follow [DISCLOSURE.md](DISCLOSURE.md). A confirmed verdict
+stays in the inbox, under "Confirmed, not reported", until
+`crateward disclosure report` records its report; the job list filters for
+it too.
 
 ## Sandbox escape indicator
 

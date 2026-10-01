@@ -5,7 +5,9 @@
   <td class="nowrap"><a href="/jobs/{{ r.id }}">{{ r.id }}</a></td>
   <td>{{ r.name }} {{ r.version }}</td>
   <td class="nowrap">{{ r.state }}</td>
-  <td class="nowrap level-{{ r.level }}">{{ r.score }} {{ r.level }}{% if r.review == "pending" %} (review){% endif %}</td>
+  <td class="nowrap level-{{ r.level }}">{{ r.score }} {{ r.level }}{% if r.review == "pending" %} (review){% endif %}
+    {%- if r.review == "confirmed" %} <span class="badge bad">confirmed</span>{% if !r.reported %} <span class="badge warn">not reported</span>{% endif %}{% endif %}
+    {%- if r.review == "false_positive" %} <span class="badge">false positive</span>{% endif %}</td>
   <td>{{ r.evidence }}</td>
   <td class="muted nowrap">{{ r.age }}</td>
 </tr>

@@ -8,6 +8,10 @@
     <option value="">any level</option>
     {% for l in levels %}<option value="{{ l }}"{% if *l == *level %} selected{% endif %}>{{ l }}</option>{% endfor %}
   </select>
+  <select name="review">
+    <option value="">any review</option>
+    {% for (value, label) in reviews %}<option value="{{ value }}"{% if *value == review %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
   <button type="submit">Filter</button>
 </form>
 {% include "rows.html" %}

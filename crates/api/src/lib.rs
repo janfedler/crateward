@@ -234,14 +234,15 @@ async fn events(
 }
 
 async fn inbox(State(state): State<Arc<AppState>>) -> Page {
-    let rows = state
-        .reader
-        .inbox()
-        .await?
-        .into_iter()
-        .map(Row::from)
-        .collect();
-    Ok(Html(InboxPage { rows }.render()?))
+    let rows = state.reader.inbox().await?;
+    let unreported = state.reader.unreported().await?;
+    Ok(Html(
+        InboxPage {
+            rows: rows.into_iter().map(Row::from).collect(),
+            unreported: unreported.into_iter().map(Row::from).collect(),
+        }
+        .render()?,
+    ))
 }
 
 /// The job list's filters.
@@ -251,9 +252,20 @@ pub struct JobsQuery {
     name: String,
     #[serde(default)]
     level: String,
+    #[serde(default)]
+    review: String,
 }
 
 const LEVELS: [&str; 5] = ["none", "low", "medium", "high", "critical"];
+
+/// The review filter's values and labels. `unreported` is a confirmed job
+/// whose report was not recorded yet.
+const REVIEWS: [(&str, &str); 4] = [
+    ("pending", "waiting for review"),
+    ("confirmed", "confirmed"),
+    ("unreported", "confirmed, not reported"),
+    ("false_positive", "false positive"),
+];
 
 async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) -> Page {
     let name: String = q.name.chars().take(64).collect();
@@ -261,10 +273,17 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
         .iter()
         .find(|l| **l == q.level)
         .map(|l| (*l).to_owned());
+    let review = REVIEWS
+        .iter()
+        .find(|(value, _)| *value == q.review)
+        .map(|(value, _)| *value);
     let filter = JobFilter {
         name: (!name.is_empty()).then(|| name.clone()),
         level: level.clone(),
-        review: None,
+        review: review
+            .map(|r| if r == "unreported" { "confirmed" } else { r })
+            .map(str::to_owned),
+        unreported: review == Some("unreported"),
     };
     let rows = state
         .reader
@@ -279,6 +298,8 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             name,
             level: level.unwrap_or_default(),
             levels: LEVELS.iter().map(|l| (*l).to_owned()).collect(),
+            review: review.unwrap_or_default().to_owned(),
+            reviews: REVIEWS.to_vec(),
         }
         .render()?,
     ))
@@ -667,7 +688,12 @@ mod tests {
 
     #[test]
     fn pages_ask_for_the_current_stylesheet() {
-        let page = InboxPage { rows: Vec::new() }.render().unwrap();
+        let page = InboxPage {
+            rows: Vec::new(),
+            unreported: Vec::new(),
+        }
+        .render()
+        .unwrap();
         let version = stylesheet_version();
         assert_eq!(version.len(), 12);
         assert!(page.contains(&format!("/static/crateward.css?v={version}\"")));
@@ -691,17 +717,23 @@ mod tests {
 
     #[test]
     fn templates_escape_guest_text() {
+        let row = Row {
+            id: 1,
+            name: "<script>alert(1)</script>".into(),
+            version: "1.0.0".into(),
+            state: "Done".into(),
+            score: "90".into(),
+            level: "critical\" onmouseover=\"x".into(),
+            review: "pending".into(),
+            evidence: "\"><img src=x onerror=alert(1)>".into(),
+            age: "now".into(),
+            reported: false,
+        };
         let page = InboxPage {
-            rows: vec![Row {
-                id: 1,
-                name: "<script>alert(1)</script>".into(),
-                version: "1.0.0".into(),
-                state: "Done".into(),
-                score: "90".into(),
-                level: "critical\" onmouseover=\"x".into(),
-                review: "pending".into(),
-                evidence: "\"><img src=x onerror=alert(1)>".into(),
-                age: "now".into(),
+            rows: vec![row.clone()],
+            unreported: vec![Row {
+                review: "confirmed".into(),
+                ..row
             }],
         };
         let html = page.render().unwrap();

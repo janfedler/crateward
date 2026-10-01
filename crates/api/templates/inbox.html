@@ -4,4 +4,8 @@
 <h1>Needs you</h1>
 <p class="muted">High and critical verdicts wait here until marked confirmed or a false positive. Nothing is published before that (DISCLOSURE.md).</p>
 {% if rows.is_empty() %}<p class="ok">Nothing waits for review.</p>{% else %}{% include "rows.html" %}{% endif %}
+
+<h2>Confirmed, not reported</h2>
+<p class="muted">Write the evidence pack with <code>crateward evidence &lt;job&gt; --out &lt;dir&gt;</code>, report it, then record the report with <code>crateward disclosure report</code>; the job page has the full commands.</p>
+{% if unreported.is_empty() %}<p class="ok">Every confirmed verdict was reported.</p>{% else %}{% let rows = unreported.clone() %}{% include "rows.html" %}{% endif %}
 {% endblock %}

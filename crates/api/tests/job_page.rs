@@ -615,6 +615,18 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
     );
     let html = db.page(job).await;
     assert!(html.contains("<h2>Disclosure</h2>\n\n<p class=\"muted\">Not reported yet."));
+    // Until the report is recorded, the inbox and a filter find it.
+    let link = format!("<a href=\"/jobs/{}\">", job.0);
+    let (_, inbox) = db.get("/inbox").await;
+    let (waiting, unreported) = inbox
+        .split_once("<h2>Confirmed, not reported</h2>")
+        .unwrap();
+    assert!(!waiting.contains(&link) && unreported.contains(&link));
+    assert!(unreported.contains("<span class=\"badge warn\">not reported</span>"));
+    let (_, found) = db.get("/jobs?review=unreported").await;
+    assert!(found.contains(&link));
+    assert!(found.contains("<option value=\"unreported\" selected>"));
+    assert!(!db.get("/jobs?review=pending").await.1.contains(&link));
     assert!(html.contains(&format!(
         "<code>crateward evidence {} --out &lt;dir&gt;</code>",
         job.0
@@ -626,6 +638,10 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
         .record_report(job, kind, "the maintainer", None, None);
     reported.await.unwrap().unwrap();
     let day = db.store.disclosure(job).await.unwrap().unwrap().reported_on;
+    assert!(!db.get("/jobs?review=unreported").await.1.contains(&link));
+    assert!(db.get("/jobs?review=confirmed").await.1.contains(&link));
+    let (_, inbox) = db.get("/inbox").await;
+    assert!(inbox.contains("Every confirmed verdict was reported."));
     let html = db.page(job).await;
     assert_eq!(
         table(&html, "<h2>Disclosure</h2>"),

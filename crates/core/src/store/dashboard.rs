@@ -24,6 +24,8 @@ pub struct JobRow {
     pub top_evidence: Option<String>,
     /// Seconds since the job last changed.
     pub age_secs: i64,
+    /// Whether a report of it was recorded (`crateward disclosure report`).
+    pub reported: bool,
 }
 
 /// Filters for the job list.
@@ -35,6 +37,8 @@ pub struct JobFilter {
     pub level: Option<String>,
     /// Review state.
     pub review: Option<String>,
+    /// Only confirmed jobs without a recorded report.
+    pub unreported: bool,
 }
 
 /// Numbers for the overview.
@@ -48,7 +52,7 @@ pub struct Overview {
     pub done_24h: i64,
     /// Of those, how many had a dynamic run.
     pub dynamic_24h: i64,
-    /// Verdicts waiting for review.
+    /// Verdicts waiting for review, and confirmed ones not reported yet.
     pub pending_reviews: i64,
 }
 
@@ -70,7 +74,12 @@ pub struct PublicStats {
 
 const ROW: &str = "j.id, j.crate_name, j.version, j.state, v.score, v.level, v.review,
      v.verdict->'evidence'->0->>'summary',
-     extract(epoch FROM now() - j.updated_at)::bigint";
+     extract(epoch FROM now() - j.updated_at)::bigint,
+     EXISTS (SELECT 1 FROM disclosures d WHERE d.job_id = j.id)";
+
+/// Confirmed, and nobody recorded a report yet.
+const UNREPORTED: &str = "v.review = 'confirmed'
+     AND NOT EXISTS (SELECT 1 FROM disclosures d WHERE d.job_id = j.id)";
 
 fn job_row(row: &tokio_postgres::Row) -> Result<JobRow, StoreError> {
     Ok(JobRow {
@@ -83,6 +92,7 @@ fn job_row(row: &tokio_postgres::Row) -> Result<JobRow, StoreError> {
         review: row.try_get(6)?,
         top_evidence: row.try_get(7)?,
         age_secs: row.try_get(8)?,
+        reported: row.try_get(9)?,
     })
 }
 
@@ -130,11 +140,14 @@ impl Store {
         let row = self
             .client
             .query_one(
-                "SELECT count(*) FILTER (WHERE j.state = 'Done'),
+                &format!(
+                    "SELECT count(*) FILTER (WHERE j.state = 'Done'),
                         count(*) FILTER (WHERE j.state = 'Done'
                                          AND (j.job->>'dynamic_runs')::int > 0),
-                        (SELECT count(*) FROM verdicts WHERE review = 'pending')
-                 FROM jobs j WHERE j.updated_at > now() - interval '24 hours'",
+                        (SELECT count(*) FROM verdicts v JOIN jobs j ON j.id = v.job_id
+                         WHERE v.review = 'pending' OR ({UNREPORTED}))
+                 FROM jobs j WHERE j.updated_at > now() - interval '24 hours'"
+                ),
                 &[],
             )
             .await?;
@@ -222,6 +235,27 @@ impl Store {
             .collect()
     }
 
+    /// Confirmed jobs without a recorded report, oldest first: each still
+    /// needs its evidence pack and report (DISCLOSURE.md).
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn unreported(&self) -> Result<Vec<JobRow>, StoreError> {
+        self.client
+            .query(
+                &format!(
+                    "SELECT {ROW} FROM verdicts v JOIN jobs j ON j.id = v.job_id
+                     WHERE {UNREPORTED} ORDER BY j.id LIMIT 200"
+                ),
+                &[],
+            )
+            .await?
+            .iter()
+            .map(job_row)
+            .collect()
+    }
+
     /// Jobs matching `filter`, newest first, at most `limit`.
     ///
     /// # Errors
@@ -241,9 +275,16 @@ impl Store {
                      WHERE ($1::text IS NULL OR j.canonical_name LIKE $1)
                        AND ($2::text IS NULL OR v.level = $2)
                        AND ($3::text IS NULL OR v.review = $3)
-                     ORDER BY j.id DESC LIMIT $4"
+                       AND (NOT $4 OR ({UNREPORTED}))
+                     ORDER BY j.id DESC LIMIT $5"
                 ),
-                &[&prefix, &filter.level, &filter.review, &limit],
+                &[
+                    &prefix,
+                    &filter.level,
+                    &filter.review,
+                    &filter.unreported,
+                    &limit,
+                ],
             )
             .await?
             .iter()
