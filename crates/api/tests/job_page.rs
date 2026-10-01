@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use crateward_api::{AppState, router};
+use crateward_core::app::Stop;
 use crateward_core::job::{JobEvent, JobId, Limits, Stage, StageLimits, Triage};
 use crateward_core::retry::RetryPolicy;
 use crateward_core::store::{CrateFile, DisclosureKind, NewJob, Policies, Review, Store};
@@ -71,6 +72,7 @@ impl Dashboard {
         let state = AppState {
             reader: connect(&config, &schema).await,
             writer: connect(&config, &schema).await,
+            stop: Stop::install().unwrap(),
         };
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();

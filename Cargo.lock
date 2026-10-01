@@ -834,6 +834,7 @@ dependencies = [
  "axum",
  "crateward_core",
  "futures-util",
+ "rustix",
  "secrecy",
  "serde",
  "serde_json",

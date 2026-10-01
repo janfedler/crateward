@@ -90,6 +90,8 @@ pub struct AppState {
     pub reader: Store,
     /// The connection for review decisions.
     pub writer: Store,
+    /// Ends the live updates, so a shutdown does not wait for open pages.
+    pub stop: Stop,
 }
 
 /// Errors shown as a plain 500; details go to the log only.
@@ -165,7 +167,10 @@ async fn events(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let stream = futures_util::stream::unfold(state, |state| async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        state.stop.sleep(Duration::from_secs(5)).await;
+        if state.stop.is_requested() {
+            return None;
+        }
         let html = match overview_data(&state.reader).await {
             Ok(o) => OverviewBody { o }.render().unwrap_or_default(),
             Err(error) => {
@@ -444,11 +449,15 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         tokio::spawn(async move {
             export::run(&exporter, export_dir, export_config.as_ref()).await;
         });
-        let state = Arc::new(AppState { reader, writer });
+        let stop = Stop::install().map_err(fatal)?;
+        let state = Arc::new(AppState {
+            reader,
+            writer,
+            stop: stop.clone(),
+        });
         let listen = config.web.listen;
         let listener = tokio::net::TcpListener::bind(listen).await.map_err(fatal)?;
         tracing::info!(%listen, "dashboard listening");
-        let stop = Stop::install().map_err(fatal)?;
         axum::serve(listener, router(state, listen.port()))
             .with_graceful_shutdown(async move { stop.wait().await })
             .await
