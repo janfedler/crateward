@@ -1,19 +1,51 @@
 # Crateward
 
-Crateward is an autonomous supply chain scanner for crates.io. It watches for
-newly published crate versions, analyzes every one statically, runs the build
-time code of the interesting ones inside Firecracker microVMs on a single bare
-metal Linux server, scores the risk with reasons that link to evidence, and
-shows everything on a web dashboard. It asks its maintainer for help only
-when something genuinely needs a human.
+[![CI](https://github.com/janfedler/crateward/actions/workflows/ci.yml/badge.svg)](https://github.com/janfedler/crateward/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+[![Rust 1.98.1](https://img.shields.io/badge/rust-1.98.1-orange.svg)](rust-toolchain.toml)
+[![Website](https://img.shields.io/badge/web-crateward.com-blue.svg)](https://crateward.com)
 
-> **Status: milestones M0 to M7 are done; M8 (launch) is in progress.**
-> The whole pipeline runs on a development host against live crates.io
-> data: new versions are fetched, analyzed statically, built in jailed
-> microVMs when their build runs their own code, and scored with reasons.
-> The deployment for the production server is ready in [deploy/](deploy/)
-> and waits for the maintainer to apply it. See
-> [the milestones](#milestones).
+**A supply chain scanner for crates.io that builds new crate versions inside
+Firecracker microVMs and tells you what their build did.**
+
+A crate runs code on your machine before you ever call it: its build script
+and its procedural macros run during `cargo build`, and so do those of every
+dependency. Crateward watches crates.io for new versions, analyzes each one
+statically, runs the build time code of the interesting ones in a fresh,
+offline microVM, and scores the risk with reasons that link to file, line
+and trace evidence.
+
+> **Status:** the whole pipeline runs unattended against live crates.io data
+> on a development host. The production deployment is ready in
+> [`deploy/`](deploy/) and not applied yet. See [project status](#project-status).
+
+## Features
+
+* **Every new version, statically.** Build scripts, proc macros and library
+  code are parsed with `syn` across all `cfg` branches, including Windows and
+  macOS paths, and checked with YARA-X rules and a diff against the previous
+  version. Nothing is executed on the host.
+* **Build time code, dynamically.** Versions whose build runs their own code
+  are built with `cargo check` in a Firecracker microVM restored from a clean
+  snapshot in about 65 ms, one VM per job, destroyed afterwards.
+* **Kernel level tracing.** eBPF LSM and tracepoint programs in the guest
+  record processes, file opens, connections, `ptrace`, `bpf` and mounts,
+  with kernel structure offsets read from the running kernel's BTF.
+* **A fake internet.** The VM has no uplink. DNS, HTTP, HTTPS and raw
+  packets go to a sink in the VM's network namespace that answers and
+  records everything.
+* **Honeytokens.** Each job gets fresh decoy credentials (a cargo token,
+  GitHub tokens, AWS keys and an SSH key). One that shows up on the network, in the trace or on the
+  scratch disk is evidence of theft.
+* **Explainable verdicts.** Every score lists its reasons with links to the
+  evidence, and every verdict states its coverage: "dynamic on Linux",
+  "static only" with the reason, or "not applicable". Never "clean".
+* **Runs without a human.** Retries with backoff, per stage circuit
+  breakers, hourly canary crates, quarantine on any escape indicator, an
+  external heartbeat, and alerts only for what really needs the maintainer.
+* **Defense in depth.** Rootless jailer, cgroup limits, seccomp, Landlock
+  sandboxed parsers for every piece of hostile input, no secrets in the
+  guest, a host integrity manifest, and 13 fuzz targets.
 
 ## How it works
 
@@ -44,105 +76,202 @@ flowchart LR
     web -. static export .-> pages[crateward.com<br/>GitHub Pages]
 ```
 
-The details, including the job state machine and the network design, are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Each crate version is one job row in Postgres that moves through an explicit
+state machine; every service claims work with a lease, so a crashed service
+loses nothing. The details, including the state diagram and the network
+design, are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## Goals
+## Workspace
 
-* Analyze every new crates.io version statically, including Windows and macOS
-  code paths, with file and line evidence for every finding.
-* Observe what build scripts, proc macros and dependencies actually do when a
-  crate is built on Linux, inside a fresh microVM per job.
-* Assume a hostile crate will try to escape, and design so that an escape
-  gains nothing: no secrets, no internet, no persistence, no influence on
-  later jobs.
-* Run unattended. Every failure class has an automated response; the
-  maintainer is paged only for a stage that keeps failing, a full disk, KVM
-  errors, a canary failure, a high risk verdict, or a sandbox escape
-  indicator.
-* Label every verdict honestly with what was covered: "dynamic on Linux",
-  "static only" with the reason, or "not applicable". Never "clean".
-* Disclose responsibly: findings go to the crates.io team and RustSec before
-  anything is published.
-* Document every decision, test everything that can be tested, and keep the
-  build reproducible.
+| Crate | What it does |
+|-------|--------------|
+| [`crateward_core`](crates/core) | Shared types, typed configuration, the job state machine, the Postgres store, sandboxing primitives |
+| [`crateward_feed`](crates/feed) | Discovers new versions from the RSS feeds, the sparse index and the daily dump |
+| [`crateward_fetcher`](crates/fetcher) | Downloads, verifies, safely extracts and vendors crates |
+| [`crateward_static_analysis`](crates/static_analysis) | Parses sources without executing them and produces findings with evidence |
+| [`crateward_orchestrator`](crates/orchestrator) | Runs jobs in jailed Firecracker microVMs and guarantees their cleanup |
+| [`crateward_guest_agent`](crates/guest_agent) | Runs inside the VM: executes the job offline and streams output and trace to the host |
+| [`crateward_guest_ebpf`](crates/guest_ebpf) | The eBPF programs the guest agent loads |
+| [`crateward_fake_internet`](crates/fake_internet) | DNS, HTTP and HTTPS sinks that stand in for the internet |
+| [`crateward_analyzer`](crates/analyzer) | Scores runs with explainable reasons and keeps behavior profiles |
+| [`crateward_supervisor`](crates/supervisor) | Health checks, breakers, canaries, retention and alerts |
+| [`crateward_api`](crates/api) | The dashboard: server rendered HTML with htmx and server sent events |
+| [`crateward_cli`](crates/cli) | `crateward`, the maintainer's command line tool |
+| [`crateward_xtask`](crates/xtask) | Local CI, documentation checks, guest images and release bundles |
 
-## Non goals
+## Getting started
 
-* **Windows, macOS, iOS and Android guests.** Firecracker supports Linux and
-  OSv guests only (Firecracker FAQ). macOS licensing requires Apple hardware,
-  and iOS cannot be virtualized in any public way. Android guests would
-  multiply the image and maintenance work on a single 4 core server. Foreign
-  code is type checked with `cargo check` for those targets, never executed.
-* **Agentless hypervisor introspection.** Firecracker exposes no guest memory
-  introspection API, and building one is a research project of its own. The
-  trace source sits behind a trait so it can become phase two
-  ([ADR 0003](docs/adr/0003-guest-agent-now-introspection-later.md)).
-* **Registries other than crates.io.** One registry done well beats several
-  done shallowly, and the data access rules differ per registry.
-* **Analyzing every version dynamically.** The hardware cannot keep up with
-  the publish rate of crates.io; triage decides, and the dashboard shows the
-  coverage.
+### Requirements
 
-## Honest limitations
+* Linux on `x86_64`. The toolchain is pinned in
+  [`rust-toolchain.toml`](rust-toolchain.toml); `rustup` installs it with the
+  `x86_64-unknown-linux-musl` target.
+* PostgreSQL 17 for the database tests. Without it they are skipped.
+* For real microVMs only: `/dev/kvm`, subordinate user and group IDs, a
+  delegated cgroup and `mkfs.erofs`. Firecracker, the guest kernel and the
+  root filesystem are built from pins by `cargo xtask`.
 
-* **Capacity.** With SMT disabled for security, the server has 4 cores, 3 of
-  them for microVMs, against roughly 500 new versions per hour at busy times.
-  Most versions will be labeled "static only", with the reason.
-* **Evasion.** A crate can detect the sandbox and stay dormant. Host side
-  ground truth (tap capture, disk diffs) limits what an active crate can
-  hide, not what a dormant one never does.
-* **Host kernel.** The server runs Debian 13's stock 6.12 kernel, which is
-  outside Firecracker's validated host kernel matrix (5.10, 6.1, 6.18). The
-  soak test and hourly canaries on the running kernel compensate
-  ([ADR 0007](docs/adr/0007-ansible-on-debian.md)).
-* **No ECC memory.** The CPU does not support it. Durable data is protected
-  by end to end checksums; results in flight are not.
-* **One server.** There is no redundancy. An outage pauses scanning; the
-  external heartbeat reports it.
-
-## Quick start
-
-Crateward is at milestone M0, so the quick start covers development only.
+### Build and test
 
 ```sh
 git clone https://github.com/janfedler/crateward
 cd crateward
-# The toolchain is pinned in rust-toolchain.toml; rustup installs it.
-cargo xtask ci          # every check CI runs, in the same order
-cargo run -p crateward_cli -- config check --config config/crateward.example.toml
-cargo run -p crateward_cli -- state-machine diagram
+cargo build --workspace
+cargo test --workspace
+
+# With Postgres, the store, feed, CLI and dashboard tests run too:
+CRATEWARD_TEST_DATABASE_URL="host=/var/run/postgresql dbname=crateward_test" \
+CRATEWARD_REQUIRE_DB=1 cargo test --workspace --all-features
+
+# Every check CI runs, in the same order (needs cargo-deny, cargo-audit
+# and cargo-vet):
+cargo xtask ci
 ```
 
-`cargo xtask ci` expects `cargo-deny`, `cargo-audit` and `cargo-vet` on the
-`PATH`. Deployment instructions follow with milestone M8 in
-[docs/OPERATIONS.md](docs/OPERATIONS.md).
+Crate code is never executed outside a microVM, not even in tests: fixture
+crates are inert archives, and CI tests the orchestrator against a fake VM
+backend. See [`docs/TESTING.md`](docs/TESTING.md).
 
-## Milestones
+### Running microVMs
+
+On a host with KVM:
+
+```sh
+cargo xtask firecracker     # pinned release, SHA-256 verified
+cargo xtask guest-kernel    # pinned kernel source
+cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1, eBPF programs
+cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-threads 1
+cargo xtask soak --jobs 50  # sequential jailed jobs, then a check for leaks
+cargo xtask canary          # a crate that steals a honeytoken must be caught
+```
+
+### Running the pipeline
+
+The pipeline is seven long running systemd services and two timers on one
+server, each service with its own user. [`deploy/`](deploy/) has the Ansible playbook, hardened units and the
+firewall; `cargo xtask release` builds a release bundle with an SBOM and an
+`install.sh` that installs, updates and removes it.
+Start from [`config/crateward.example.toml`](config/crateward.example.toml)
+and follow [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+## Usage
+
+The `crateward` command line tool covers what the dashboard shows, so
+recovery works over SSH:
+
+```sh
+crateward config check --config /etc/crateward/crateward.toml
+crateward status                     # pauses, breakers, canaries, pending alerts
+crateward state-machine diagram      # the job state machine in Mermaid
+crateward evidence 42454 --out pack  # evidence pack of a job, for a report
+crateward integrity check            # compare the host against its manifest
+crateward quarantine lift            # only after the cause is understood
+```
+
+## Design
+
+**Goals.** Analyze every new version statically. Observe what build time
+code really does on Linux. Assume a hostile crate tries to escape, and make
+an escape gain nothing: no secrets, no internet, no persistence, no
+influence on later jobs. Run unattended. Label coverage honestly. Disclose
+responsibly: findings go to the crates.io team and RustSec first. Record
+every decision in an [ADR](docs/adr/README.md).
+
+**Non goals.**
+
+* Windows, macOS, iOS and Android guests. Firecracker runs Linux guests, so
+  code for other targets is only type checked with `cargo check`.
+* Agentless hypervisor introspection. The trace source sits behind a trait
+  so it can come later ([ADR 0003](docs/adr/0003-guest-agent-now-introspection-later.md)).
+* Registries other than crates.io.
+* Building every version. Triage decides, and the dashboard shows the
+  coverage.
+
+**Limitations.**
+
+* **Capacity.** Four cores with SMT disabled, three of them for microVMs,
+  against about 500 new versions per hour at busy times. Most versions end
+  up "static only", with the reason.
+* **Evasion.** A crate can detect the sandbox and stay dormant. Host side
+  ground truth (packet capture, disk scans) limits what an active crate can
+  hide, not what a dormant one never does.
+* **Host kernel.** Debian 13's 6.12 kernel is outside Firecracker's
+  validated host kernels; soak tests and hourly canaries compensate
+  ([ADR 0007](docs/adr/0007-ansible-on-debian.md)).
+* **One server, no ECC memory.** No redundancy; durable data has end to end
+  checksums, results in flight do not.
+
+## Project status
+
+Milestones M0 to M7 are done and M8 (launch) is built. Since 2026-09-24 the
+pipeline has processed every new crates.io version on a development host.
+Deploying to the production server is the remaining step.
+
+<details>
+<summary>Milestones</summary>
 
 | Milestone | Scope | State |
 |-----------|-------|-------|
 | M0 | Foundation: workspace, CI, config, core types, state machine, docs | done |
 | M1 | Firecracker platform: guest kernel and rootfs, orchestrator, rootless jail, limits, cleanup | done |
-| M1.5 | Build cache warmer: prewarmed snapshot and read only sccache, measured | done: warm target image from replayed dependency builds, 28% less run time measured (ADR 0008) |
+| M1.5 | Build cache warmer: prewarmed snapshot | done: 28% less run time measured ([ADR 0008](docs/adr/0008-prewarmed-snapshot-and-shared-sccache.md)) |
 | M2 | Ingest: feed, fetcher, safe extraction, vendoring, content addressed store | done |
 | M3 | Static analysis: findings with evidence, cfg coverage, diffs | done |
-| M4 | Dynamic analysis: guest agent, events, fake internet, honeytokens, ground truth | done: VM runs, eBPF trace, fake internet with TLS and packet capture, honeytokens, scratch disk scan; cross target checks later |
-| M5 | Autonomy: scheduler, retries, breakers, reconciliation, canaries, alerts | done: breakers, quarantine, pauses, canaries, deadlines, alerts, heartbeat (ADR 0020) |
-| M6 | Analyzer and web: scoring, profiles, dashboard, public export | done: scoring and review inbox (ADR 0021), dashboard (loopback, reached through an SSH tunnel) and public export (ADR 0022) |
-| M7 | Hardening and storage: security checklist, fuzzing, retention, measured budget | done: 13 fuzz targets, host escape detection and retention (ADR 0023), [security checklist](docs/SECURITY_CHECKLIST.md), measured storage budget; the offsite backup target waits for the maintainer |
-| M8 | Launch: deployment, runbook, disclosure workflow, write up | built, not deployed: Ansible, hardened units and firewall ([deploy/](deploy/)), release bundles with SBOM and an `install.sh` that installs, updates and removes them, guest versions with rollback (ADR 0024), evidence packs and disclosure records, the public about page, a [write up draft](docs/WRITEUP.md); applying them to the server waits for the maintainer |
+| M4 | Dynamic analysis: guest agent, eBPF trace, fake internet, honeytokens, ground truth | done |
+| M5 | Autonomy: retries, breakers, quarantine, canaries, deadlines, alerts, heartbeat | done |
+| M6 | Analyzer and web: scoring, review inbox, dashboard, public export | done |
+| M7 | Hardening and storage: security checklist, fuzzing, escape detection, retention | done; the offsite backup target is open |
+| M8 | Launch: Ansible, hardened units, firewall, release bundles with SBOM, disclosure workflow, write up | built, not deployed |
+
+</details>
 
 ## Documentation
 
 * [Architecture](docs/ARCHITECTURE.md) and [threat model](docs/THREAT_MODEL.md)
-* [Security policy](docs/SECURITY.md), [security checklist](docs/SECURITY_CHECKLIST.md) and [disclosure workflow](docs/DISCLOSURE.md)
-* [Runbook](docs/RUNBOOK.md), [operations](docs/OPERATIONS.md) and [testing](docs/TESTING.md)
-* [Dependencies](docs/DEPENDENCIES.md), one line of justification each
 * [Architecture decision records](docs/adr/README.md)
-* [Launch write up](docs/WRITEUP.md) (draft), [deployment](deploy/README.md)
+* [Testing](docs/TESTING.md), [operations](docs/OPERATIONS.md) and [runbook](docs/RUNBOOK.md)
+* [Security checklist](docs/SECURITY_CHECKLIST.md) and [disclosure workflow](docs/DISCLOSURE.md)
+* [Dependencies](docs/DEPENDENCIES.md), with one line of justification each
+* [Deployment](deploy/README.md) and the [launch write up](docs/WRITEUP.md) (draft)
+
+## Security
+
+Crateward runs hostile code for a living, so reports about sandbox escapes,
+parser bugs or anything that lets a crate influence the host are especially
+welcome. Please report privately through GitHub's private vulnerability
+reporting, not in a public issue. Details are in
+[`docs/SECURITY.md`](docs/SECURITY.md).
+
+## Contributing
+
+Issues and pull requests are welcome. Before a pull request, run
+`cargo xtask ci`; it includes `rustfmt`, `clippy` with the workspace lints,
+the tests, the documentation style check and the supply chain checks.
+Larger design changes start with an
+[architecture decision record](docs/adr/README.md).
 
 ## License
 
-Not chosen yet. Until the maintainer picks one, all rights are reserved and
-every package is marked `publish = false`.
+Licensed under either of
+
+* Apache License, Version 2.0 ([`LICENSE-APACHE`](LICENSE-APACHE) or
+  <https://www.apache.org/licenses/LICENSE-2.0>)
+* MIT license ([`LICENSE-MIT`](LICENSE-MIT) or
+  <https://opensource.org/licenses/MIT>)
+
+at your option.
+
+The eBPF programs in [`crates/guest_ebpf`](crates/guest_ebpf) are licensed
+under the GNU General Public License, version 2 only
+([`crates/guest_ebpf/LICENSE`](crates/guest_ebpf/LICENSE)), because the
+kernel requires a GPL compatible license for the helpers they call. The
+guest agent loads them as a separate object at run time
+([ADR 0025](docs/adr/0025-license.md)).
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work by you, as defined in the Apache-2.0
+license, shall be dual licensed as above, without any additional terms or
+conditions. Contributions to `crates/guest_ebpf` are licensed under
+GPL-2.0-only.
