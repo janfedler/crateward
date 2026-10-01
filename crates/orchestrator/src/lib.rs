@@ -89,7 +89,8 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
 
 async fn serve(config: &Config) -> Result<(), ComponentError> {
     let sandbox = &config.sandbox;
-    let (backend, work) = boot(config).await?;
+    let booted = boot(config).await?;
+    let work = booted.work.clone();
     let mut store = Store::connect(config.database.url.expose_secret())
         .await
         .map_err(fatal)?;
@@ -99,7 +100,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
     // its VM through reconciliation instead of leaving it behind.
     let stop = Stop::install().map_err(fatal)?;
     let mut template = Sandbox {
-        backend,
+        backend: booted.backend.clone(),
         slot: 0,
         setup: WorkerSetup {
             exe: std::env::current_exe().map_err(fatal)?,
@@ -113,7 +114,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
         blobs: BlobStore::open(&config.instance.data_dir.join("cas")).map_err(fatal)?,
     };
     if let Some(warm_config) = &sandbox.warm {
-        template.setup.warm = warm_cache(&template, &store, warm_config, &stop).await?;
+        template.setup.warm = warm_cache(&booted, &template, &store, warm_config, &stop).await?;
     }
     if stop.is_requested() {
         return Ok(());
@@ -126,9 +127,20 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
     Ok(())
 }
 
+/// The base snapshot's backend, and what made it, for the warm build's own.
+struct Booted {
+    backend: Arc<FirecrackerBackend>,
+    work: PathBuf,
+    fc: FirecrackerConfig,
+    spec: BootSpec,
+    cgroups: CgroupTree,
+    /// The warm build's VM, from [`warm::machine`].
+    warm_machine: Option<(u8, u32)>,
+}
+
 /// Clears the leftovers of an earlier run and boots a clean VM for the base
-/// snapshot. Returns the backend and the work directory.
-async fn boot(config: &Config) -> Result<(Arc<FirecrackerBackend>, PathBuf), ComponentError> {
+/// snapshot.
+async fn boot(config: &Config) -> Result<Booted, ComponentError> {
     let sandbox = &config.sandbox;
     // A deploy switches the guest files by moving a link (ADR 0002).
     // Resolving them once keeps a running orchestrator on the files its
@@ -153,8 +165,18 @@ async fn boot(config: &Config) -> Result<(Arc<FirecrackerBackend>, PathBuf), Com
         .await
         .map_err(fatal)?;
     tracing::info!(ms = started.elapsed().as_millis(), "base snapshot ready");
-    let backend = FirecrackerBackend::new(fc, cgroups, snapshot);
-    Ok((Arc::new(backend), work))
+    let backend = FirecrackerBackend::new(fc.clone(), cgroups.clone(), snapshot);
+    Ok(Booted {
+        backend: Arc::new(backend),
+        work,
+        fc,
+        spec: boot,
+        cgroups,
+        warm_machine: sandbox
+            .warm
+            .as_ref()
+            .and_then(|w| warm::machine(sandbox, w)),
+    })
 }
 
 fn resolve(path: &Path) -> Result<PathBuf, ComponentError> {
@@ -179,6 +201,13 @@ fn firecracker_config(sandbox: &SandboxConfig, authority: PathBuf) -> Firecracke
         max_file_size: (sandbox.memory_mib_per_slot + VMM_OVERHEAD_MIB)
             .max(sandbox.scratch_mib_per_slot)
             .max(sandbox.warm.as_ref().map_or(0, warm::scratch_mib))
+            .max(
+                sandbox
+                    .warm
+                    .as_ref()
+                    .and_then(|w| warm::machine(sandbox, w))
+                    .map_or(0, |(_, memory)| u64::from(memory) + VMM_OVERHEAD_MIB),
+            )
             << 20,
         fake_internet: Some(sandbox.fake_internet_bin.clone()),
         authority: Some(authority),
@@ -245,6 +274,7 @@ fn boot_spec(
 /// failure means cold builds, never a failed start. A stop request during
 /// the build ends its VM through reconciliation.
 async fn warm_cache(
+    booted: &Booted,
     slot0: &Sandbox,
     store: &Store,
     config: &WarmConfig,
@@ -261,6 +291,14 @@ async fn warm_cache(
             return Ok(None);
         }
     };
+    let snapshot = booted.work.join("warm-snapshot");
+    let builder = match warm_builder(booted, slot0, &snapshot).await {
+        Ok(builder) => builder,
+        Err(error) => {
+            tracing::warn!(%error, "the warm build runs in one slot");
+            slot0.clone()
+        }
+    };
     tracing::info!(
         probes = plan.probes.len(),
         units = plan.units,
@@ -269,23 +307,62 @@ async fn warm_cache(
         "building the warm build cache"
     );
     let built = tokio::select! {
-        built = warm::build(slot0, config, &plan) => built,
+        built = warm::build(slot0, &builder, config, &plan) => Some(built),
         () = stop.wait() => {
             let reconciled = slot0.backend.reconcile().await.map_err(fatal)?;
             tracing::info!(?reconciled, "stopped during the warm build");
-            return Ok(None);
+            None
         }
     };
+    // Its memory file is as large as its guest memory, in tmpfs.
+    let _ = std::fs::remove_dir_all(&snapshot);
     match built {
-        Ok(image) => {
+        None => Ok(None),
+        Some(Ok(image)) => {
             tracing::info!(image = ?image, "warm build cache ready");
             Ok(image)
         }
-        Err(error) => {
+        Some(Err(error)) => {
             tracing::warn!(%error, "no warm build cache");
             Ok(None)
         }
     }
+}
+
+/// The sandbox the warm build replays in: a VM of the size
+/// [`warm::machine`] gives, from its own base snapshot in `snapshot`, or
+/// slot 0 when that is not more than one slot.
+async fn warm_builder(
+    booted: &Booted,
+    slot0: &Sandbox,
+    snapshot: &Path,
+) -> Result<Sandbox, backend::BackendError> {
+    let Some((vcpus, memory)) = booted.warm_machine else {
+        return Ok(slot0.clone());
+    };
+    let mut fc = booted.fc.clone();
+    fc.limits = SlotLimits {
+        cpus: u32::from(vcpus),
+        memory_mib: u64::from(memory) + VMM_OVERHEAD_MIB,
+        ..fc.limits
+    };
+    let spec = BootSpec {
+        vcpus,
+        memory_mib: memory,
+        ..booted.spec.clone()
+    };
+    let started = std::time::Instant::now();
+    let base = FirecrackerBackend::create_base_snapshot(&fc, &spec, snapshot).await?;
+    tracing::info!(
+        ms = started.elapsed().as_millis(),
+        vcpus,
+        memory_mib = memory,
+        "warm build snapshot ready"
+    );
+    Ok(Sandbox {
+        backend: Arc::new(FirecrackerBackend::new(fc, booted.cgroups.clone(), base)),
+        ..slot0.clone()
+    })
 }
 
 type SlotTask = JoinHandle<Result<(), StoreError>>;

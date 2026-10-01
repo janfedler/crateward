@@ -42,7 +42,11 @@ dominates the run time.
    analyzed like any job, and packs `/target` into a read only image that
    later jobs mount under an overlay. Only dependencies locked by several
    jobs, stored for two weeks and without high severity findings go in, and
-   a promotion check must pass first.
+   a promotion check must pass first. No job runs yet, so the warm build's
+   VM gets the vCPUs of every slot and as much memory as the slots would
+   use, from its own base snapshot that is deleted afterwards. Each replay
+   may take as long as a job's `cargo check`; one that takes longer is
+   ended and named in the log, and the others continue.
 
 ## Alternatives
 

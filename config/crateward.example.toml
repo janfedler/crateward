@@ -163,6 +163,7 @@ max_probes = 80
 # if Crateward stored its file at least this long ago (two weeks).
 min_jobs = 3
 min_age_hours = 336
+# The whole warm build. Each replay gets check_timeout_secs on its own.
 timeout_secs = 5400
 max_image_mib = 6144
 

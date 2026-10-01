@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crateward_core::child::ChildError;
-use crateward_core::config::WarmConfig;
+use crateward_core::config::{SandboxConfig, WarmConfig};
 use crateward_core::digest::Sha256Digest;
 use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
@@ -143,20 +143,26 @@ pub fn plan(
     result
 }
 
-/// The script that runs the replays, one `cargo check` per probe. A failing
-/// replay (for example a missing system library) does not stop the others.
-fn script(plan: &Plan) -> String {
-    let mut out = String::from("#!/bin/sh\n");
-    for i in 0..plan.probes.len() {
+/// The script that runs the replays, one `cargo check` per probe, each
+/// limited to `probe_secs`. A failing replay (for example a missing system
+/// library) does not stop the others, nor does a slow one: `timeout` ends
+/// its whole process group, build scripts included, and the units finished
+/// so far stay. The probes that ran out of time are named last, so they
+/// show in the logged end of the output.
+fn script(plan: &Plan, probe_secs: u64) -> String {
+    let mut out = String::from("#!/bin/sh\nslow=\n");
+    for (i, stub) in plan.stubs.iter().enumerate() {
         let dir = if i == 0 {
             "/cw/probe".to_owned()
         } else {
             format!("/cw/probes/{}", i - 1)
         };
         out.push_str(&format!(
-            "cd {dir} && cargo check --locked --offline --keep-going || true\n"
+            "cd {dir} && timeout -k 10 {probe_secs} cargo check --locked --offline --keep-going\n\
+             case $? in 124|137) slow=\"$slow {stub}\" ;; esac\n"
         ));
     }
+    out.push_str("[ -z \"$slow\" ] || echo \"crateward-warm: timed out:$slow\" >&2\n");
     out
 }
 
@@ -305,6 +311,29 @@ pub async fn plan_from_store(
     ))
 }
 
+/// vCPUs and guest memory of the warm build's VM. It runs before any job,
+/// so it gets the vCPUs of every slot, and as much memory as fits into
+/// what the slots would use: their memory and scratch disks, less the
+/// warm build's larger scratch disk, halved because the memory counts
+/// twice (the snapshot file in tmpfs and the pages the VM writes). `None`
+/// when that is not more than one slot has, which then runs the build.
+#[must_use]
+pub fn machine(sandbox: &SandboxConfig, config: &WarmConfig) -> Option<(u8, u32)> {
+    let slots = u64::from(sandbox.slots);
+    let share = slots.saturating_mul(
+        sandbox
+            .memory_mib_per_slot
+            .saturating_add(sandbox.scratch_mib_per_slot),
+    );
+    let memory = (share.saturating_sub(scratch_mib(config)) / 2)
+        .min(slots.saturating_mul(sandbox.memory_mib_per_slot));
+    if sandbox.slots < 2 || memory < sandbox.memory_mib_per_slot {
+        return None;
+    }
+    let vcpus = sandbox.slots.saturating_mul(sandbox.vcpus_per_slot);
+    Some((u8::try_from(vcpus).ok()?, u32::try_from(memory).ok()?))
+}
+
 /// Size of the warm build's scratch disk: room for the target directory up
 /// to the image limit, plus the rest of what a build writes.
 #[must_use]
@@ -373,9 +402,10 @@ fn image_io(path: &Path) -> impl FnOnce(std::io::Error) -> WarmError {
     move |source| WarmError::Image { path, source }
 }
 
-/// Builds the warm image in the slot of `sandbox` and returns its path, or
-/// `None` when there is nothing to warm. The image lands in the work
-/// directory.
+/// Builds the warm image and returns its path, or `None` when there is
+/// nothing to warm. The replays run on `builder` (see [`machine`]), the
+/// promotion check as an ordinary job on `sandbox`. The image lands in the
+/// work directory.
 ///
 /// # Errors
 ///
@@ -383,6 +413,7 @@ fn image_io(path: &Path) -> impl FnOnce(std::io::Error) -> WarmError {
 /// rejected build, or an image above the size limit.
 pub async fn build(
     sandbox: &Sandbox,
+    builder: &Sandbox,
     config: &WarmConfig,
     plan: &Plan,
 ) -> Result<Option<PathBuf>, WarmError> {
@@ -395,14 +426,17 @@ pub async fn build(
         lockfile: first.lockfile.clone(),
         packages: plan.packages.clone(),
         extra_probes: rest.to_vec(),
-        files: vec![("warm.sh".into(), script(plan).into_bytes())],
+        files: vec![(
+            "warm.sh".into(),
+            script(plan, sandbox.setup.check_timeout.as_secs()).into_bytes(),
+        )],
         stubs: plan.stubs.clone(),
     };
     let files = JobFiles {
         warm: None,
         ..JobFiles::named(&sandbox.setup, "warm")
     };
-    let result = replay(sandbox, config, plan, spec, &files).await;
+    let result = replay(sandbox, builder, config, plan, spec, &files).await;
     files.remove();
     result.map(Some)
 }
@@ -411,12 +445,13 @@ pub async fn build(
 /// checks the image with an ordinary job.
 async fn replay(
     sandbox: &Sandbox,
+    builder: &Sandbox,
     config: &WarmConfig,
     plan: &Plan,
     spec: PayloadSpec,
     files: &JobFiles,
 ) -> Result<PathBuf, WarmError> {
-    let mut warming = sandbox.clone();
+    let mut warming = builder.clone();
     warming.setup.scratch_mib = scratch_mib(config);
     let run = RunPlan {
         argv: vec!["/bin/sh".into(), "/cw/warm.sh".into()],
@@ -592,17 +627,39 @@ mod tests {
         // `b` locks `rare`, which only one sample locks.
         assert_eq!(plan.stubs, ["a-1.0.0", "c-1.0.0"]);
         assert_eq!(plan.units, 1);
-        let text = script(&plan);
-        assert!(
-            text.contains("cd /cw/probe && cargo check --locked --offline --keep-going || true")
-        );
+        let text = script(&plan, 900);
+        assert!(text.contains(
+            "cd /cw/probe && timeout -k 10 900 cargo check --locked --offline --keep-going\n\
+             case $? in 124|137) slow=\"$slow a-1.0.0\" ;; esac\n"
+        ));
         assert!(text.contains("cd /cw/probes/0 && "));
+        assert!(text.ends_with("echo \"crateward-warm: timed out:$slow\" >&2\n"));
         // The gate: nothing eligible, nothing replayed.
         assert!(
             super::plan(&samples, &HashSet::new(), &blobs, 2, 10)
                 .probes
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn the_warm_vm_takes_what_the_slots_would_use() {
+        let mut config = crateward_core::config::Config::from_toml(include_str!(
+            "../../../config/crateward.example.toml"
+        ))
+        .unwrap();
+        let warm = config.sandbox.warm.take().unwrap();
+        // Three slots of 1 vCPU, 4 GiB and a 4 GiB scratch disk: 24 GiB,
+        // less the 8 GiB scratch disk of the warm build, halved.
+        assert_eq!(machine(&config.sandbox, &warm), Some((3, 8192)));
+        config.sandbox.scratch_mib_per_slot = 2048;
+        assert_eq!(machine(&config.sandbox, &warm), Some((3, 5120)));
+        // Not more than one slot has.
+        config.sandbox.scratch_mib_per_slot = 512;
+        assert_eq!(machine(&config.sandbox, &warm), None);
+        config.sandbox.scratch_mib_per_slot = 4096;
+        config.sandbox.slots = 1;
+        assert_eq!(machine(&config.sandbox, &warm), None);
     }
 
     #[test]
