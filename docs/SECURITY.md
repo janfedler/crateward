@@ -11,8 +11,7 @@ host or other jobs are especially welcome.
 
 * Report privately through GitHub's private vulnerability reporting on
   `janfedler/crateward` (Security tab, "Report a vulnerability").
-* Once the mailbox exists (milestone M8), `security@crateward.com` works
-  too.
+* Or write to `security@janfedler.de`.
 * Please do not open a public issue for a security problem.
 
 Crateward is maintained by one person. Expect an acknowledgement within 7

@@ -189,7 +189,7 @@ async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportErro
     );
     let output = tokio::process::Command::new("git")
         .args(["-c", "user.name=Crateward"])
-        .args(["-c", "user.email=security@crateward.com"])
+        .args(["-c", "user.email=security@janfedler.de"])
         .args(args)
         .current_dir(dir)
         .env("GIT_SSH_COMMAND", ssh)
@@ -384,7 +384,7 @@ mod tests {
         let last = git_in(&bare, &["log", "-1", "--format=%an <%ae>: %s", "main"]);
         assert_eq!(
             last.trim(),
-            "Crateward <security@crateward.com>: Update statistics"
+            "Crateward <security@janfedler.de>: Update statistics"
         );
         assert_eq!(git_in(&bare, &["rev-list", "--count", "main"]).trim(), "2");
         let page = git_in(&bare, &["show", "main:index.html"]);
@@ -461,7 +461,7 @@ mod tests {
         assert!(!about.contains("<script"));
         // The user agent points at this page.
         assert!(
-            about.contains("crateward/0.1 (+https://crateward.com/about; security@crateward.com)")
+            about.contains("crateward/0.1 (+https://crateward.com/about; security@janfedler.de)")
         );
     }
 
