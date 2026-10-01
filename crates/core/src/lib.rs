@@ -20,6 +20,7 @@
 
 #[cfg(feature = "app")]
 pub mod app;
+pub mod attack;
 #[cfg(feature = "blobs")]
 pub mod blobs;
 pub mod breaker;

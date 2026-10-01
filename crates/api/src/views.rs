@@ -2,6 +2,7 @@
 //! nothing here marks text as safe HTML.
 
 use askama::Template;
+use crateward_core::attack::Technique;
 use crateward_core::store::JobRow;
 
 /// Seconds as a short relative time.
@@ -134,6 +135,8 @@ pub struct EvidenceView {
     pub summary: String,
     /// The file in the crates.io code viewer, or empty.
     pub code_url: String,
+    /// ATT&CK techniques it is consistent with.
+    pub techniques: Vec<Technique>,
 }
 
 /// The parts of a job page that come from its verdict.
@@ -196,6 +199,11 @@ pub struct JobPage {
     pub new_behavior: Vec<String>,
     /// Behavior profile.
     pub profile: Vec<String>,
+    /// ATT&CK techniques of all evidence, the supply chain compromise
+    /// first once a human confirmed the verdict.
+    pub techniques: Vec<Technique>,
+    /// The ATT&CK release the techniques follow.
+    pub attack_version: &'static str,
     /// Static findings of the crate's own file.
     pub findings: Vec<FindingView>,
     /// When, from, to, event, worker.

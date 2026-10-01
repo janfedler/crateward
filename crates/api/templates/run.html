@@ -23,7 +23,7 @@
 <tr><th>Process</th><th>Arguments</th><th>Start</th><th>Took</th><th>Exit</th></tr>
 {% for p in run.processes %}
 <tr class="role-{{ p.role }}{% if p.compiler() %} compiler{% endif %}{% if p.root %} root{% endif %}{% if p.disguised() %} disguised{% endif %}">
-<td class="d{{ p.depth }}">{% if p.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ p.role }}</span> <span class="mono" title="pid {{ p.pid }}">{{ p.exe }}</span></td>
+<td class="d{{ p.depth }}">{% if p.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ p.role }}</span> <span class="mono" title="pid {{ p.pid }}">{{ p.exe }}</span>{% if let Some(t) = p.masquerading() %} <a class="tag" href="{{ t.url() }}" title="{{ t.name }}" rel="noreferrer noopener" target="_blank">{{ t.id }}</a>{% endif %}</td>
 <td class="mono">{{ p.args }}</td>
 <td class="nowrap muted">{{ p.start }}</td>
 <td class="nowrap">{{ p.duration }}</td>

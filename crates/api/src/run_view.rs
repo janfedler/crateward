@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crateward_core::attack::{self, Technique};
 use serde_json::Value;
 
 /// Deepest indentation of the process tree.
@@ -80,6 +81,12 @@ impl ProcessRow {
     #[must_use]
     pub fn disguised(&self) -> bool {
         self.compiler_name() && !self.compiler()
+    }
+
+    /// The ATT&CK technique a disguised compiler is consistent with.
+    #[must_use]
+    pub fn masquerading(&self) -> Option<Technique> {
+        self.disguised().then_some(attack::MASQUERADING)
     }
 
     fn compiler_name(&self) -> bool {

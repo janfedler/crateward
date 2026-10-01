@@ -35,6 +35,7 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Router, middleware};
 use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::attack;
 use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
@@ -392,7 +393,9 @@ fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, Str
 }
 
 fn evidence_view(e: Evidence) -> EvidenceView {
+    let techniques = attack::techniques(&e.signal, e.location.as_deref());
     EvidenceView {
+        techniques,
         points: e.points,
         signal: e.signal,
         source: e.source.name().to_owned(),
@@ -428,6 +431,15 @@ async fn job(
     if let Some(report) = &static_report {
         attach_links(&mut verdict.evidence, report, &job.name, &job.version);
     }
+    let mut techniques: Vec<attack::Technique> = Vec::new();
+    if verdict.review == Review::Confirmed.name() {
+        techniques.push(attack::SUPPLY_CHAIN);
+    }
+    for t in verdict.evidence.iter().flat_map(|e| &e.techniques) {
+        if !techniques.contains(t) {
+            techniques.push(*t);
+        }
+    }
     let findings = static_report
         .as_ref()
         .map(|r| findings(r, &job.name, &job.version))
@@ -450,6 +462,8 @@ async fn job(
         level: verdict.level,
         review: verdict.review,
         evidence: verdict.evidence,
+        techniques,
+        attack_version: attack::VERSION,
         new_behavior: verdict.new_behavior,
         profile: verdict.profile,
         findings,

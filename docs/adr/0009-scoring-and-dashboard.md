@@ -45,6 +45,12 @@ the one person who can act on it.
    write is a review decision.
 6. **Public site:** a static export of counts only. Findings reach it by
    hand, after disclosure.
+7. **MITRE ATT&CK tags.** A fixed table in `crates/core/src/attack.rs`
+   maps each signal, and its path or program where that decides, to the
+   techniques it is consistent with, checked against the named ATT&CK
+   release. The job page and the evidence pack show them; they add no
+   points, since the score already weighs the same signals. T1195.001 is
+   claimed for the crate only after a human confirmed the verdict.
 
 ## Alternatives
 

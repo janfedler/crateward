@@ -830,7 +830,8 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
     let raw = std::fs::read_to_string(pack.join("job.json")).unwrap();
     assert!(raw.starts_with("{\n  \""), "{raw}");
     assert!(raw.contains("\n  \"events\": [\n    {\n"), "{raw}");
-    let expected = json!({"verdict": verdict(), "review": "none"});
+    let attack = json!({"version": "v19", "crate": null, "evidence": []});
+    let expected = json!({"verdict": verdict(), "review": "none", "attack": attack});
     assert_eq!(json_file(&pack, "verdict.json"), expected);
     let expected = json!({
         "triage": triage,
