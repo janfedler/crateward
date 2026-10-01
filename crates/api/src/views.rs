@@ -200,8 +200,8 @@ pub struct JobPage {
     pub findings: Vec<FindingView>,
     /// When, from, to, event, worker.
     pub timeline: Vec<(String, String, String, String, String)>,
-    /// Run kind and its report, pretty printed.
-    pub runs: Vec<(String, String)>,
+    /// The VM runs.
+    pub runs: Vec<crate::run_view::RunView>,
     /// The disclosure record as label and value, empty without a report.
     pub disclosure: Vec<(String, String)>,
 }

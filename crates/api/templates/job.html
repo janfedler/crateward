@@ -64,8 +64,7 @@
 {% endfor %}
 </table>
 
-{% for (kind, report) in runs %}
-<h2>Run: {{ kind }}</h2>
-<pre>{{ report }}</pre>
+{% for run in runs %}
+{% include "run.html" %}
 {% endfor %}
 {% endblock %}

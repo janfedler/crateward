@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod export;
+pub mod run_view;
 pub mod security;
 pub mod views;
 
@@ -85,9 +86,6 @@ pub fn stylesheet_version() -> &'static str {
     });
     &VERSION
 }
-
-/// Largest pretty printed run report shown on a job page.
-const MAX_REPORT_TEXT: usize = 256 * 1024;
 
 fn fatal(reason: impl std::fmt::Display) -> ComponentError {
     ComponentError::Fatal {
@@ -393,15 +391,6 @@ fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, Str
     )
 }
 
-fn run_text(report: &serde_json::Value) -> String {
-    let mut text = serde_json::to_string_pretty(report).unwrap_or_default();
-    if text.len() > MAX_REPORT_TEXT {
-        text.truncate(text.floor_char_boundary(MAX_REPORT_TEXT));
-        text.push_str("\n… (cut)");
-    }
-    text
-}
-
 fn evidence_view(e: Evidence) -> EvidenceView {
     EvidenceView {
         points: e.points,
@@ -467,11 +456,39 @@ async fn job(
         timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
         runs: runs
             .into_iter()
-            .map(|(kind, r)| (kind, run_text(&r)))
+            .map(|(kind, r)| run_view::run_view(id, &kind, &r))
             .collect(),
         disclosure: disclosure.map(disclosure_rows).unwrap_or_default(),
     };
     Ok(Html(page.render()?).into_response())
+}
+
+/// A run report as a file, for tools and archives.
+async fn run_report(
+    State(state): State<Arc<AppState>>,
+    Path((id, file)): Path<(i64, String)>,
+) -> Result<Response, AppError> {
+    let runs = state.reader.job_runs(JobId(id)).await?;
+    let wanted = file.strip_suffix(".json");
+    let Some((kind, report)) = runs
+        .into_iter()
+        .find(|(kind, _)| Some(kind.as_str()) == wanted)
+    else {
+        return Ok((StatusCode::NOT_FOUND, "no such run").into_response());
+    };
+    let body = serde_json::to_vec_pretty(&report).unwrap_or_default();
+    // The kind is one of the orchestrator's own names, but keep the header
+    // safe whatever the database holds.
+    let kind: String = kind.chars().filter(char::is_ascii_alphanumeric).collect();
+    let disposition = format!("attachment; filename=\"crateward-job-{id}-{kind}.json\"");
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/json".to_owned()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 /// A review decision from the job page.
@@ -520,6 +537,7 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
         .route("/jobs", get(jobs))
         .route("/jobs/{id}", get(job))
         .route("/jobs/{id}/review", post(review))
+        .route("/jobs/{id}/runs/{file}", get(run_report))
         .route("/static/{file}", get(asset))
         .with_state(state)
         .layer(middleware::from_fn(move |request, next| {

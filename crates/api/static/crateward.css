@@ -33,6 +33,45 @@ th { color: var(--muted); font-weight: 600; }
 pre { background: var(--panel); border: 1px solid var(--line); padding: .5rem;
       overflow-x: auto; max-height: 30rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 form.inline { display: inline; }
+h3 { font-size: 1rem; margin: 0 0 .5rem; } h4 { font-size: .9rem; margin: 1rem 0 .4rem; color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+a.button { display: inline-block; padding: .25rem .6rem; border: 1px solid var(--line); border-radius: 6px;
+           background: var(--bg); color: var(--fg); text-decoration: none; }
+.badge { display: inline-block; padding: 0 .45rem; border: 1px solid var(--line); border-radius: 999px;
+         font-size: 12px; line-height: 1.6; white-space: nowrap; color: var(--muted); }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+.badge.warn { color: var(--warn); border-color: var(--warn); }
+.badge.bad { color: var(--bad); border-color: var(--bad); }
+.chip { display: inline-block; padding: 0 .4rem; margin: 0 .15rem .25rem 0; border-radius: 4px;
+        background: var(--panel); border: 1px solid var(--line); }
+
+/* A VM run: a header, alerts, facts, then one panel per kind of activity. */
+.run { margin-top: 2rem; }
+.run-head { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.run-head h2 { margin: 0; }
+.run-head .button { margin-left: auto; }
+.alerts { margin: .75rem 0; padding: .5rem 1rem .5rem 2rem; border: 1px solid var(--bad); border-radius: 6px;
+          background: color-mix(in srgb, var(--bad) 10%, transparent); color: var(--fg); }
+.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .5rem;
+         margin: .75rem 0; }
+.facts div { border: 1px solid var(--line); border-radius: 6px; padding: .4rem .6rem; background: var(--panel); }
+.facts dt { color: var(--muted); font-size: 12px; } .facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.panel { border: 1px solid var(--line); border-radius: 6px; padding: .75rem; margin-top: .75rem; }
+.panel table { font-size: 13px; }
+.toggle { display: inline-flex; gap: .4rem; align-items: center; color: var(--muted); margin-bottom: .5rem; }
+/* The checkbox hides compilers with CSS alone, no script. */
+.proc:has(.toggle input:checked) tr.compiler { display: none; }
+.tree .branch { color: var(--muted); margin-right: .3rem; }
+.tree tr.role-build_script .badge.role { color: var(--warn); border-color: var(--warn); }
+.tree tr.role-other .badge.role, .tree tr.root .badge.role { color: var(--bad); border-color: var(--bad); }
+.tree td.d1 { padding-left: 1.75rem; }
+.tree td.d2 { padding-left: 3.00rem; }
+.tree td.d3 { padding-left: 4.25rem; }
+.tree td.d4 { padding-left: 5.50rem; }
+.tree td.d5 { padding-left: 6.75rem; }
+.tree td.d6 { padding-left: 8.00rem; }
+.tree td.d7 { padding-left: 9.25rem; }
+.tree td.d8 { padding-left: 10.50rem; }
 button { font: inherit; padding: .25rem .6rem; border: 1px solid var(--line);
          border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
 input, select { font: inherit; padding: .2rem .4rem; }

