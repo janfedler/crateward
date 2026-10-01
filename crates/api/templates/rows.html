@@ -2,12 +2,12 @@
 <tr><th>Job</th><th>Crate</th><th>State</th><th>Score</th><th>Strongest evidence</th><th>Changed</th></tr>
 {% for r in rows %}
 <tr>
-  <td><a href="/jobs/{{ r.id }}">{{ r.id }}</a></td>
+  <td class="nowrap"><a href="/jobs/{{ r.id }}">{{ r.id }}</a></td>
   <td>{{ r.name }} {{ r.version }}</td>
-  <td>{{ r.state }}</td>
-  <td class="level-{{ r.level }}">{{ r.score }} {{ r.level }}{% if r.review == "pending" %} (review){% endif %}</td>
+  <td class="nowrap">{{ r.state }}</td>
+  <td class="nowrap level-{{ r.level }}">{{ r.score }} {{ r.level }}{% if r.review == "pending" %} (review){% endif %}</td>
   <td>{{ r.evidence }}</td>
-  <td class="muted">{{ r.age }}</td>
+  <td class="muted nowrap">{{ r.age }}</td>
 </tr>
 {% endfor %}
 </table>

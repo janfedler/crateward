@@ -33,7 +33,7 @@
 <table>
 <tr><th>Points</th><th>Signal</th><th>Source</th><th>Package</th><th>Where</th><th>What</th></tr>
 {% for e in evidence %}
-<tr><td>{{ e.points }}</td><td>{{ e.signal }}</td><td>{{ e.source }}</td><td>{{ e.package }}</td><td>{{ e.location }}</td><td>{{ e.summary }}</td></tr>
+<tr><td class="nowrap">{{ e.points }}</td><td>{{ e.signal }}</td><td>{{ e.source }}</td><td>{{ e.package }}</td><td>{{ e.location }}</td><td>{{ e.summary }}</td></tr>
 {% endfor %}
 </table>
 {% endif %}
@@ -51,7 +51,7 @@
 <table>
 <tr><th>Severity</th><th>Kind</th><th>Context</th><th>Where</th><th>Evidence</th></tr>
 {% for f in findings %}
-<tr><td>{{ f.severity }}</td><td>{{ f.kind }}</td><td>{{ f.context }}</td><td>{{ f.location }}</td><td>{{ f.evidence }}</td></tr>
+<tr><td class="nowrap">{{ f.severity }}</td><td>{{ f.kind }}</td><td>{{ f.context }}</td><td>{{ f.location }}</td><td>{{ f.evidence }}</td></tr>
 {% endfor %}
 </table>
 {% endif %}
@@ -60,7 +60,7 @@
 <table>
 <tr><th>When</th><th>From</th><th>To</th><th>Event</th><th>Worker</th></tr>
 {% for t in timeline %}
-<tr><td class="muted">{{ t.0 }}</td><td>{{ t.1 }}</td><td>{{ t.2 }}</td><td>{{ t.3 }}</td><td class="muted">{{ t.4 }}</td></tr>
+<tr><td class="muted nowrap">{{ t.0 }}</td><td class="nowrap">{{ t.1 }}</td><td class="nowrap">{{ t.2 }}</td><td>{{ t.3 }}</td><td class="muted">{{ t.4 }}</td></tr>
 {% endfor %}
 </table>
 

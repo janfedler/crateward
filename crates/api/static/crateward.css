@@ -22,6 +22,9 @@ th { color: var(--muted); font-weight: 600; }
 .card { border: 1px solid var(--line); border-radius: 6px; padding: .75rem; background: var(--panel); }
 .card .n { font-size: 1.6rem; font-weight: 700; }
 .muted { color: var(--muted); }
+/* Short values (numbers, states, times) never break: with `anywhere`
+   above, a long neighbor would squeeze them to a few characters. */
+.nowrap { white-space: nowrap; }
 .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .level-critical, .level-high { color: var(--bad); font-weight: 700; }
 .level-medium { color: var(--warn); font-weight: 600; }
