@@ -33,7 +33,7 @@
 <table>
 <tr><th>Points</th><th>Signal</th><th>Source</th><th>Package</th><th>Where</th><th>What</th></tr>
 {% for e in evidence %}
-<tr><td class="nowrap">{{ e.points }}</td><td>{{ e.signal }}</td><td>{{ e.source }}</td><td>{{ e.package }}</td><td>{{ e.location }}</td><td>{{ e.summary }}</td></tr>
+<tr><td class="nowrap">{{ e.points }}</td><td>{{ e.signal }}</td><td>{{ e.source }}</td><td>{{ e.package }}</td><td>{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
 {% if !e.snippet.is_empty() %}<tr class="snippet"><td></td><td colspan="5">{% let snippet = &e.snippet %}{% include "snippet.html" %}</td></tr>{% endif %}
 {% endfor %}
 </table>
@@ -52,7 +52,7 @@
 <table>
 <tr><th>Severity</th><th>Kind</th><th>Context</th><th>Where</th><th>Evidence</th></tr>
 {% for f in findings %}
-<tr><td class="nowrap">{{ f.severity }}</td><td>{{ f.kind }}</td><td>{{ f.context }}</td><td>{{ f.location }}</td><td>{% if f.snippet.is_empty() %}{{ f.evidence }}{% else %}<details><summary>{{ f.evidence }}</summary>{% let snippet = &f.snippet %}{% include "snippet.html" %}</details>{% endif %}</td></tr>
+<tr><td class="nowrap">{{ f.severity }}</td><td>{{ f.kind }}</td><td>{{ f.context }}</td><td><a href="{{ f.code_url }}" rel="noreferrer noopener" target="_blank">{{ f.location }}</a></td><td>{% if f.snippet.is_empty() %}{{ f.evidence }}{% else %}<details><summary>{{ f.evidence }}</summary>{% let snippet = &f.snippet %}{% include "snippet.html" %}</details>{% endif %}</td></tr>
 {% endfor %}
 </table>
 {% endif %}

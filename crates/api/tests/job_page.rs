@@ -263,10 +263,22 @@ fn unescape(text: &str) -> String {
         .replace("&#38;", "&")
 }
 
+/// The text of a cell, with the tags inside it (links) removed.
 fn cells(row: &str) -> Row {
     let cell = |piece: &str| {
-        let (tag, text) = piece.rsplit_once('>')?;
-        tag.contains("<t").then(|| unescape(text))
+        let start = piece.find("<t")?;
+        let inner = &piece[start + piece[start..].find('>')? + 1..];
+        let mut plain = String::new();
+        let mut in_tag = false;
+        for c in inner.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => plain.push(c),
+                _ => {}
+            }
+        }
+        Some(unescape(&plain))
     };
     row.split("</t").filter_map(cell).collect()
 }
@@ -662,7 +674,13 @@ async fn static_evidence_shows_the_code_around_it() {
         snippet(evidence, "static:yara:reverse_shell"),
         [" 8 // a", ">9 sh -i >& /dev/tcp/x"]
     );
+    let viewer = "https://crates.io/crates/evil/0.1.0/code/build.rs";
+    assert_eq!(
+        evidence.matches(&format!("<a href=\"{viewer}\"")).count(),
+        2
+    );
     let findings = &html[html.find("<h2>Static findings</h2>").unwrap()..];
+    assert!(findings.contains("<a href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs\""));
     assert_eq!(findings.matches("<details>").count(), 2);
     assert_eq!(snippet(findings, "<details>").len(), 4);
     db.drop().await;

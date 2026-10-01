@@ -240,6 +240,27 @@ fn text(v: &serde_json::Value, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// A file of a crate version in the crates.io code viewer. Everything but
+/// unreserved characters and the path separator is percent encoded.
+fn code_url(name: &str, version: &str, file: &str) -> String {
+    let encode = |text: &str| {
+        text.bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                    char::from(b).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect::<String>()
+    };
+    format!(
+        "https://crates.io/crates/{}/{}/code/{}",
+        encode(name),
+        encode(version).replace('/', "%2F"),
+        encode(file.trim_start_matches('/'))
+    )
+}
+
 /// A finding's file and line, as evidence names its location.
 fn finding_location(f: &serde_json::Value) -> String {
     match f.get("line").and_then(serde_json::Value::as_u64) {
@@ -288,7 +309,7 @@ fn report_findings(report: &serde_json::Value) -> &[serde_json::Value] {
         .map_or(&[], Vec::as_slice)
 }
 
-fn findings(report: &serde_json::Value) -> Vec<FindingView> {
+fn findings(report: &serde_json::Value, name: &str, version: &str) -> Vec<FindingView> {
     report_findings(report)
         .iter()
         .take(300)
@@ -303,6 +324,7 @@ fn findings(report: &serde_json::Value) -> Vec<FindingView> {
                 context: text(f, "context"),
                 location: finding_location(f),
                 evidence: text(f, "evidence"),
+                code_url: code_url(name, version, &text(f, "file")),
                 snippet: snippet(f),
             }
         })
@@ -311,8 +333,14 @@ fn findings(report: &serde_json::Value) -> Vec<FindingView> {
 
 /// Shows the code behind each piece of static evidence: the finding of the
 /// same kind at the same place, or in the same file when the verdict
-/// predates line numbers for that kind.
-fn attach_snippets(evidence: &mut [EvidenceView], report: &serde_json::Value) {
+/// predates line numbers for that kind. The crate's own files link to the
+/// crates.io code viewer.
+fn attach_code(
+    evidence: &mut [EvidenceView],
+    report: &serde_json::Value,
+    name: &str,
+    version: &str,
+) {
     let findings = report_findings(report);
     for e in evidence
         .iter_mut()
@@ -331,7 +359,10 @@ fn attach_snippets(evidence: &mut [EvidenceView], report: &serde_json::Value) {
                     .filter(same_kind)
                     .find(|f| text(f, "file") == e.location)
             });
-        e.snippet = found.map(snippet).unwrap_or_default();
+        if let Some(f) = found {
+            e.snippet = snippet(f);
+            e.code_url = code_url(name, version, &text(f, "file"));
+        }
     }
 }
 
@@ -385,6 +416,7 @@ fn evidence_view(e: Evidence) -> EvidenceView {
         package: e.package.unwrap_or_default(),
         location: e.location.unwrap_or_default(),
         summary: e.summary,
+        code_url: String::new(),
         snippet: Vec::new(),
     }
 }
@@ -412,8 +444,12 @@ async fn job(
     let mut verdict = verdict.unwrap_or_default();
     let static_report = store.static_report(&job.cksum).await?.map(|(_, r)| r);
     if let Some(report) = &static_report {
-        attach_snippets(&mut verdict.evidence, report);
+        attach_code(&mut verdict.evidence, report, &job.name, &job.version);
     }
+    let findings = static_report
+        .as_ref()
+        .map(|r| findings(r, &job.name, &job.version))
+        .unwrap_or_default();
     let disclosure = store.disclosure(job.id).await?;
     let events = store.events(job.id).await?;
     let runs = store.job_runs(job.id).await?;
@@ -434,7 +470,7 @@ async fn job(
         evidence: verdict.evidence,
         new_behavior: verdict.new_behavior,
         profile: verdict.profile,
-        findings: static_report.as_ref().map(findings).unwrap_or_default(),
+        findings,
         timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
         runs: runs
             .into_iter()
@@ -554,6 +590,18 @@ mod tests {
             let digest = Sha256Digest::from_bytes(sha2::Sha256::digest(bytes).into());
             assert_eq!(digest.to_string(), pin, "{name}");
         }
+    }
+
+    #[test]
+    fn code_links_encode_what_the_crate_controls() {
+        assert_eq!(
+            code_url("masler", "0.1.0-alpha.4", "src/macros.rs"),
+            "https://crates.io/crates/masler/0.1.0-alpha.4/code/src/macros.rs"
+        );
+        assert_eq!(
+            code_url("a", "1.0.0+meta", "/odd dir/x\"?#%.rs"),
+            "https://crates.io/crates/a/1.0.0%2Bmeta/code/odd%20dir/x%22%3F%23%25.rs"
+        );
     }
 
     #[test]
