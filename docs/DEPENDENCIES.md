@@ -70,4 +70,5 @@ All pinned by commit SHA.
 | `newuidmap`, `newgidmap` (Debian `uidmap`) | Write the ID maps of each jail's user namespace. |
 | PostgreSQL | Job queue and result store ([ADR 0001](adr/0001-one-server-postgres-queue.md)). |
 | htmx 2.0.11 and `htmx-ext-sse` 2.2.4 (0BSD) | Vendored in `crates/api/static`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test ([ADR 0009](adr/0009-scoring-and-dashboard.md)). |
+| Lobster, DM Sans and JetBrains Mono (OFL 1.1), from Fontsource 5.3.0 | The design system's webfonts, latin subset, served by the dashboard and copied into the public site so no page loads anything from elsewhere. Vendored in `crates/api/static` with `OFL.txt`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test. |
 | `bpf-linker` 0.11.1 | Links the eBPF programs; pinned by SHA-256 in `guest/bpf-linker.toml` together with the nightly compiler whose LLVM it matches ([ADR 0007](adr/0007-guest-agent-ebpf.md)). |

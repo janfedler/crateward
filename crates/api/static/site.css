@@ -1,10 +1,19 @@
-body { margin: 0; font: 16px/1.6 system-ui, sans-serif; color: #1b1f24; background: #fff; }
-main { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-h1 { font-size: 1.8rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
-table { border-collapse: collapse; } th, td { text-align: left; padding: .3rem 1rem .3rem 0; }
-th { font-weight: 500; color: #57606a; }
-.muted { color: #57606a; font-size: .9rem; }
-@media (prefers-color-scheme: dark) {
-  body { color: #e6edf3; background: #0d1117; } th, .muted { color: #8d96a0; }
-  a { color: #58a6ff; }
-}
+/* The public site, on the tokens of brand.css. */
+body { font-size: 16px; line-height: 1.7; background: var(--bg-deep); }
+main { max-width: 760px; margin: 0 auto; padding: 4.5rem 1.25rem 4rem; }
+h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 8vw, 72px); line-height: 1.05;
+     letter-spacing: -.01em; margin: 0 0 1.5rem; }
+h1 + p { font-size: 17px; }
+/* Section labels, as the design system has them. */
+h2 { font-size: 11px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;
+     color: var(--accent); margin: 3.5rem 0 1rem; }
+p { color: var(--fg-secondary); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: .6rem 1rem .6rem 0; border-bottom: 1px solid var(--border-default);
+         vertical-align: top; }
+th { font-weight: 400; color: var(--fg-secondary); }
+td { color: var(--fg-primary); font-weight: 500; }
+tr:first-child > th, tr:first-child > td { border-top: 1px solid var(--border-default); }
+.muted { color: var(--fg-muted); font-size: 14px; }
+main > p.muted:last-child { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border-default); }
+@media (max-width: 640px) { main { padding-top: 2.5rem; } th, td { padding-right: .6rem; } }

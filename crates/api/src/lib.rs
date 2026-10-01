@@ -53,8 +53,33 @@ use crate::views::{
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Api;
 
+/// The dashboard stylesheet: the design system's tokens, then its own rules.
+const DASHBOARD_CSS: &str = concat!(
+    include_str!("../static/brand.css"),
+    include_str!("../static/crateward.css")
+);
+
+/// The webfonts of the design system (`static/OFL.txt`), with their SHA-256.
+pub const FONTS: [(&str, &[u8], &str); 3] = [
+    (
+        "lobster-latin-400.woff2",
+        include_bytes!("../static/lobster-latin-400.woff2"),
+        "aed68c73817364906ff95d97be87246d106bd38d5e4397e4866ec831ee22f7ba",
+    ),
+    (
+        "dm-sans-latin-wght.woff2",
+        include_bytes!("../static/dm-sans-latin-wght.woff2"),
+        "9fea608a947e67020c33cad9a6fe3d60c54119dfb8cff87768a8117a15ed7543",
+    ),
+    (
+        "jetbrains-mono-latin-wght.woff2",
+        include_bytes!("../static/jetbrains-mono-latin-wght.woff2"),
+        "18be452724bfdc236c074ca94a249a7f41a86752c7d04ab258ce9ed5651f6a7e",
+    ),
+];
+
 /// Vendored files, served under `/static/`, with their SHA-256.
-pub const STATIC: [(&str, &str, &[u8], &str); 3] = [
+pub const STATIC: [(&str, &str, &[u8], &str); 6] = [
     (
         "htmx-2.0.11.min.js",
         "text/javascript",
@@ -67,11 +92,24 @@ pub const STATIC: [(&str, &str, &[u8], &str); 3] = [
         include_bytes!("../static/sse-2.2.4.min.js"),
         "98a46496de0c3605fbffdce9167ba427bdd9553184f83f149c261891a92c0136",
     ),
+    ("crateward.css", "text/css", DASHBOARD_CSS.as_bytes(), ""),
     (
-        "crateward.css",
-        "text/css",
-        include_bytes!("../static/crateward.css"),
-        "",
+        "lobster-latin-400.woff2",
+        "font/woff2",
+        FONTS[0].1,
+        FONTS[0].2,
+    ),
+    (
+        "dm-sans-latin-wght.woff2",
+        "font/woff2",
+        FONTS[1].1,
+        FONTS[1].2,
+    ),
+    (
+        "jetbrains-mono-latin-wght.woff2",
+        "font/woff2",
+        FONTS[2].1,
+        FONTS[2].2,
     ),
 ];
 
@@ -82,7 +120,7 @@ pub fn stylesheet_version() -> &'static str {
     static VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut hasher = DefaultHasher::new();
-        include_bytes!("../static/crateward.css").hash(&mut hasher);
+        DASHBOARD_CSS.hash(&mut hasher);
         format!("{:012x}", hasher.finish() & 0xffff_ffff_ffff)
     });
     &VERSION
@@ -611,6 +649,19 @@ mod tests {
             }
             let digest = Sha256Digest::from_bytes(sha2::Sha256::digest(bytes).into());
             assert_eq!(digest.to_string(), pin, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_stylesheet_loads_only_served_fonts() {
+        let urls: Vec<&str> = DASHBOARD_CSS
+            .split("url(")
+            .skip(1)
+            .filter_map(|rest| rest.split_once(')').map(|(url, _)| url))
+            .collect();
+        assert_eq!(urls.len(), FONTS.len());
+        for url in urls {
+            assert!(STATIC.iter().any(|(name, ..)| *name == url), "{url}");
         }
     }
 

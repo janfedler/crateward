@@ -51,6 +51,12 @@ pub enum ExportError {
     },
 }
 
+/// The site's stylesheet: the design system's tokens, then its own rules.
+const SITE_CSS: &str = concat!(
+    include_str!("../static/brand.css"),
+    include_str!("../static/site.css")
+);
+
 #[derive(Template)]
 #[template(path = "site.html")]
 struct SitePage {
@@ -149,18 +155,27 @@ pub fn render(
             "page": format!("findings/{}/", f.slug),
         })).collect::<Vec<_>>(),
     });
-    Ok(vec![
+    let mut files: Vec<(String, Vec<u8>)> = vec![
         ("index.html".into(), page.render()?.into_bytes()),
         ("about/index.html".into(), AboutPage.render()?.into_bytes()),
         ("stats.json".into(), serde_json::to_vec_pretty(&json)?),
+        ("site.css".into(), SITE_CSS.as_bytes().to_vec()),
+    ];
+    files.extend(
+        crate::FONTS
+            .iter()
+            .map(|(name, bytes, _)| ((*name).to_owned(), bytes.to_vec())),
+    );
+    files.extend([
         (
-            "site.css".into(),
-            include_bytes!("../static/site.css").to_vec(),
+            "OFL.txt".into(),
+            include_bytes!("../static/OFL.txt").to_vec(),
         ),
         ("CNAME".into(), format!("{DOMAIN}\n").into_bytes()),
         // Serve the files as they are, without Jekyll processing.
         (".nojekyll".into(), Vec::new()),
-    ])
+    ]);
+    Ok(files)
 }
 
 /// Writes the files into `dir`, replacing earlier ones.
@@ -451,6 +466,10 @@ mod tests {
                 "about/index.html",
                 "stats.json",
                 "site.css",
+                "lobster-latin-400.woff2",
+                "dm-sans-latin-wght.woff2",
+                "jetbrains-mono-latin-wght.woff2",
+                "OFL.txt",
                 "CNAME",
                 ".nojekyll"
             ]

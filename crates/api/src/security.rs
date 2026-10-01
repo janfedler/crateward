@@ -21,8 +21,8 @@ use axum::response::{IntoResponse, Response};
 
 /// The Content Security Policy of every response.
 pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
-    img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; \
-    base-uri 'none'";
+    font-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; \
+    frame-ancestors 'none'; base-uri 'none'";
 
 /// Whether a request may proceed, given the port the dashboard listens on.
 ///
