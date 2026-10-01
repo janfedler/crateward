@@ -253,9 +253,10 @@ fn text(v: &serde_json::Value, key: &str) -> String {
         .unwrap_or_default()
 }
 
-/// A file of a crate version in the crates.io code viewer. Everything but
-/// unreserved characters and the path separator is percent encoded.
-fn code_url(name: &str, version: &str, file: &str) -> String {
+/// A file of a crate version in the crates.io code viewer, at the line when
+/// there is one. Everything but unreserved characters and the path
+/// separator is percent encoded.
+fn code_url(name: &str, version: &str, file: &str, line: Option<u64>) -> String {
     let encode = |text: &str| {
         text.bytes()
             .map(|b| match b {
@@ -266,12 +267,19 @@ fn code_url(name: &str, version: &str, file: &str) -> String {
             })
             .collect::<String>()
     };
+    let anchor = line.map(|l| format!("#L{l}")).unwrap_or_default();
     format!(
-        "https://crates.io/crates/{}/{}/code/{}",
+        "https://crates.io/crates/{}/{}/code/{}{anchor}",
         encode(name),
         encode(version).replace('/', "%2F"),
         encode(file.trim_start_matches('/'))
     )
+}
+
+/// A finding's place in the crates.io code viewer.
+fn finding_url(f: &serde_json::Value, name: &str, version: &str) -> String {
+    let line = f.get("line").and_then(serde_json::Value::as_u64);
+    code_url(name, version, &text(f, "file"), line)
 }
 
 /// A finding's file and line, as evidence names its location.
@@ -337,7 +345,7 @@ fn findings(report: &serde_json::Value, name: &str, version: &str) -> Vec<Findin
                 context: text(f, "context"),
                 location: finding_location(f),
                 evidence: text(f, "evidence"),
-                code_url: code_url(name, version, &text(f, "file")),
+                code_url: finding_url(f, name, version),
                 snippet: snippet(f),
             }
         })
@@ -374,7 +382,7 @@ fn attach_code(
             });
         if let Some(f) = found {
             e.snippet = snippet(f);
-            e.code_url = code_url(name, version, &text(f, "file"));
+            e.code_url = finding_url(f, name, version);
         }
     }
 }
@@ -616,11 +624,15 @@ mod tests {
     #[test]
     fn code_links_encode_what_the_crate_controls() {
         assert_eq!(
-            code_url("masler", "0.1.0-alpha.4", "src/macros.rs"),
+            code_url("masler", "0.1.0-alpha.4", "src/macros.rs", None),
             "https://crates.io/crates/masler/0.1.0-alpha.4/code/src/macros.rs"
         );
         assert_eq!(
-            code_url("a", "1.0.0+meta", "/odd dir/x\"?#%.rs"),
+            code_url("hegeltest", "0.47.4", "build.rs", Some(4)),
+            "https://crates.io/crates/hegeltest/0.47.4/code/build.rs#L4"
+        );
+        assert_eq!(
+            code_url("a", "1.0.0+meta", "/odd dir/x\"?#%.rs", None),
             "https://crates.io/crates/a/1.0.0%2Bmeta/code/odd%20dir/x%22%3F%23%25.rs"
         );
     }

