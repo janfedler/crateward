@@ -73,6 +73,19 @@ pub const STATIC: [(&str, &str, &[u8], &str); 3] = [
     ),
 ];
 
+/// A hash of the stylesheet, added to its URL so that a browser fetches it
+/// again when it changed instead of using its cached copy.
+#[must_use]
+pub fn stylesheet_version() -> &'static str {
+    static VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        include_bytes!("../static/crateward.css").hash(&mut hasher);
+        format!("{:012x}", hasher.finish() & 0xffff_ffff_ffff)
+    });
+    &VERSION
+}
+
 /// Largest pretty printed run report shown on a job page.
 const MAX_REPORT_TEXT: usize = 256 * 1024;
 
@@ -590,6 +603,14 @@ mod tests {
             let digest = Sha256Digest::from_bytes(sha2::Sha256::digest(bytes).into());
             assert_eq!(digest.to_string(), pin, "{name}");
         }
+    }
+
+    #[test]
+    fn pages_ask_for_the_current_stylesheet() {
+        let page = InboxPage { rows: Vec::new() }.render().unwrap();
+        let version = stylesheet_version();
+        assert_eq!(version.len(), 12);
+        assert!(page.contains(&format!("/static/crateward.css?v={version}\"")));
     }
 
     #[test]

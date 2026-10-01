@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"selfRequestsOnly":true}'>
 <title>{% block title %}Crateward{% endblock %}</title>
-<link rel="stylesheet" href="/static/crateward.css">
+<link rel="stylesheet" href="/static/crateward.css?v={{ crate::stylesheet_version() }}">
 <script src="/static/htmx-2.0.11.min.js"></script>
 <script src="/static/sse-2.2.4.min.js"></script>
 </head>
