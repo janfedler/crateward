@@ -1,7 +1,7 @@
 //! Dashboard (M6).
 //!
 //! Zone: control plane. The admin view listens on loopback and is reached
-//! through WireGuard and an SSH tunnel (ADR 0022);
+//! through an SSH tunnel (ADR 0022);
 //! the public view is a static export (`crate::export`), never served here.
 //!
 //! Why it looks the way it does:

@@ -20,12 +20,3 @@ slots: 3
 run_tmpfs_size: 31g
 
 ssh_port: 22
-wireguard_port: 51820
-# Leave out the key file until WireGuard is set up; then SSH stays public.
-# wireguard_private_key_file: /path/to/wg-private-key
-wireguard_address: 10.77.0.1/24
-wireguard_peer_public_key: REPLACE
-wireguard_peer_allowed_ips: 10.77.0.2/32
-# Set only after logging in through WireGuard worked: SSH then listens on
-# the tunnel address alone.
-ssh_wireguard_only: false

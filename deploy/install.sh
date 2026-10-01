@@ -147,7 +147,7 @@ write_vars() {
         return
     fi
     cp "$BUNDLE/deploy/ansible/vars.example.yml" "$vars"
-    say "wrote $vars; WireGuard is set up there later (deploy/README.md)"
+    say "wrote $vars"
 }
 
 # ansible-core in a virtual environment, reinstalled when the pinned
@@ -255,7 +255,7 @@ uninstall() {
     else
         say "removed the software; the state is kept, and ./install.sh restores it"
     fi
-    say "$STATE, SSH, WireGuard and the kernel command line are unchanged"
+    say "$STATE, SSH and the kernel command line are unchanged"
 }
 
 # Switches the guest files back to the previous version (ADR 0024,

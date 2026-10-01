@@ -8,7 +8,7 @@
 #   ansible-playbook -i inventory.yml uninstall.yml -e purge=true
 #
 # With purge=true it also deletes all of that state and the firewall rules.
-# It never touches SSH, WireGuard, or the host settings site.yml made for
+# It never touches SSH or the host settings site.yml made for
 # the sandbox (kernel command line, swap, KSM), because removing them can
 # lock the maintainer out or weaken the host.
 

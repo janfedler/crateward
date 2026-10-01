@@ -1,6 +1,6 @@
 # 0009: One server; GitHub Pages, healthchecks.io and ntfy.sh instead of a VPS
 
-* Status: Accepted (maintainer decision, 2026-09-24)
+* Status: Accepted (maintainer decision, 2026-09-24); admin access superseded by [0026](0026-ssh-without-wireguard.md)
 * Date: 2026-09-24
 
 ## Context

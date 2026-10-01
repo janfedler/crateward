@@ -6,8 +6,7 @@
 #   ansible-playbook -i inventory.yml site.yml -e @vars.yml
 #
 # vars.example.yml lists every variable. Secrets (the configuration file,
-# the site deploy key, the WireGuard private key) stay outside the
-# repository and are read from local paths the maintainer passes in.
+# the site deploy key) stay outside the repository and are read from local paths the maintainer passes in.
 
 - name: Crateward server
   hosts: crateward
@@ -109,7 +108,6 @@
           - systemd-resolved
           - uidmap
           - unattended-upgrades
-          - wireguard-tools
           - xz-utils
 
     - name: Data checksums are on
@@ -325,41 +323,9 @@
       ansible.builtin.command: /usr/local/bin/crateward config check --config /etc/crateward/crateward.toml
       changed_when: false
 
-    # Network: WireGuard, SSH and the firewall
+    # Network: SSH and the firewall
 
-    - name: WireGuard interface
-      ansible.builtin.template:
-        src: wg0.conf.j2
-        dest: /etc/wireguard/wg0.conf
-        mode: "0600"
-      when: wireguard_private_key_file is defined
-
-    - name: WireGuard at boot
-      ansible.builtin.systemd_service:
-        name: wg-quick@wg0
-        enabled: true
-        state: started
-      when: wireguard_private_key_file is defined
-
-    - name: Drop in directory for ssh.service
-      ansible.builtin.file:
-        path: /etc/systemd/system/ssh.service.d
-        state: directory
-        mode: "0755"
-      when: ssh_wireguard_only | bool
-
-    - name: SSH starts after the tunnel it listens on
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/ssh.service.d/crateward.conf
-        content: |
-          [Unit]
-          After=wg-quick@wg0.service
-          Wants=wg-quick@wg0.service
-        mode: "0644"
-      when: ssh_wireguard_only | bool
-      notify: Reload systemd
-
-    - name: SSH with keys only, and only through WireGuard once confirmed
+    - name: SSH with keys only
       ansible.builtin.template:
         src: sshd-crateward.conf.j2
         dest: /etc/ssh/sshd_config.d/crateward.conf

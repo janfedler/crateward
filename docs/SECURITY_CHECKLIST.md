@@ -23,7 +23,7 @@ each control exists; this page says how to see that it still holds.
 | The integrity manifest covers the new binaries | `crateward integrity --config <file> record`, then `check` prints nothing |
 | The configuration is valid | `crateward config check --config <file>` |
 | The dashboard listens on loopback only | `ss -ltn` shows `127.0.0.1:8080` and no other address for it |
-| No inbound service except WireGuard and SSH | `ss -ltun` |
+| No inbound service except SSH | `ss -ltun` |
 | Secrets are readable by their service user only | the secret files are mode 0600 |
 | Access times work where jails live | the orchestrator starts (it refuses to when a read does not change a file's access time) |
 | Nothing is paused unexpectedly | `crateward status` shows no quarantine and closed breakers |

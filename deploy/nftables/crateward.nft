@@ -1,13 +1,11 @@
 #!/usr/sbin/nft -f
-# Crateward host firewall: WireGuard is the only inbound service, and every
+# Crateward host firewall: SSH is the only inbound service, and every
 # service user reaches only its allowlisted hosts (ARCHITECTURE.md,
 # "Egress"; THREAT_MODEL.md). The address sets are filled by
 # `crateward egress | nft -f -`, run by crateward-egress.timer as root.
 #
-# The variables file defines WG_PORT, SSH_PORT, SSH_IFACES (the WireGuard
-# interface; until WireGuard is confirmed working, also the public one),
-# SLOT_UIDS (a range) and one numeric UID per service user. Ansible writes
-# it.
+# The variables file defines SSH_PORT, SLOT_UIDS (a range) and one numeric
+# UID per service user. Ansible writes it.
 include "/etc/crateward/nftables-vars.nft"
 
 destroy table inet crateward
@@ -29,10 +27,8 @@ table inet crateward {
 		ct state established,related accept
 		ct state invalid drop
 		iif lo accept
-		# WireGuard answers nothing to unauthenticated packets.
-		udp dport $WG_PORT accept
-		# SSH only through the tunnel, once `ssh_wireguard_only` is set.
-		iifname $SSH_IFACES tcp dport $SSH_PORT accept
+		# SSH with keys only (sshd-crateward.conf).
+		tcp dport $SSH_PORT accept
 		icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
 		icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept
 	}

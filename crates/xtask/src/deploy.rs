@@ -8,9 +8,7 @@ use std::process::Command;
 use crate::TaskError;
 
 /// Firewall variables with placeholder IDs, for the dry run.
-const SAMPLE_VARS: &str = "define WG_PORT = 51820
-define SSH_PORT = 22
-define SSH_IFACES = { \"wg0\" }
+const SAMPLE_VARS: &str = "define SSH_PORT = 22
 define SLOT_UIDS = 200000-200003
 define FEED_UID = 991
 define FETCHER_UID = 992

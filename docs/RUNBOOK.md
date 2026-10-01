@@ -4,8 +4,8 @@ Every alert Crateward can send, what it means, what the automation already
 did, and what to do. The list matches `crateward_core::escalation`
 exactly; an alert that is not listed here is a bug.
 
-Alerts arrive through ntfy with minimal text. Details are on the dashboard
-behind WireGuard. Milestone markers show when a step becomes available.
+Alerts arrive through ntfy with minimal text. Details are on the dashboard,
+behind SSH. Milestone markers show when a step becomes available.
 
 ## Stage failing after retries
 
@@ -108,7 +108,7 @@ running is failed and will not be retried automatically.
    An integrity finding right after a deploy usually means the manifest was
    not recorded again; confirm the deploy changed exactly those files.
 4. If anything is confirmed, treat the host as compromised: rotate the
-   WireGuard keys, the deploy key, the ntfy topic and the heartbeat URL,
+   SSH keys, the deploy key, the ntfy topic and the heartbeat URL,
    then reinstall from the Ansible playbooks and restore data from backup.
 5. Report a Firecracker or KVM escape to the respective project's security
    contact.
@@ -135,7 +135,7 @@ down, cannot reach the internet, or the supervisor stopped. This alert is
 sent by healthchecks.io, not by Crateward.
 
 **What to do.**
-1. Try WireGuard and SSH.
+1. Try SSH.
 2. If unreachable, check the Hetzner Robot panel for the server status and
    use the rescue system or a KVM console request if needed.
 3. After a reboot, check `crateward status`: pauses and breakers survive a

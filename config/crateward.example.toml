@@ -227,6 +227,6 @@ deploy_key = "/etc/crateward/site-deploy-key"
 interval_hours = 24
 
 [web]
-# Loopback only: the maintainer reaches the dashboard through WireGuard and
-# an SSH tunnel, `ssh -L 8080:127.0.0.1:8080 <server>` (ADR 0022).
+# Loopback only: the maintainer reaches the dashboard through an SSH tunnel,
+# `ssh -L 8080:127.0.0.1:8080 <server>` (ADR 0022).
 listen = "127.0.0.1:8080"

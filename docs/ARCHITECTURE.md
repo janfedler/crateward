@@ -318,9 +318,8 @@ dropped.
 | exporter | `github.com` | one way push of the public site |
 | everything else | none | |
 
-The only inbound path is WireGuard on one UDP port, which sends nothing in
-response to unauthenticated packets. See
-[ADR 0009](adr/0009-single-server-with-external-services.md).
+The only inbound path is SSH with keys only. See
+[ADR 0026](adr/0026-ssh-without-wireguard.md).
 
 ## Package map
 

@@ -437,7 +437,7 @@ pub struct HeartbeatConfig {
 #[serde(deny_unknown_fields)]
 pub struct WebConfig {
     /// Listen address. Must be a loopback address: the dashboard is reached
-    /// through WireGuard and an SSH tunnel (ADR 0022).
+    /// through an SSH tunnel (ADR 0022).
     pub listen: SocketAddr,
 }
 

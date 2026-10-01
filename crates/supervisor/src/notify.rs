@@ -2,7 +2,7 @@
 //!
 //! Alerts leave the server through a third party, so they carry no crate
 //! names and no details: a category, a short title, and where to look. The
-//! evidence stays on the server, behind WireGuard.
+//! evidence stays on the server, behind SSH.
 
 use crateward_core::config::NotifierConfig;
 use crateward_core::escalation::{EscalationCategory, HumanEscalation};

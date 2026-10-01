@@ -2,8 +2,3 @@
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
-{% if ssh_wireguard_only | bool %}
-# Only through the tunnel (THREAT_MODEL.md, "No inbound service except
-# WireGuard"). The firewall also allows SSH on wg0 only.
-ListenAddress {{ wireguard_address.split('/')[0] }}
-{% endif %}

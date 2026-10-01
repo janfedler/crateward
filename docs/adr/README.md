@@ -15,7 +15,7 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0006](0006-ebpf-over-ptrace.md) | eBPF with aya for guest tracing, not ptrace | Accepted |
 | [0007](0007-ansible-on-debian.md) | Ansible on Debian 13, not NixOS or Arch | Accepted |
 | [0008](0008-prewarmed-snapshot-and-shared-sccache.md) | A warm build cache from replayed dependency builds | Accepted |
-| [0009](0009-single-server-with-external-services.md) | One server; GitHub Pages, healthchecks.io and ntfy.sh instead of a VPS | Accepted |
+| [0009](0009-single-server-with-external-services.md) | One server; GitHub Pages, healthchecks.io and ntfy.sh instead of a VPS | Accepted; admin access superseded by 0026 |
 | [0010](0010-smt-off-and-ram-hot-path.md) | SMT disabled and the hot path in RAM | Accepted |
 | [0011](0011-guest-kernel-source.md) | Guest kernel from a pinned Amazon Linux 6.18 branch commit | Accepted |
 | [0012](0012-rootless-jail.md) | A rootless jail instead of Firecracker's jailer | Accepted |
@@ -32,3 +32,4 @@ rewritten; a changed decision gets a new record that supersedes the old one.
 | [0023](0023-host-escape-detection-and-retention.md) | Host escape detection and retention | Accepted |
 | [0024](0024-guest-image-versions-and-rollback.md) | Guest image versions, refresh and rollback | Accepted |
 | [0025](0025-license.md) | MIT OR Apache-2.0, with GPL-2.0-only for the eBPF programs | Accepted |
+| [0026](0026-ssh-without-wireguard.md) | SSH as the only admin access, without WireGuard | Accepted |

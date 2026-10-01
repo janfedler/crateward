@@ -13,7 +13,7 @@ numbers during milestone M7.
 | Disks | 2 × 2 TB enterprise HDD |
 | OS | Debian 13, stock 6.12 kernel, unattended upgrades |
 | Configuration | Ansible, from this repository (M1 and M8) |
-| Admin access | WireGuard on one UDP port, SSH with keys only over WireGuard |
+| Admin access | SSH with keys only ([ADR 0026](adr/0026-ssh-without-wireguard.md)) |
 
 Kernel command line additions: `nosmt`, `mds=full,nosmt` and
 `l1tf=full,force` (see [ADR 0010](adr/0010-smt-off-and-ram-hot-path.md)).
@@ -114,8 +114,8 @@ the development account.
 
 ## Opening the dashboard
 
-The dashboard listens on `127.0.0.1:8080` only (ADR 0022). With WireGuard
-up, open a tunnel and browse to `http://localhost:8080`:
+The dashboard listens on `127.0.0.1:8080` only (ADR 0022). Open a tunnel
+and browse to `http://localhost:8080`:
 
 ```sh
 ssh -N -L 8080:127.0.0.1:8080 <server>

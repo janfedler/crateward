@@ -1,12 +1,5 @@
 # Written by Ansible (deploy/ansible/site.yml); read by crateward.nft.
-define WG_PORT = {{ wireguard_port }}
 define SSH_PORT = {{ ssh_port }}
-{% if ssh_wireguard_only | bool %}
-define SSH_IFACES = { "wg0" }
-{% else %}
-# Until WireGuard is confirmed working, SSH stays reachable publicly too.
-define SSH_IFACES = { "wg0", "{{ ansible_facts.default_ipv4.interface }}" }
-{% endif %}
 # sandbox.slot_uid_base to slot_uid_base + slots (the spare slot included).
 define SLOT_UIDS = {{ slot_id_base }}-{{ slot_id_base + slots }}
 define FEED_UID = {{ getent_passwd['crateward-feed'][1] }}

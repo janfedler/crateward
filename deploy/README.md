@@ -9,10 +9,10 @@ applies it as root; nothing here runs automatically.
 | `ansible/components.yml` | The service users, services and timers, shared by the playbooks |
 | `ansible/rollback.yml` | Switches the guest files back to the previous version and restarts the orchestrator ([ADR 0024](../docs/adr/0024-guest-image-versions-and-rollback.md)) |
 | `ansible/uninstall.yml` | Removes the software and keeps the state; with `purge=true` it removes the state too |
-| `ansible/site.yml` | The whole host: kernel command line, swap and KSM, packages, users, directories, the sandbox tmpfs, PostgreSQL with data checksums, the release bundle, the configuration, WireGuard, SSH, the firewall, the units, the integrity manifest |
+| `ansible/site.yml` | The whole host: kernel command line, swap and KSM, packages, users, directories, the sandbox tmpfs, PostgreSQL with data checksums, the release bundle, the configuration, SSH, the firewall, the units, the integrity manifest |
 | `ansible/vars.example.yml` | Every variable of the playbook |
 | `systemd/` | One hardened unit per component, the egress refresh and the daily database dump |
-| `nftables/crateward.nft` | Inbound: WireGuard and SSH only. Outbound: each service user reaches its allowlisted hosts and nothing else |
+| `nftables/crateward.nft` | Inbound: SSH only. Outbound: each service user reaches its allowlisted hosts and nothing else |
 
 ## First setup
 
@@ -32,11 +32,6 @@ applies it as root; nothing here runs automatically.
    orchestrator runs on the host, such as a development pipeline.
 5. Reboot once, so the kernel command line applies. Then check the host
    with [the security checklist](../docs/SECURITY_CHECKLIST.md).
-6. Set up WireGuard in `/root/crateward/vars.yml`
-   (`wireguard_private_key_file` and the peer), run `./install.sh` again,
-   and log in through the tunnel. Then set `ssh_wireguard_only: true` and
-   run it once more. Until then SSH stays reachable on the public
-   interface, so a broken tunnel cannot lock you out.
 
 `install.sh` checks `SHA256SUMS` and its signature, but a script cannot
 vouch for itself. For a bundle copied from another machine, check the
@@ -70,7 +65,7 @@ configuration, the database, the evidence, the backups, the service users
 and the firewall stay, so `./install.sh` brings it back as it was.
 
 `./install.sh uninstall --purge` removes all of that too, after asking to
-type `purge`. Both leave `/root/crateward`, SSH, WireGuard and the host
+type `purge`. Both leave `/root/crateward`, SSH and the host
 settings for the sandbox (kernel command line, swap, KSM) as they are.
 
 ## Rolling back the guest
