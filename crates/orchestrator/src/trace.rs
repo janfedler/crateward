@@ -44,6 +44,36 @@ pub enum Role {
     Unknown,
 }
 
+/// C compilers, linkers (including the `rust-lld` that rustc ships) and
+/// their helpers. The dashboard keeps the same list.
+const TOOLCHAIN: [&str; 25] = [
+    "cc",
+    "gcc",
+    "g++",
+    "c++",
+    "clang",
+    "clang++",
+    "cpp",
+    "cc1",
+    "cc1plus",
+    "collect2",
+    "lto-wrapper",
+    "lto1",
+    "as",
+    "ld",
+    "ld.bfd",
+    "ld.gold",
+    "ld.lld",
+    "lld",
+    "rust-lld",
+    "ld.mold",
+    "mold",
+    "ar",
+    "ranlib",
+    "strip",
+    "objcopy",
+];
+
 fn role(exe: &str) -> Role {
     let name = exe.rsplit('/').next().unwrap_or(exe);
     if name == "cargo" {
@@ -52,23 +82,7 @@ fn role(exe: &str) -> Role {
         Role::Rustc
     } else if exe.contains("/build/") && name.starts_with("build-script-") {
         Role::BuildScript
-    } else if matches!(
-        name,
-        "cc" | "gcc"
-            | "g++"
-            | "c++"
-            | "clang"
-            | "ld"
-            | "ld.bfd"
-            | "ld.gold"
-            | "ar"
-            | "as"
-            | "collect2"
-            | "cc1"
-            | "cc1plus"
-            | "ranlib"
-            | "strip"
-    ) {
+    } else if TOOLCHAIN.contains(&name) {
         Role::Toolchain
     } else {
         Role::Other
@@ -431,6 +445,16 @@ impl TraceSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linkers_belong_to_the_toolchain() {
+        assert_eq!(
+            role("/usr/local/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld"),
+            Role::Toolchain
+        );
+        assert_eq!(role("/usr/bin/cc"), Role::Toolchain);
+        assert_eq!(role("/usr/bin/curl"), Role::Other);
+    }
 
     /// The builder's user ID in the guest.
     const BUILDER_UID: u32 = 1000;

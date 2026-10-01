@@ -21,7 +21,7 @@
 <table class="tree">
 <tr><th>Process</th><th>Arguments</th><th>Start</th><th>Took</th><th>Exit</th></tr>
 {% for p in run.processes %}
-<tr class="role-{{ p.role }}{% if p.compiler() %} compiler{% endif %}{% if p.root %} root{% endif %}">
+<tr class="role-{{ p.role }}{% if p.compiler() %} compiler{% endif %}{% if p.root %} root{% endif %}{% if p.disguised() %} disguised{% endif %}">
 <td class="d{{ p.depth }}">{% if p.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ p.role }}</span> <span class="mono" title="pid {{ p.pid }}">{{ p.exe }}</span></td>
 <td class="mono" title="{{ p.args_full }}">{{ p.args }}</td>
 <td class="nowrap muted">{{ p.start }}</td>

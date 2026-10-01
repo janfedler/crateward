@@ -63,7 +63,7 @@ a.button { display: inline-block; padding: .25rem .6rem; border: 1px solid var(-
 .proc:has(.toggle input:checked) tr.compiler { display: none; }
 .tree .branch { color: var(--muted); margin-right: .3rem; }
 .tree tr.role-build_script .badge.role { color: var(--warn); border-color: var(--warn); }
-.tree tr.role-other .badge.role, .tree tr.root .badge.role { color: var(--bad); border-color: var(--bad); }
+.tree tr.role-other .badge.role, .tree tr.root .badge.role, .tree tr.disguised .badge.role { color: var(--bad); border-color: var(--bad); }
 .tree td.d1 { padding-left: 1.75rem; }
 .tree td.d2 { padding-left: 3.00rem; }
 .tree td.d3 { padding-left: 4.25rem; }

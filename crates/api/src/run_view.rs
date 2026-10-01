@@ -13,6 +13,36 @@ use serde_json::Value;
 /// Deepest indentation of the process tree.
 const MAX_DEPTH: usize = 8;
 
+/// C compilers, linkers and their helpers, as in the orchestrator's trace,
+/// which classified fewer of them in older reports.
+const TOOLCHAIN: [&str; 25] = [
+    "cc",
+    "gcc",
+    "g++",
+    "c++",
+    "clang",
+    "clang++",
+    "cpp",
+    "cc1",
+    "cc1plus",
+    "collect2",
+    "lto-wrapper",
+    "lto1",
+    "as",
+    "ld",
+    "ld.bfd",
+    "ld.gold",
+    "ld.lld",
+    "lld",
+    "rust-lld",
+    "ld.mold",
+    "mold",
+    "ar",
+    "ranlib",
+    "strip",
+    "objcopy",
+];
+
 /// Longest argument list shown in a row; the full one is in the tooltip.
 const MAX_ARGS: usize = 240;
 
@@ -43,8 +73,21 @@ pub struct ProcessRow {
 
 impl ProcessRow {
     /// `rustc` and the C toolchain, hidden by default: a build runs many.
+    /// Only programs of the guest image count, under `/usr`, which the
+    /// build cannot write: a build script that names its own program
+    /// `rustc` stays visible.
     #[must_use]
     pub fn compiler(&self) -> bool {
+        self.exe.starts_with("/usr/") && self.compiler_name()
+    }
+
+    /// A compiler by name that runs from outside the guest image.
+    #[must_use]
+    pub fn disguised(&self) -> bool {
+        self.compiler_name() && !self.compiler()
+    }
+
+    fn compiler_name(&self) -> bool {
         self.role == "rustc" || self.role == "toolchain"
     }
 }
@@ -276,11 +319,18 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
         .collect();
     let args_full = argv.join(" ");
     let started = u64_of(p, "started_ms").unwrap_or(0);
+    let exe = str_of(p, "exe");
+    let name = exe.rsplit('/').next().unwrap_or_default();
+    let role = if TOOLCHAIN.contains(&name) {
+        "toolchain".to_owned()
+    } else {
+        str_of(p, "role")
+    };
     ProcessRow {
         depth: depth.min(MAX_DEPTH),
         pid: u64_of(p, "pid").unwrap_or(0),
-        role: str_of(p, "role"),
-        exe: str_of(p, "exe"),
+        role,
+        exe,
         args: shorten(&args_full, MAX_ARGS),
         args_full,
         start: duration(started),
@@ -601,6 +651,30 @@ mod tests {
         );
         assert_eq!(rows[1].duration, "1.5 s");
         assert!(rows[3].compiler());
+    }
+
+    #[test]
+    fn only_system_compilers_hide() {
+        let trace = json!({"processes": [
+            {"pid": 1, "exe": "/usr/local/lib/rustlib/x86_64-unknown-linux-gnu/bin/rust-lld", "role": "other"},
+            {"pid": 2, "exe": "/tmp/x/rust-lld", "role": "other"},
+            {"pid": 3, "exe": "/work/target/rustc", "role": "rustc"},
+            {"pid": 4, "exe": "/usr/local/bin/rustc", "role": "rustc"}
+        ]});
+        let rows = process_rows(&trace);
+        let hidden: Vec<(u64, &str, bool)> = rows
+            .iter()
+            .map(|r| (r.pid, r.role.as_str(), r.compiler()))
+            .collect();
+        assert_eq!(
+            hidden,
+            [
+                (1, "toolchain", true),
+                (2, "toolchain", false),
+                (3, "rustc", false),
+                (4, "rustc", true)
+            ]
+        );
     }
 
     #[test]
