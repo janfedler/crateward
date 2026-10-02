@@ -253,7 +253,7 @@ fn crate_file() -> CrateFile {
 /// that needs escaping.
 fn run_report() -> Value {
     json!({
-        "outcome": "succeeded", "end": "Finished", "exit": {"Code": 0},
+        "outcome": "succeeded", "end": "finished", "exit": {"Code": 0},
         "run_ms": 4250, "restore_ms": 90, "payload_files": 3, "payload_bytes": 4096,
         "stdout_tail": "", "stderr_tail": "warning: <unused>", "truncated": false,
         "missing_packages": [],
@@ -519,7 +519,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     );
     assert!(full.contains("<span class=\"badge ok\">succeeded</span>"));
     for (label, value) in [
-        ("Ended", "Finished"),
+        ("Ended", "agent reported the end"),
         ("Guest", "exit code 0"),
         ("Run time", "4.2 s"),
         ("Payload", "3 files, 4.0 KiB"),

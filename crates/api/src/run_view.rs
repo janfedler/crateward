@@ -349,6 +349,34 @@ fn access_rows(trace: &Value, key: &str) -> Vec<AccessRow> {
 }
 
 /// What the fake internet recognized in a connection.
+/// How a run ended, from the host's view, in words. Reports store the
+/// end's name with an optional reason (`guest_stopped: panic`); older ones
+/// stored Rust's debug form, cut at 64 characters, of which only the
+/// variant's name is kept.
+fn end_text(raw: &str) -> String {
+    let name: String = raw
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .filter(|c| *c != '_')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let label = match name.as_str() {
+        "finished" => "agent reported the end",
+        "hosttimeout" => "host time limit",
+        "resourcelimit" => "resource limit",
+        "gueststopped" => "guest stopped",
+        "vmmcrashed" => "VMM crashed",
+        "decoytouched" => "decoy touched",
+        "kvmerror" => "KVM error",
+        "unexpectedexit" => "unexpected exit",
+        _ => return raw.to_owned(),
+    };
+    match raw.split_once(": ") {
+        Some((_, reason)) if !raw.contains('(') => format!("{label}: {reason}"),
+        _ => label.to_owned(),
+    }
+}
+
 /// The fake internet's address in every slot (the orchestrator's
 /// `HOST_ADDRESS`). Every name the guest looks up resolves to it.
 const FAKE_INTERNET: &str = "10.0.2.1";
@@ -593,7 +621,7 @@ pub fn run_view(job: i64, kind: &str, report: &Value) -> RunView {
         stderr: str_of(report, "stderr_tail"),
         ..RunView::default()
     };
-    let mut facts = vec![("Ended".to_owned(), str_of(report, "end"))];
+    let mut facts = vec![("Ended".to_owned(), end_text(&str_of(report, "end")))];
     let exit = exit_text(report.get("exit"));
     if !exit.is_empty() {
         facts.push(("Guest".to_owned(), exit));
@@ -764,6 +792,23 @@ mod tests {
             ["The agent did not close the trace; it may be incomplete"]
         );
         assert_eq!(view.entries[0].mode, "644");
+    }
+
+    #[test]
+    fn the_end_is_put_in_words() {
+        assert_eq!(end_text("finished"), "agent reported the end");
+        assert_eq!(
+            end_text("guest_stopped: kernel panic"),
+            "guest stopped: kernel panic"
+        );
+        // The debug form of older reports, cut inside the output bytes.
+        assert_eq!(
+            end_text("Finished(RunOutcome { exit: Code(0), stdout: [], stderr: [32, 32"),
+            "agent reported the end"
+        );
+        assert_eq!(end_text("HostTimeout"), "host time limit");
+        assert_eq!(end_text("something new"), "something new");
+        assert_eq!(end_text(""), "");
     }
 
     #[test]
