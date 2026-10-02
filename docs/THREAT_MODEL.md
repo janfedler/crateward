@@ -65,7 +65,7 @@ test. Nothing is marked Built before the code exists.
 | Fixed size scratch disk per job: a sparse ext4 image on tmpfs, writable only by the slot's UID, deleted after the run ([ADR 0006](adr/0006-dynamic-runs.md)) | Built | M4 |
 | Drive and network rate limiters: 256 MiB/s and 50,000 operations per second per drive, 4 MiB/s and 2000 packets per second on the network | Built | M4 |
 | SMT disabled (`nosmt`), L1D flush and current microcode against L1TF and MDS | Built (verified on the host) | M1 |
-| KSM disabled, no swap, as the Firecracker production guide recommends | Built (host configured by hand, `deploy/ansible` for new hosts) | M1 |
+| KSM disabled, no swap, as the Firecracker production guide recommends | Built | M1 |
 | Guest kernel without module support (`CONFIG_MODULES` off), so guest root cannot load a rootkit module | Built | M1 |
 | Check that guest visible CPU mitigations are not weaker than the host's. The stock Debian 6.12 host kernel is outside Firecracker's validated matrix | Tested | M1 |
 | Startup reconciliation removes slot cgroups and directories left by a crash. Namespaces and tap devices cannot outlive their process | Tested | M1 |
@@ -158,7 +158,7 @@ forge them. It cannot reach the server or read undisclosed findings.
 | `cargo deny`, `cargo audit` and `cargo vet` in CI | Built | M0 |
 | GitHub Actions pinned by commit SHA. Workflow token read only | Built | M0 |
 | `unsafe_code` denied workspace wide. One documented `unsafe` block (`crateward_core::sandbox`, wrapping `unshare(2)`) | Built | M2 |
-| Release bundles with vendored sources (reproducible archive), a CycloneDX SBOM of every locked package and the pinned sandbox parts, and `SHA256SUMS` (`cargo xtask release`). Signing the sums needs the maintainer's key | Partly built | M8 |
+| Release bundles with vendored sources (reproducible archive), a CycloneDX SBOM of every locked package and the pinned sandbox parts, and `SHA256SUMS` (`cargo xtask release`), signed by the maintainer and verified by `install.sh` | Built | M8 |
 
 ### Integrity without ECC (A2)
 
