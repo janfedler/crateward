@@ -3,7 +3,7 @@
 //! The score is a sum of points from independent signals, capped per group
 //! so that one noisy source cannot dominate, and capped at 100 in total.
 //! The point values are a starting calibration, documented in the ADR and
-//! meant to be tuned on live traffic (M7); they are ordered by how strongly
+//! meant to be tuned on live traffic; they are ordered by how strongly
 //! each signal indicates intent:
 //!
 //! * a honeytoken that left the VM is theft, and alone makes a verdict

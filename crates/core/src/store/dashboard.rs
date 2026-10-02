@@ -1,4 +1,4 @@
-//! Read queries for the dashboard (M6).
+//! Read queries for the dashboard.
 
 use super::{Store, StoreError};
 use crate::job::JobId;

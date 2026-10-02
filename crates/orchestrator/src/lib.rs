@@ -21,8 +21,6 @@
 //!   compromised guest cannot hide from.
 //! * A `VmBackend` trait separates Firecracker from the scheduling logic,
 //!   so CI can use a fake backend and another VMM could be added later.
-//!
-//! The build cache warmer ships as a second binary of this package in M1.5.
 
 #![forbid(unsafe_code)]
 

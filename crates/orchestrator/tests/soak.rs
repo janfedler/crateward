@@ -1,7 +1,6 @@
 //! Soak test: many sequential jailed jobs, then a check for leaks.
 //!
-//! This is the exit criterion of milestone M1 ("50 sequential jobs run
-//! without leaks"). It needs `/dev/kvm`, the guest images, subordinate IDs
+//! 50 sequential jobs must run without leaks. It needs `/dev/kvm`, the guest images, subordinate IDs
 //! and a delegated cgroup, so it only runs through
 //!
 //! ```sh

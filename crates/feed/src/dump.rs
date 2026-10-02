@@ -9,8 +9,7 @@
 //! dependencies (kind 2 in crates.io's `DependencyKind`: 0 normal, 1 build,
 //! 2 dev). Columns are read by header name, so their order does not matter.
 //!
-//! The counts drive priorities (updates to popular crates first) and the
-//! warm set of the build cache warmer (M1.5).
+//! The counts drive priorities: updates to popular crates first.
 
 use std::collections::{HashMap, HashSet};
 use std::io::Read;

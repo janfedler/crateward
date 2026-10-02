@@ -1,4 +1,4 @@
-//! Dashboard (M6).
+//! Dashboard.
 //!
 //! Zone: control plane. The admin view listens on loopback and is reached
 //! through an SSH tunnel (ADR 0009);

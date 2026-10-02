@@ -2,7 +2,7 @@
 //!
 //! The zone decides what a component may touch: only the untrusted zone and
 //! the guest ever execute crate code, and only the trusted zone talks to the
-//! real internet. Encoding the mapping once lets logs, metrics and the threat
+//! real internet. Encoding the mapping once lets logs and the threat
 //! model refer to the same names.
 
 use std::fmt;
@@ -38,9 +38,6 @@ pub enum Component {
     StaticAnalysis,
     /// Runs jobs in Firecracker microVMs.
     Orchestrator,
-    /// Builds the prewarmed base snapshot and shared build cache. Ships as a
-    /// binary of the orchestrator package (milestone M1.5).
-    Warmer,
     /// Runs inside the microVM and streams observed behavior to the host.
     GuestAgent,
     /// DNS, HTTP and HTTPS sinks that stand in for the internet.
@@ -57,12 +54,11 @@ pub enum Component {
 
 impl Component {
     /// Every component, in pipeline order.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 10] = [
         Self::Feed,
         Self::Fetcher,
         Self::StaticAnalysis,
         Self::Orchestrator,
-        Self::Warmer,
         Self::GuestAgent,
         Self::FakeInternet,
         Self::Analyzer,
@@ -71,7 +67,7 @@ impl Component {
         Self::Cli,
     ];
 
-    /// Short name used in logs, metrics and unit names.
+    /// Short name used in logs and unit names.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -79,7 +75,6 @@ impl Component {
             Self::Fetcher => "fetcher",
             Self::StaticAnalysis => "static_analysis",
             Self::Orchestrator => "orchestrator",
-            Self::Warmer => "warmer",
             Self::GuestAgent => "guest_agent",
             Self::FakeInternet => "fake_internet",
             Self::Analyzer => "analyzer",
@@ -94,7 +89,7 @@ impl Component {
     pub const fn zone(self) -> Zone {
         match self {
             Self::Feed | Self::Fetcher | Self::StaticAnalysis => Zone::Trusted,
-            Self::Orchestrator | Self::Warmer | Self::FakeInternet => Zone::Untrusted,
+            Self::Orchestrator | Self::FakeInternet => Zone::Untrusted,
             Self::GuestAgent => Zone::Guest,
             Self::Analyzer | Self::Api | Self::Supervisor | Self::Cli => Zone::ControlPlane,
         }

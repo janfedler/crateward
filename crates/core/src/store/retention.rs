@@ -1,4 +1,4 @@
-//! Retention of raw run data (M7).
+//! Retention of raw run data.
 //!
 //! A run report keeps two kinds of data: evidence (what the job read,
 //! wrote, reached or left behind; honeytokens; the network summary) and raw

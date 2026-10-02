@@ -25,20 +25,10 @@ use crate::store::{Policies, Store};
 
 /// Exit code for an invalid configuration (`EX_CONFIG`).
 pub const EXIT_CONFIG: u8 = 78;
-/// Exit code for a feature that is not built yet (`EX_UNAVAILABLE`).
-pub const EXIT_UNAVAILABLE: u8 = 69;
 
 /// Why a component stopped.
 #[derive(Debug, thiserror::Error)]
 pub enum ComponentError {
-    /// The component is planned for a later milestone.
-    #[error("{component} is not implemented yet (planned for milestone {milestone})")]
-    NotImplemented {
-        /// The component.
-        component: Component,
-        /// The milestone that delivers it.
-        milestone: &'static str,
-    },
     /// The component could not continue. systemd restarts it.
     #[error("{component} stopped: {reason}")]
     Fatal {
@@ -100,11 +90,7 @@ where
     );
     match run(&config) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error @ ComponentError::NotImplemented { .. }) => {
-            tracing::error!(component = component.name(), %error, "stopping");
-            ExitCode::from(EXIT_UNAVAILABLE)
-        }
-        Err(error @ ComponentError::Fatal { .. }) => {
+        Err(error) => {
             tracing::error!(component = component.name(), %error, "stopping");
             ExitCode::FAILURE
         }

@@ -16,7 +16,7 @@
 //! * Both sides start with a `Hello` carrying [`PROTOCOL_VERSION`]. A
 //!   mismatch ends the connection.
 //!
-//! The decoder is a fuzz target (milestone M7) and is covered by property
+//! The decoder is a fuzz target and is covered by property
 //! tests below.
 
 use std::io::{Read, Write};
