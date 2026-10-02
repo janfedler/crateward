@@ -422,10 +422,7 @@ fn disclosure_rows(d: Disclosure) -> Vec<(String, String)> {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
     [
         ("Kind", d.kind.name().to_owned()),
-        (
-            "Reported",
-            format!("{} to {}", d.reported_on, d.reported_to),
-        ),
+        ("Reported", d.reported()),
         ("Reference", dash(d.reference)),
         ("Resolved", dash(d.resolved_on)),
         ("Published", dash(d.published_on)),

@@ -19,7 +19,9 @@ mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
 use autonomy::{insert_alert, insert_pause};
 pub use dashboard::{JobFilter, JobRow, Overview, PublicStats};
-pub use disclosures::{Disclosure, DisclosureKind, DisclosureRefusal, PublishedFinding};
+pub use disclosures::{
+    Disclosure, DisclosureKind, DisclosureRefusal, PublishedFinding, REMOVED_FIRST,
+};
 pub use verdicts::Review;
 
 use std::collections::BTreeMap;
@@ -47,6 +49,10 @@ const MIGRATIONS: &[(i32, &str)] = &[
     (7, include_str!("../migrations/0007_verdicts.sql")),
     (8, include_str!("../migrations/0008_retention.sql")),
     (9, include_str!("../migrations/0009_disclosures.sql")),
+    (
+        10,
+        include_str!("../migrations/0010_removed_before_report.sql"),
+    ),
 ];
 
 /// The server's message for database errors, which the error's own

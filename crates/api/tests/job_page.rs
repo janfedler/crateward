@@ -412,7 +412,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     let form = format!("action=\"/jobs/{}/review\"", job.0);
     assert_eq!(html.matches(&form).count(), 2);
 
-    let reported_on = format!("{} to crates.io", day.reported_on);
+    let reported_on = format!("{} to crates.io", day.reported_on.as_deref().unwrap());
     let disclosure = table(&html, "<h2>Disclosure</h2>");
     assert_eq!(
         disclosure,
@@ -637,7 +637,14 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
         .store
         .record_report(job, kind, "the maintainer", None, None);
     reported.await.unwrap().unwrap();
-    let day = db.store.disclosure(job).await.unwrap().unwrap().reported_on;
+    let day = db
+        .store
+        .disclosure(job)
+        .await
+        .unwrap()
+        .unwrap()
+        .reported_on
+        .unwrap();
     assert!(!db.get("/jobs?review=unreported").await.1.contains(&link));
     assert!(db.get("/jobs?review=confirmed").await.1.contains(&link));
     let (_, inbox) = db.get("/inbox").await;

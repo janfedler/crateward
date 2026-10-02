@@ -26,6 +26,15 @@ pub enum Command {
         #[arg(long)]
         note: Option<String>,
     },
+    /// crates.io removed a confirmed malicious crate before it was
+    /// reported: no report is needed, and the finding is resolved.
+    Removed {
+        /// The job's number.
+        job: i64,
+        /// A note for the record, for example when it was removed.
+        #[arg(long)]
+        note: Option<String>,
+    },
     /// The recipient acted: the crate was removed or a fix released.
     Resolved {
         /// The job's number.
@@ -66,6 +75,10 @@ pub async fn run(store: Store, command: Command) -> Result<(), CliError> {
                 .await??;
             out!("recorded the report of job {job} to {to}");
         }
+        Command::Removed { job, note } => {
+            store.record_removal(JobId(job), note.as_deref()).await??;
+            out!("job {job} is resolved without a report; it may be published");
+        }
         Command::Resolved { job, reference } => {
             store
                 .mark_resolved(JobId(job), reference.as_deref())
@@ -86,11 +99,7 @@ pub async fn run(store: Store, command: Command) -> Result<(), CliError> {
 
 fn show(record: &Disclosure) {
     out!("kind       {}", record.kind.name());
-    out!(
-        "reported   {} to {}",
-        record.reported_on,
-        record.reported_to
-    );
+    out!("reported   {}", record.reported());
     out!("reference  {}", record.reference.as_deref().unwrap_or("-"));
     out!(
         "resolved   {}",

@@ -1,6 +1,8 @@
 //! Disclosure records (DISCLOSURE.md): a confirmed finding is reported,
-//! the recipient acts, and only then is it published. The database
-//! enforces the order; the public export reads published rows only.
+//! the recipient acts, and only then is it published. A malicious crate
+//! that crates.io removed before any report is recorded as such, resolved
+//! by the removal. The database enforces the order; the public export
+//! reads published rows only.
 
 use super::{Store, StoreError};
 use crate::job::JobId;
@@ -60,10 +62,11 @@ pub struct Disclosure {
     pub job: JobId,
     /// What the finding is.
     pub kind: DisclosureKind,
-    /// Who received the report.
-    pub reported_to: String,
+    /// Who received the report; `None` when crates.io removed the crate
+    /// before a report.
+    pub reported_to: Option<String>,
     /// When it was reported.
-    pub reported_on: String,
+    pub reported_on: Option<String>,
     /// The recipient's ticket or advisory number.
     pub reference: Option<String>,
     /// When the recipient acted.
@@ -76,6 +79,20 @@ pub struct Disclosure {
     pub note: Option<String>,
 }
 
+/// How a finding without a report reads, wherever its report would be.
+pub const REMOVED_FIRST: &str = "not reported: crates.io removed the crate first";
+
+impl Disclosure {
+    /// The report in words: day and recipient, or [`REMOVED_FIRST`].
+    #[must_use]
+    pub fn reported(&self) -> String {
+        match (&self.reported_on, &self.reported_to) {
+            (Some(on), Some(to)) => format!("{on} to {to}"),
+            _ => REMOVED_FIRST.to_owned(),
+        }
+    }
+}
+
 /// A published finding, for the public site.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishedFinding {
@@ -85,8 +102,8 @@ pub struct PublishedFinding {
     pub version: String,
     /// What the finding is.
     pub kind: DisclosureKind,
-    /// When it was reported.
-    pub reported_on: String,
+    /// When it was reported; `None` when crates.io removed the crate first.
+    pub reported_on: Option<String>,
     /// When it was published.
     pub published_on: String,
     /// The page name under `findings/`.
@@ -118,15 +135,7 @@ impl Store {
         reference: Option<&str>,
         note: Option<&str>,
     ) -> Result<Result<(), DisclosureRefusal>, StoreError> {
-        let confirmed = self
-            .client
-            .query_opt(
-                "SELECT 1 FROM verdicts WHERE job_id = $1 AND review = 'confirmed'",
-                &[&job.0],
-            )
-            .await?
-            .is_some();
-        if !confirmed {
+        if !self.confirmed(job).await? {
             return Ok(Err(DisclosureRefusal::NotConfirmed));
         }
         self.client
@@ -134,12 +143,52 @@ impl Store {
                 "INSERT INTO disclosures (job_id, kind, reported_to, reference, note)
                  VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT (job_id) DO UPDATE SET kind = $2, reported_to = $3,
+                     reported_at = COALESCE(disclosures.reported_at, now()),
                      reference = COALESCE($4, disclosures.reference),
                      note = COALESCE($5, disclosures.note)",
                 &[&job.0, &kind.name(), &reported_to, &reference, &note],
             )
             .await?;
         Ok(Ok(()))
+    }
+
+    /// Records that crates.io removed a confirmed malicious crate before
+    /// Crateward reported it. No report is needed then; the removal
+    /// resolves the finding, which may be published.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn record_removal(
+        &self,
+        job: JobId,
+        note: Option<&str>,
+    ) -> Result<Result<(), DisclosureRefusal>, StoreError> {
+        if !self.confirmed(job).await? {
+            return Ok(Err(DisclosureRefusal::NotConfirmed));
+        }
+        self.client
+            .execute(
+                "INSERT INTO disclosures (job_id, kind, reported_to, reported_at, resolved_at, note)
+                 VALUES ($1, 'malicious', NULL, NULL, now(), $2)
+                 ON CONFLICT (job_id) DO UPDATE SET
+                     resolved_at = COALESCE(disclosures.resolved_at, now()),
+                     note = COALESCE($2, disclosures.note)",
+                &[&job.0, &note],
+            )
+            .await?;
+        Ok(Ok(()))
+    }
+
+    async fn confirmed(&self, job: JobId) -> Result<bool, StoreError> {
+        Ok(self
+            .client
+            .query_opt(
+                "SELECT 1 FROM verdicts WHERE job_id = $1 AND review = 'confirmed'",
+                &[&job.0],
+            )
+            .await?
+            .is_some())
     }
 
     /// Records that the recipient acted: crates.io removed the crate, or the

@@ -131,7 +131,10 @@ pub fn render(
                 name: f.name.clone(),
                 version: f.version.clone(),
                 kind: f.kind.name(),
-                reported_on: f.reported_on.clone(),
+                reported_on: f
+                    .reported_on
+                    .clone()
+                    .unwrap_or_else(|| "removed by crates.io first".to_owned()),
                 published_on: f.published_on.clone(),
                 slug: f.slug.clone(),
             })
@@ -498,11 +501,18 @@ mod tests {
             name: "evil<b>".into(),
             version: "0.1.0".into(),
             kind: DisclosureKind::Malicious,
-            reported_on: "2026-09-20".into(),
+            reported_on: Some("2026-09-20".into()),
             published_on: "2026-10-04".into(),
             slug: "evil-0-1-0".into(),
         };
-        let files = render(&stats, &[], &[finding], "now").unwrap();
+        // crates.io removed this one before it was reported.
+        let removed = PublishedFinding {
+            name: "gone".into(),
+            reported_on: None,
+            slug: "gone-0-1-0".into(),
+            ..finding.clone()
+        };
+        let files = render(&stats, &[], &[finding, removed], "now").unwrap();
         let index = String::from_utf8(files[0].1.clone()).unwrap();
         assert!(index.contains(r#"<a href="findings/evil-0-1-0/">details</a>"#));
         // Crate names are escaped like any other text.
@@ -510,5 +520,7 @@ mod tests {
         assert!(!index.contains("None yet."));
         let json: serde_json::Value = serde_json::from_slice(&files[2].1).unwrap();
         assert_eq!(json["findings"][0]["page"], "findings/evil-0-1-0/");
+        assert!(index.contains("<td>removed by crates.io first</td>"));
+        assert_eq!(json["findings"][1]["reported"], serde_json::Value::Null);
     }
 }

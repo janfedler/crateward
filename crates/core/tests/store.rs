@@ -118,7 +118,7 @@ async fn migrations_are_idempotent() {
     let mut store = db.store().await;
     assert_eq!(
         store.migrate().await.unwrap(),
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     );
     assert!(store.migrate().await.unwrap().is_empty());
     db.drop().await;
@@ -901,5 +901,51 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         Err(DisclosureRefusal::SlugTaken)
     );
     assert!(store.disclosure(JobId(i64::MAX)).await.unwrap().is_none());
+
+    // crates.io removed a crate before it was reported: no report, but
+    // resolved, so it may be published. Only a confirmed verdict counts.
+    let gone = store
+        .enqueue(&new_job("gone", "0.1.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store.record_removal(gone, None).await.unwrap(),
+        Err(DisclosureRefusal::NotConfirmed)
+    );
+    store.record_verdict(gone, &verdict).await.unwrap();
+    store
+        .set_review(gone, Review::Confirmed, None)
+        .await
+        .unwrap();
+    let note = Some("removed on 2026-10-01");
+    assert_eq!(store.record_removal(gone, note).await.unwrap(), Ok(()));
+    let record = store.disclosure(gone).await.unwrap().unwrap();
+    assert_eq!(record.kind, DisclosureKind::Malicious);
+    assert!(record.reported_on.is_none() && record.reported_to.is_none());
+    assert!(record.resolved_on.is_some());
+    assert_eq!(record.reported(), crateward_core::store::REMOVED_FIRST);
+    assert_eq!(store.publish_finding(gone, "gone").await.unwrap(), Ok(()));
+    let published = store.published_findings().await.unwrap();
+    assert!(
+        published
+            .iter()
+            .any(|f| f.slug == "gone" && f.reported_on.is_none())
+    );
+    // A report recorded later fills the report in.
+    assert_eq!(report(gone).await, Ok(()));
+    let record = store.disclosure(gone).await.unwrap().unwrap();
+    assert!(record.reported_on.is_some() && record.resolved_on.is_some());
+    // The database refuses a vulnerability without a report.
+    let raw = db.raw().await;
+    let refused = raw
+        .batch_execute(&format!(
+            "SET search_path TO {}; UPDATE disclosures
+             SET kind = 'vulnerability', reported_to = NULL, reported_at = NULL
+             WHERE job_id = {}",
+            db.schema, gone.0
+        ))
+        .await;
+    assert!(refused.is_err());
     db.drop().await;
 }
