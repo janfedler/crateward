@@ -5,19 +5,9 @@
 [![Rust 1.98.1](https://img.shields.io/badge/rust-1.98.1-orange.svg)](rust-toolchain.toml)
 [![Website](https://img.shields.io/badge/web-crateward.com-blue.svg)](https://crateward.com)
 
-**A supply chain scanner for crates.io that builds new crate versions inside
-Firecracker microVMs and tells you what their build did.**
-
-A crate runs code on your machine before you ever call it: its build script
-and its procedural macros run during `cargo build`, and so do those of every
-dependency. Crateward watches crates.io for new versions, analyzes each one
-statically, runs the build time code of the interesting ones in a fresh,
-offline microVM, and scores the risk with reasons that link to file, line
-and trace evidence.
-
-> **Status:** the whole pipeline runs unattended against live crates.io data
-> on a development host. The production deployment is ready in
-> [`deploy/`](deploy/) and not applied yet. See [project status](#project-status).
+Watches crates.io for new versions, analyzes each one statically, runs the
+build time code of the interesting ones in a fresh, offline microVM, and
+scores the risk with reasons that link to file, line and trace evidence.
 
 ## Features
 
