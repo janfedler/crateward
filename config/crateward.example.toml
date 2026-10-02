@@ -3,7 +3,7 @@
 # Every service reads this file. Unknown keys are rejected and every value is
 # validated at startup; `crateward config check` runs the same validation.
 #
-# Secrets (database.url, notifier.topic) belong in the deployed copy only,
+# Secrets (database.url, ntfy.topic) belong in the deployed copy only,
 # which Ansible installs readable by the service users.
 
 [instance]
@@ -27,7 +27,7 @@ url = "postgresql://crateward@localhost/crateward?host=/run/postgresql"
 [crates_io]
 # The data access policy asks for a user agent that identifies the
 # application and a way to contact its operator.
-user_agent = "crateward/0.1 (+https://crateward.com/about; security@janfedler.de)"
+user_agent = "crateward/0.1 (+https://example.com/about; security@example.com)"
 index_url = "https://index.crates.io/"
 static_url = "https://static.crates.io/"
 rss_updates_url = "https://static.crates.io/rss/updates.xml"
@@ -179,8 +179,8 @@ decoys = [
     "/var/lib/crateward/decoys/deploy-token",
 ]
 
-[notifier]
-kind = "ntfy"
+# Push notifications for alerts. Leave this table out to only log them.
+[ntfy]
 server_url = "https://ntfy.sh"
 # Without access control the topic name is the password. Replace with the
 # output of `openssl rand -hex 24`.
@@ -189,7 +189,7 @@ topic = "example_topic_replace_with_48_random_hex_chars"
 # The public site (ADR 0001), a static export of aggregate statistics
 # pushed to GitHub Pages. Leave this table out to only write it locally.
 [export]
-repository = "git@github.com:janfedler/crateward-site.git"
+repository = "git@github.com:example/crateward-site.git"
 branch = "main"
 # A deploy key with write access to the site repository only.
 deploy_key = "/etc/crateward/site-deploy-key"

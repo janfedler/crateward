@@ -55,8 +55,10 @@ pub struct Config {
     pub fetcher: FetcherConfig,
     /// Breakers, deadlines and alert delivery.
     pub supervisor: SupervisorConfig,
-    /// Where alerts go.
-    pub notifier: NotifierConfig,
+    /// Push notifications for alerts. Without this table alerts are only
+    /// logged, as on development installations.
+    #[serde(default)]
+    pub ntfy: Option<NtfyConfig>,
     /// The admin dashboard.
     pub web: WebConfig,
     /// Where the public site is pushed (ADR 0001). Without this table the
@@ -380,20 +382,15 @@ pub struct SupervisorConfig {
     pub decoys: Vec<PathBuf>,
 }
 
-/// Where alerts go.
+/// Push notifications through an ntfy server.
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum NotifierConfig {
-    /// Only log alerts, for development installations.
-    Log,
-    /// Push notifications through an ntfy server.
-    Ntfy {
-        /// Server root, for example `https://ntfy.sh`.
-        server_url: Url,
-        /// Topic name. Without access control, the topic name is the
-        /// password, so it must be long and random.
-        topic: SecretString,
-    },
+#[serde(deny_unknown_fields)]
+pub struct NtfyConfig {
+    /// Server root, for example `https://ntfy.sh`.
+    pub server_url: Url,
+    /// Topic name. Without access control, the topic name is the password,
+    /// so it must be long and random.
+    pub topic: SecretString,
 }
 
 /// The admin dashboard.
@@ -701,7 +698,7 @@ impl Config {
         );
         v.absolute(&self.fetcher.cargo_bin, "fetcher.cargo_bin");
         self.validate_supervisor(v);
-        self.validate_notifier(v);
+        self.validate_ntfy(v);
         v.check(
             self.web.listen.ip().is_loopback(),
             "web.listen",
@@ -760,19 +757,17 @@ impl Config {
         }
     }
 
-    fn validate_notifier(&self, v: &mut Issues) {
-        match &self.notifier {
-            NotifierConfig::Log => {}
-            NotifierConfig::Ntfy { server_url, topic } => {
-                v.https(server_url, "notifier.server_url");
-                let topic = topic.expose_secret();
-                v.check(
-                    (32..=64).contains(&topic.len()) && is_plain_name(topic),
-                    "notifier.topic",
-                    "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password",
-                );
-            }
-        }
+    fn validate_ntfy(&self, v: &mut Issues) {
+        let Some(ntfy) = &self.ntfy else {
+            return;
+        };
+        v.https(&ntfy.server_url, "ntfy.server_url");
+        let topic = ntfy.topic.expose_secret();
+        v.check(
+            (32..=64).contains(&topic.len()) && is_plain_name(topic),
+            "ntfy.topic",
+            "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password",
+        );
     }
 }
 
@@ -801,9 +796,7 @@ mod tests {
     fn debug_output_redacts_secrets() {
         let config = Config::from_toml(EXAMPLE).unwrap();
         let debug = format!("{config:?}");
-        let NotifierConfig::Ntfy { topic, .. } = &config.notifier else {
-            panic!("the example uses ntfy");
-        };
+        let topic = &config.ntfy.as_ref().unwrap().topic;
         assert!(!debug.contains(topic.expose_secret()));
         assert!(!debug.contains(config.database.url.expose_secret()));
     }
@@ -830,11 +823,9 @@ mod tests {
     #[test]
     fn short_ntfy_topic_is_rejected() {
         let config = Config::from_toml(EXAMPLE).unwrap();
-        let NotifierConfig::Ntfy { topic, .. } = &config.notifier else {
-            panic!("the example uses ntfy");
-        };
+        let topic = &config.ntfy.as_ref().unwrap().topic;
         let issues = issues_for(topic.expose_secret(), "alerts");
-        assert_eq!(issues[0].key, "notifier.topic");
+        assert_eq!(issues[0].key, "ntfy.topic");
     }
 
     #[test]
@@ -1286,29 +1277,27 @@ mod tests {
     }
 
     #[test]
-    fn notifier_and_web_rules() {
-        accepted(|c| c.notifier = NotifierConfig::Log);
-        let ntfy = |server_url: Url, topic: &str| NotifierConfig::Ntfy {
-            server_url,
-            topic: topic.into(),
+    fn ntfy_and_web_rules() {
+        accepted(|c| c.ntfy = None);
+        let ntfy = |server_url: Url, topic: &str| {
+            Some(NtfyConfig {
+                server_url,
+                topic: topic.into(),
+            })
         };
         let topic = "a".repeat(32);
-        rule(
-            |c| c.notifier = ntfy(http(), &topic),
-            "notifier.server_url",
-            HTTPS,
-        );
+        rule(|c| c.ntfy = ntfy(http(), &topic), "ntfy.server_url", HTTPS);
         let message =
             "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password";
         let secure = |c: &mut Config, topic: &str| {
-            c.notifier = ntfy(Url::parse("https://ntfy.sh").unwrap(), topic);
+            c.ntfy = ntfy(Url::parse("https://ntfy.sh").unwrap(), topic);
         };
         for topic in [
             "a".repeat(31),
             "a".repeat(65),
             format!("{}!", "a".repeat(31)),
         ] {
-            rule(|c| secure(c, &topic), "notifier.topic", message);
+            rule(|c| secure(c, &topic), "ntfy.topic", message);
         }
         for topic in [
             "a".repeat(32),
@@ -1369,10 +1358,10 @@ mod tests {
         sup.alert_repeat_hours = 0;
         sup.integrity_interval_minutes = 0;
         sup.decoys = vec!["a".into(), "b".into()];
-        c.notifier = NotifierConfig::Ntfy {
+        c.ntfy = Some(NtfyConfig {
             server_url: http(),
             topic: "short".into(),
-        };
+        });
         c.web.listen = "0.0.0.0:1".parse().unwrap();
         let export = c.export.as_mut().unwrap();
         export.repository = "x".into();
@@ -1441,7 +1430,7 @@ mod tests {
         "supervisor.breaker_failure_percent supervisor.breaker_window_secs ",
         "supervisor.breaker_cooldown_secs supervisor.alert_repeat_hours ",
         "supervisor.integrity_interval_minutes supervisor.decoys supervisor.decoys ",
-        "notifier.server_url notifier.topic ",
+        "ntfy.server_url ntfy.topic ",
         "web.listen",
     );
 

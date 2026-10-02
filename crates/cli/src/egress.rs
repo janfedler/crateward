@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::net::{IpAddr, ToSocketAddrs as _};
 
-use crateward_core::config::{Config, NotifierConfig};
+use crateward_core::config::Config;
 
 /// Hosts the weekly image build downloads from: the pinned Rust toolchain,
 /// the Debian snapshot the root filesystem is built from, and the kernel
@@ -58,8 +58,8 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
     // which is the static host.
     let fetcher = collect(&[cio.index_url.as_str(), cio.static_url.as_str()]);
     let mut supervisor: BTreeSet<String> = BTreeSet::new();
-    if let NotifierConfig::Ntfy { server_url, .. } = &config.notifier {
-        supervisor.extend(host(server_url.as_str()));
+    if let Some(ntfy) = &config.ntfy {
+        supervisor.extend(host(ntfy.server_url.as_str()));
     }
     // `git@github.com:owner/name.git`
     let api = config

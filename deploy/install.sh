@@ -7,9 +7,11 @@
 #   ./install.sh uninstall           remove the software, keep all state
 #   ./install.sh uninstall --purge   remove the state as well
 #
-# The first install asks for the ntfy topic and the dashboard address, and
-# writes the configuration. Without a terminal it reads CRATEWARD_NTFY_TOPIC
-# and CRATEWARD_WEB_LISTEN instead.
+# The first install asks for the operator's contact details, the ntfy topic,
+# the site repository and the dashboard address, and writes the
+# configuration. Without a terminal it reads CRATEWARD_CONTACT_URL,
+# CRATEWARD_CONTACT_EMAIL, CRATEWARD_NTFY_TOPIC, CRATEWARD_SITE_REPOSITORY
+# ("none" for no public site) and CRATEWARD_WEB_LISTEN instead.
 #
 # Everything the maintainer owns stays in CRATEWARD_STATE (default
 # /root/crateward), mode 0700:
@@ -111,24 +113,42 @@ default_listen() {
     fi
 }
 
+# Copies standard input without the TOML table named $1.
+without_table() {
+    awk -v table="[$1]" '$0 == table { skip = 1; next } /^\[/ { skip = 0 } !skip'
+}
+
 write_config() {
     local config="$STATE/crateward.toml"
     if [[ -f "$config" ]]; then
         say "keeping $config"
         return
     fi
-    local topic listen
+    local url email topic repository listen
+    # Characters that would break the user agent, the TOML string or sed.
+    local unsafe='[[:space:]";|&)\\]'
+    # crates.io asks for a user agent that names a way to reach the operator.
+    url="$(ask CRATEWARD_CONTACT_URL "operator website, sent in the user agent" "")"
+    [[ "$url" == https://?* && ! "$url" =~ $unsafe ]] || die "the website must be an https:// URL"
+    email="$(ask CRATEWARD_CONTACT_EMAIL "operator email address, sent in the user agent" "")"
+    [[ "$email" == ?*@?* && ! "$email" =~ $unsafe ]] || die "not an email address"
     topic="$(ask CRATEWARD_NTFY_TOPIC "ntfy topic (openssl rand -hex 24)" "")"
     [[ "$topic" =~ ^[A-Za-z0-9_-]{32,64}$ && "$topic" != example_* ]] ||
         die "the ntfy topic must be 32 to 64 characters of [A-Za-z0-9_-]"
+    repository="$(ask CRATEWARD_SITE_REPOSITORY "site repository, git@github.com:owner/name.git, or none" "none")"
+    [[ "$repository" == none || "$repository" =~ ^git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$ ]] ||
+        die "the site repository must be git@github.com:owner/name.git or none"
     listen="$(ask CRATEWARD_WEB_LISTEN "dashboard address, loopback only" "$(default_listen)")"
     [[ "$listen" =~ ^(127\.0\.0\.1|\[::1\]):[0-9]{1,5}$ ]] ||
         die "the dashboard address must be 127.0.0.1:<port> or [::1]:<port>"
 
     local draft="$STATE/crateward.toml.new"
-    sed -e "s|^topic = .*|topic = \"$topic\"|" \
+    sed -e "s|^user_agent = .*|user_agent = \"crateward/0.1 (+$url; $email)\"|" \
+        -e "s|^topic = .*|topic = \"$topic\"|" \
+        -e "s|^repository = .*|repository = \"$repository\"|" \
         -e "s|^listen = .*|listen = \"$listen\"|" \
-        "$BUNDLE/config/crateward.example.toml" > "$draft"
+        "$BUNDLE/config/crateward.example.toml" |
+        if [[ "$repository" == none ]]; then without_table export; else cat; fi > "$draft"
     "$BUNDLE/bin/crateward" config check --config "$draft" ||
         die "the configuration does not validate; see $draft"
     mv "$draft" "$config"

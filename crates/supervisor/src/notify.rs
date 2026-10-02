@@ -4,7 +4,7 @@
 //! names and no details: a category, a short title, and where to look. The
 //! evidence stays on the server, behind SSH.
 
-use crateward_core::config::NotifierConfig;
+use crateward_core::config::NtfyConfig;
 use crateward_core::escalation::{EscalationCategory, HumanEscalation};
 use secrecy::ExposeSecret;
 
@@ -85,19 +85,19 @@ pub enum Notifier {
 }
 
 impl Notifier {
-    /// The notifier of a configuration.
+    /// Pushes through ntfy when it is configured, otherwise only logs.
     #[must_use]
-    pub fn new(config: &NotifierConfig, client: &reqwest::Client) -> Self {
-        match config {
-            NotifierConfig::Log => Self::Log,
-            NotifierConfig::Ntfy { server_url, topic } => Self::Ntfy {
-                client: client.clone(),
-                url: format!(
-                    "{}/{}",
-                    server_url.as_str().trim_end_matches('/'),
-                    topic.expose_secret()
-                ),
-            },
+    pub fn new(ntfy: Option<&NtfyConfig>, client: &reqwest::Client) -> Self {
+        let Some(NtfyConfig { server_url, topic }) = ntfy else {
+            return Self::Log;
+        };
+        Self::Ntfy {
+            client: client.clone(),
+            url: format!(
+                "{}/{}",
+                server_url.as_str().trim_end_matches('/'),
+                topic.expose_secret()
+            ),
         }
     }
 
@@ -163,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_log_notifier_always_delivers() {
-        let notifier = Notifier::new(&NotifierConfig::Log, &reqwest::Client::new());
+        let notifier = Notifier::new(None, &reqwest::Client::new());
         notifier.send(&HumanEscalation::KvmError).await.unwrap();
     }
 }

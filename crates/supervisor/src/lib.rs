@@ -264,7 +264,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             config,
             store,
             policies: Policies::from_config(&config.stages).map_err(fatal)?,
-            notifier: Notifier::new(&config.notifier, &client),
+            notifier: Notifier::new(config.ntfy.as_ref(), &client),
             integrity: integrity::Integrity::new(
                 &config.instance.data_dir,
                 Duration::from_secs(
