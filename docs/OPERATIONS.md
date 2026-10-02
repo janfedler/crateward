@@ -7,10 +7,8 @@ numbers during milestone M7.
 
 | Item | Value |
 |------|-------|
-| Provider | Hetzner dedicated server |
-| CPU | Intel Core i7-7700, SMT disabled (4 cores in use) |
-| Memory | 64 GiB, no ECC |
-| Disks | 2 × 2 TB enterprise HDD |
+| CPU | SMT disabled |
+| Memory | no ECC |
 | OS | Debian 13, stock 6.12 kernel, unattended upgrades |
 | Configuration | Ansible, from this repository (M1 and M8) |
 | Admin access | SSH with keys only ([ADR 0003](adr/0003-debian-ansible-ssh.md)) |
@@ -24,8 +22,8 @@ KSM disabled, no swap.
 | Mount | Medium | Contents |
 |-------|--------|----------|
 | `/boot` | md RAID1 | kernel and initramfs |
-| `/` | ext4 on md RAID1 (`md2`), unencrypted; monthly `mdcheck` scrub | system, Postgres, content addressed store, evidence, logs, image archive |
-| `/run/crateward` | tmpfs, capped at the images, the scratch disks and the snapshot together (31 GiB) | the base snapshot, the warm image, per job payload and scratch images, the slot jails, the fetcher's and the export's work directories |
+| `/` | ext4 on md RAID1, unencrypted; monthly `mdcheck` scrub | system, Postgres, content addressed store, evidence, logs, image archive |
+| `/run/crateward` | tmpfs, capped at the images, the scratch disks and the snapshot together | the base snapshot, the warm image, per job payload and scratch images, the slot jails, the fetcher's and the export's work directories |
 
 PostgreSQL clusters are created with data checksums enabled.
 

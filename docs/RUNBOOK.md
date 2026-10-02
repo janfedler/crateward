@@ -105,7 +105,7 @@ running is failed and will not be retried automatically.
 **What to do.**
 1. Do not reboot yet; volatile evidence lives in tmpfs.
 2. Copy the jail directory of the slot, the tap capture and the job's
-   evidence pack to the HDD archive.
+   evidence pack to the disk archive.
 3. Check the host for persistence: new users, systemd units, cron entries,
    changed binaries (`crateward integrity --config <file> check`), unknown
    processes (`ps -eo pid,ppid,uid,comm` for the slot UIDs).
@@ -129,5 +129,5 @@ or a disk is replaced:
 
 1. Revoke the GitHub deploy key and the read token, and rotate the ntfy
    topic.
-2. Boot the Hetzner rescue system and overwrite both disks completely, for
+2. Boot a rescue system and overwrite all disks completely, for
    example with `blkdiscard` where supported, otherwise `shred -n 1`.

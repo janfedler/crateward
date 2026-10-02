@@ -293,7 +293,7 @@ fn check_prose(prose: &str) -> Vec<String> {
 }
 
 /// A letter, a hyphen and a letter: `read-only`, `pre-warmed`. Hyphens next
-/// to digits (`SHA-256`, `i7-7700`) and leading hyphens (`--flag`) are fine.
+/// to digits (`SHA-256`, `x86-64`) and leading hyphens (`--flag`) are fine.
 fn is_hyphenated_compound(word: &str) -> bool {
     let chars: Vec<char> = word.chars().collect();
     chars
@@ -323,7 +323,7 @@ mod tests {
         let text = "Use `cargo-deny` and <https://a-b.example/x-y>.\n\
                     See [docs](https://x.org/a-b) or https://c-d.org.\n\
                     <!-- generated-marker -->\n\
-                    SHA-256 on an i7-7700 with --no-deps.\n\
+                    SHA-256 on x86-64 with --no-deps.\n\
                     ```\nlet read-only = 1;\n```\n";
         assert_eq!(lint(text, Kind::Markdown), Vec::<String>::new());
     }

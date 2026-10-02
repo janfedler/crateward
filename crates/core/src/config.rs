@@ -87,7 +87,7 @@ pub struct ExportConfig {
 pub struct InstanceConfig {
     /// Name used in alerts and the public export.
     pub name: String,
-    /// Durable state on the HDD array (content addressed store, evidence).
+    /// Durable state on disk (content addressed store, evidence).
     pub data_dir: PathBuf,
     /// Volatile state in tmpfs (promoted images, sockets, scratch).
     pub run_dir: PathBuf,

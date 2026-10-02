@@ -8,8 +8,8 @@
 Crateward runs code that must be assumed hostile, many times per hour, on
 one server. The virtual machine monitor is the most important security
 boundary. It needs fast restores from a snapshot, a network device for the
-fake internet, a vsock channel and per VM limits. The server is an Intel
-Core i7-7700 (Kaby Lake, 4 cores, 8 threads) with 64 GiB of RAM without ECC.
+fake internet, a vsock channel and per VM limits. The server's CPU is
+affected by L1TF and MDS, and its memory has no ECC.
 
 ## Decision
 
@@ -30,8 +30,8 @@ Core i7-7700 (Kaby Lake, 4 cores, 8 threads) with 64 GiB of RAM without ECC.
    Tests check from the host on every run: the slot's UID, `CapEff` and
    `CapPrm` zero, `NoNewPrivs` 1, `Seccomp` 2, and no tap device in the
    host's namespace.
-3. **SMT off** (`nosmt`, `mds=full,nosmt`, `l1tf=full,force`): 4 cores, one
-   for the host and three for VM slots of one vCPU each. **Hot path in
+3. **SMT off** (`nosmt`, `mds=full,nosmt`, `l1tf=full,force`): one core
+   for the host and the others for VM slots of one vCPU each. **Hot path in
    RAM:** images, the snapshot and the scratch disks live in tmpfs, copied
    from the disk and verified with BLAKE3.
 4. **Guest kernel** from a pinned commit of Amazon Linux's

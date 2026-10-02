@@ -2,8 +2,6 @@
 #
 # Every service reads this file. Unknown keys are rejected and every value is
 # validated at startup; `crateward config check` runs the same validation.
-# Values below are the defaults for the production server: an Intel Core
-# i7-7700 with SMT disabled (4 cores), 64 GiB RAM and two HDDs.
 #
 # Secrets (database.url, notifier.topic) belong in the deployed copy only,
 # which Ansible installs readable by the service users.
@@ -11,7 +9,7 @@
 [instance]
 # Name used in alerts and in the public export.
 name = "crateward"
-# Durable state on the HDD array: content addressed store, evidence, logs.
+# Durable state on disk: content addressed store, evidence, logs.
 data_dir = "/var/lib/crateward"
 # Volatile state in tmpfs: promoted images, sockets, per job scratch.
 run_dir = "/run/crateward"

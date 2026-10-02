@@ -15,21 +15,19 @@ maintainer only for the closed list of reasons in
 
 ## Hardware and its consequences
 
-The production server is fixed: an Intel Core i7-7700 (4 cores, 8 threads),
-64 GiB RAM without ECC, and two 2 TB enterprise HDDs, hosted at Hetzner. Three
-consequences shape everything below.
+Three properties of the host shape everything below.
 
-* **SMT is disabled.** The i7-7700 is affected by L1TF and MDS. The kernel
+* **SMT is disabled.** The CPU is affected by L1TF and MDS. The kernel
   documentation calls `mds=full,nosmt` "the complete mitigation" and states
   that preventing the SMT issues of L1TF "might" require disabling SMT
-  completely. With SMT off the server has 4 cores: 1 for host services and 3
-  for microVMs. See [ADR 0002](adr/0002-firecracker-rootless-jail.md).
-* **The hot path lives in RAM.** Spinning disks cannot serve the random reads
+  completely. One core is kept for host services, the others run microVMs.
+  See [ADR 0002](adr/0002-firecracker-rootless-jail.md).
+* **The hot path lives in RAM.** Hard disks cannot serve the random reads
   of snapshot memory files or the writes of scratch disks. Promoted images
-  and per job scratch disks live in tmpfs; the HDDs hold durable data.
-* **No ECC, plain ext4.** The disks are an md RAID1 with ext4, unencrypted
-  ([ADR 0003](adr/0003-debian-ansible-ssh.md)). Neither
-  checksums data, so Crateward does: content addressed blobs are verified
+  and per job scratch disks live in tmpfs; the disks hold durable data.
+* **No ECC, plain ext4.** The memory has no ECC, and the disks are an md
+  RAID1 with ext4, unencrypted ([ADR 0003](adr/0003-debian-ansible-ssh.md)).
+  Neither checksums data, so Crateward does: content addressed blobs are verified
   by their BLAKE3 digest on every read, images by BLAKE3 manifests, crate
   files by the index SHA-256, and PostgreSQL pages by data checksums.
 

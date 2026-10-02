@@ -188,5 +188,5 @@ forge them. It cannot reach the server or read undisclosed findings.
 * The disks are not encrypted ([ADR 0003](adr/0003-debian-ansible-ssh.md)).
   A disk that leaves the data center carries Crateward's secrets, crate
   files, evidence and undisclosed findings. Secrets are scoped and
-  rotatable, and the RUNBOOK wipes both disks before the server is
+  rotatable, and the RUNBOOK wipes all disks before the server is
   cancelled.

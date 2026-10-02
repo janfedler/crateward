@@ -6,8 +6,7 @@
 ## Context
 
 The host must be reproducible, minimal, updated without a human and set up
-as code. It runs at Hetzner, whose installimage created two md RAID1 arrays
-with ext4 over the two HDDs. Firecracker 1.17 validates the host kernels
+as code. Its disks are md RAID1 arrays with ext4. Firecracker 1.17 validates the host kernels
 5.10, 6.1 and 6.18; others "might work".
 
 ## Decision
@@ -25,7 +24,7 @@ with ext4 over the two HDDs. Firecracker 1.17 validates the host kernels
 
 ## Alternatives
 
-* **NixOS:** not an installation image Hetzner supports.
+* **NixOS:** not an installation image the hosting provider supports.
 * **Arch Linux with `linux-lts`:** moves to each new LTS series within
   weeks, faster than Firecracker validates them, and upgrades Postgres
   across major versions.
@@ -45,7 +44,7 @@ with ext4 over the two HDDs. Firecracker 1.17 validates the host kernels
   compensate. Revisit at every Debian point release.
 * SSH faces the whole internet, so OpenSSH security updates matter.
 * Replaced or returned disks carry readable data. Secrets stay few, scoped
-  and rotatable, and the RUNBOOK wipes both disks before the server is
+  and rotatable, and the RUNBOOK wipes all disks before the server is
   cancelled. The threat model lists this as an accepted risk.
 
 ## Sources
@@ -53,6 +52,4 @@ with ext4 over the two HDDs. Firecracker 1.17 validates the host kernels
 * Firecracker `docs/kernel-policy.md` and `CHANGELOG.md` (1.17.0)
 * Debian kernel list, "Re: Trixie-backports : 6.18 LTS kernel",
   `https://lists.debian.org/debian-kernel/2025/12/msg00176.html`
-* Hetzner standard images,
-  `https://docs.hetzner.com/robot/dedicated-server/operating-systems/standard-images/`
 * `pg_checksums(1)`, PostgreSQL 17

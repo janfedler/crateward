@@ -92,7 +92,7 @@ reported and handled ([DISCLOSURE.md](DISCLOSURE.md)).
   truth limits what an active crate can hide, not what a dormant one never
   does.
 * Only Linux is executed; Windows and macOS code is covered statically.
-* One server with three VM slots: roughly one version in five needs a VM,
+* Three VM slots: roughly one version in five needs a VM,
   and a version that waits more than 12 hours is scored statically and
   labeled that way.
 
