@@ -19,13 +19,10 @@ run_dir = "/run/crateward"
 log_format = "json"
 # A tracing filter directive. RUST_LOG overrides it.
 log_filter = "info"
-# Prometheus metrics endpoint. Loopback only; scraped locally.
-metrics_listen = "127.0.0.1:9464"
 
 [database]
 # Peer authentication over the local socket: no password in this file.
 url = "postgresql://crateward@localhost/crateward?host=/run/postgresql"
-max_connections = 8
 
 [crates_io]
 # The data access policy asks for a user agent that identifies the
@@ -36,11 +33,6 @@ static_url = "https://static.crates.io/"
 rss_updates_url = "https://static.crates.io/rss/updates.xml"
 rss_new_crates_url = "https://static.crates.io/rss/crates.xml"
 db_dump_url = "https://static.crates.io/db-dump.tar.gz"
-# Last resort only. The policy allows at most one request per second.
-api_url = "https://crates.io/api/v1/"
-api_max_requests_per_second = 1.0
-# static.crates.io has no published rate limit; stay polite anyway.
-static_max_concurrent_downloads = 4
 # Request rates towards the CDN and the sparse index. crates.io publishes no
 # limit for either; these are our own courtesy.
 static_requests_per_second = 5.0
@@ -57,46 +49,35 @@ db_dump_refresh_hours = 24
 # from backoff_base_secs up to backoff_cap_secs.
 
 [stages.fetch]
-concurrency = 4
 lease_secs = 300
-heartbeat_secs = 30
 max_attempts = 5
 max_infrastructure_retries = 100
 backoff_base_secs = 10
 backoff_cap_secs = 3600
 
 [stages.static_analysis]
-concurrency = 1
 lease_secs = 300
-heartbeat_secs = 30
 max_attempts = 3
 max_infrastructure_retries = 100
 backoff_base_secs = 10
 backoff_cap_secs = 1800
 
 [stages.sandbox]
-# Must not exceed sandbox.slots.
-concurrency = 3
 lease_secs = 120
-heartbeat_secs = 20
 max_attempts = 3
 max_infrastructure_retries = 50
 backoff_base_secs = 30
 backoff_cap_secs = 3600
 
 [stages.analysis]
-concurrency = 1
 lease_secs = 120
-heartbeat_secs = 20
 max_attempts = 3
 max_infrastructure_retries = 100
 backoff_base_secs = 5
 backoff_cap_secs = 600
 
 [stages.finalize]
-concurrency = 1
 lease_secs = 120
-heartbeat_secs = 20
 max_attempts = 5
 max_infrastructure_retries = 100
 backoff_base_secs = 5
@@ -115,16 +96,10 @@ popular_min_reverse_dependencies = 100
 popular_min_downloads = 1000000
 
 [sandbox]
-# Physical cores with SMT disabled, and the cores kept for host services.
-host_cores = 4
-host_reserved_cores = 1
-# Upper bound for VM memory, scratch disks and the image tmpfs together.
-host_memory_budget_mib = 40960
 slots = 3
 vcpus_per_slot = 1
 memory_mib_per_slot = 4096
 scratch_mib_per_slot = 4096
-images_tmpfs_mib = 14336
 check_timeout_secs = 900
 full_timeout_secs = 2700
 firecracker_bin = "/usr/local/lib/crateward/firecracker"

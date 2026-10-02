@@ -15,8 +15,8 @@ postgresql_version: 17
 slot_id_base: 200000
 slots: 3
 
-# /run/crateward: images_tmpfs_mib + slots * scratch_mib_per_slot + the
-# base snapshot (memory_mib_per_slot), rounded up.
+# /run/crateward: the promoted images (up to 14 GiB) + slots *
+# scratch_mib_per_slot + the base snapshot (memory_mib_per_slot), rounded up.
 run_tmpfs_size: 31g
 
 ssh_port: 22

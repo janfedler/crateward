@@ -37,7 +37,7 @@ pub const DEFAULT_CONFIG_PATH: &str = "/etc/crateward/crateward.toml";
 pub struct Config {
     /// Identity and directories of this installation.
     pub instance: InstanceConfig,
-    /// Logging and metrics.
+    /// Logging.
     pub telemetry: TelemetryConfig,
     /// Postgres connection.
     pub database: DatabaseConfig,
@@ -103,7 +103,7 @@ pub enum LogFormat {
     Pretty,
 }
 
-/// Logging and metrics.
+/// Logging.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TelemetryConfig {
@@ -112,8 +112,6 @@ pub struct TelemetryConfig {
     /// A `tracing` filter directive such as `info,crateward_feed=debug`.
     /// The `RUST_LOG` environment variable overrides it.
     pub log_filter: String,
-    /// Address of the Prometheus metrics endpoint.
-    pub metrics_listen: SocketAddr,
 }
 
 /// Postgres connection.
@@ -122,8 +120,6 @@ pub struct TelemetryConfig {
 pub struct DatabaseConfig {
     /// Connection URL. Secret because it may contain a password.
     pub url: SecretString,
-    /// Connection pool size per process.
-    pub max_connections: u32,
 }
 
 /// Access to crates.io.
@@ -143,12 +139,6 @@ pub struct CratesIoConfig {
     pub rss_new_crates_url: Url,
     /// Daily database dump.
     pub db_dump_url: Url,
-    /// Web API root, used only when nothing else provides the data.
-    pub api_url: Url,
-    /// API rate limit. The data access policy allows at most 1.
-    pub api_max_requests_per_second: f64,
-    /// Parallel downloads from the CDN.
-    pub static_max_concurrent_downloads: u32,
     /// Request rate towards `static.crates.io` (feeds, crate files).
     /// crates.io sets no limit there; this is our own courtesy.
     pub static_requests_per_second: f64,
@@ -162,17 +152,12 @@ pub struct CratesIoConfig {
     pub db_dump_refresh_hours: u64,
 }
 
-/// Concurrency and retry budgets of one stage.
+/// Lease and retry budgets of one stage.
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StageConfig {
-    /// Parallel workers.
-    pub concurrency: u32,
     /// How long a claim is valid without a heartbeat.
     pub lease_secs: u64,
-    /// Heartbeat interval. At most half the lease, so one missed heartbeat
-    /// never expires a healthy lease.
-    pub heartbeat_secs: u64,
     /// Attempts before the job fails.
     pub max_attempts: u32,
     /// Infrastructure retries before the job fails.
@@ -268,12 +253,6 @@ pub struct TriageConfig {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SandboxConfig {
-    /// Physical cores on the host with SMT disabled.
-    pub host_cores: u32,
-    /// Cores kept free for host services.
-    pub host_reserved_cores: u32,
-    /// Memory the whole sandbox may use: VMs, scratch and images.
-    pub host_memory_budget_mib: u64,
     /// Concurrent microVMs.
     pub slots: u32,
     /// vCPUs per microVM.
@@ -282,8 +261,6 @@ pub struct SandboxConfig {
     pub memory_mib_per_slot: u64,
     /// Size cap of the per job scratch disk (tmpfs backed).
     pub scratch_mib_per_slot: u64,
-    /// Size of the tmpfs holding the promoted images.
-    pub images_tmpfs_mib: u64,
     /// Wall clock limit for a `cargo check` run.
     pub check_timeout_secs: u64,
     /// Wall clock limit for an escalated full build and test.
@@ -600,12 +577,6 @@ impl Config {
             "database.url",
             "must be a postgres:// or postgresql:// URL",
         );
-        v.between(
-            self.database.max_connections,
-            1,
-            100,
-            "database.max_connections",
-        );
     }
 
     fn validate_crates_io(&self, v: &mut Issues) {
@@ -622,21 +593,9 @@ impl Config {
             (&c.rss_updates_url, "crates_io.rss_updates_url"),
             (&c.rss_new_crates_url, "crates_io.rss_new_crates_url"),
             (&c.db_dump_url, "crates_io.db_dump_url"),
-            (&c.api_url, "crates_io.api_url"),
         ] {
             v.https(url, key);
         }
-        v.check(
-            c.api_max_requests_per_second > 0.0 && c.api_max_requests_per_second <= 1.0,
-            "crates_io.api_max_requests_per_second",
-            "must be above 0 and at most 1 (crates.io data access policy)",
-        );
-        v.between(
-            c.static_max_concurrent_downloads,
-            1,
-            16,
-            "crates_io.static_max_concurrent_downloads",
-        );
         for (rate, key) in [
             (
                 c.static_requests_per_second,
@@ -669,13 +628,7 @@ impl Config {
         for stage in Stage::ALL {
             let s = self.stages.get(stage);
             let key = |field: &str| format!("stages.{}.{field}", stage.name());
-            v.at_least(s.concurrency, 1, &key("concurrency"));
             v.at_least(s.lease_secs, 10, &key("lease_secs"));
-            v.check(
-                s.heartbeat_secs >= 1 && s.heartbeat_secs.saturating_mul(2) <= s.lease_secs,
-                &key("heartbeat_secs"),
-                "must be at least 1 and at most half of lease_secs",
-            );
             v.between(s.max_attempts, 1, 20, &key("max_attempts"));
             let retries = s.max_infrastructure_retries;
             v.at_most(retries, 1000, &key("max_infrastructure_retries"));
@@ -685,11 +638,6 @@ impl Config {
                 "must be at least 1 and not above backoff_cap_secs",
             );
         }
-        v.check(
-            self.stages.sandbox.concurrency <= self.sandbox.slots,
-            "stages.sandbox.concurrency",
-            "must not exceed sandbox.slots",
-        );
         let hours = self.triage.dynamic_deadline_hours;
         v.at_least(hours, 1, "triage.dynamic_deadline_hours");
     }
@@ -698,29 +646,8 @@ impl Config {
         let s = &self.sandbox;
         v.at_least(s.slots, 1, "sandbox.slots");
         v.at_least(s.vcpus_per_slot, 1, "sandbox.vcpus_per_slot");
-        v.check(
-            s.host_reserved_cores >= 1 && s.host_reserved_cores < s.host_cores,
-            "sandbox.host_reserved_cores",
-            "must be at least 1 and leave at least one core for VMs",
-        );
-        let vm_cores = s.host_cores.saturating_sub(s.host_reserved_cores);
-        v.check(
-            s.slots.saturating_mul(s.vcpus_per_slot) <= vm_cores,
-            "sandbox.slots",
-            format!(
-                "slots times vcpus_per_slot must not exceed host_cores minus host_reserved_cores ({vm_cores})"
-            ),
-        );
         v.at_least(s.memory_mib_per_slot, 1024, "sandbox.memory_mib_per_slot");
         v.at_least(s.scratch_mib_per_slot, 512, "sandbox.scratch_mib_per_slot");
-        let needed = u64::from(s.slots)
-            .saturating_mul(s.memory_mib_per_slot.saturating_add(s.scratch_mib_per_slot))
-            .saturating_add(s.images_tmpfs_mib);
-        v.check(
-            needed <= s.host_memory_budget_mib,
-            "sandbox.host_memory_budget_mib",
-            format!("slots, scratch and images need {needed} MiB, more than the budget"),
-        );
         v.check(
             s.check_timeout_secs >= 60 && s.check_timeout_secs <= s.full_timeout_secs,
             "sandbox.check_timeout_secs",
@@ -756,11 +683,6 @@ impl Config {
             "must be at least 1 and not above sample_jobs",
         );
         v.at_least(w.timeout_secs, 60, "sandbox.warm.timeout_secs");
-        v.check(
-            w.max_image_mib <= self.sandbox.images_tmpfs_mib,
-            "sandbox.warm.max_image_mib",
-            "must fit into images_tmpfs_mib",
-        );
     }
 
     fn validate_operations(&self, v: &mut Issues) {
@@ -895,21 +817,6 @@ mod tests {
     }
 
     #[test]
-    fn api_rate_above_the_policy_is_rejected() {
-        let issues = issues_for(
-            "api_max_requests_per_second = 1.0",
-            "api_max_requests_per_second = 2.0",
-        );
-        assert_eq!(issues[0].key, "crates_io.api_max_requests_per_second");
-    }
-
-    #[test]
-    fn overcommitted_cores_are_rejected() {
-        let issues = issues_for("slots = 3", "slots = 4");
-        assert!(issues.iter().any(|i| i.key == "sandbox.slots"));
-    }
-
-    #[test]
     fn dashboard_off_loopback_is_rejected() {
         for address in ["0.0.0.0:8080", "10.77.0.1:8080", "[::]:8080"] {
             let issues = issues_for(
@@ -1026,13 +933,6 @@ mod tests {
             rule(|c| c.database.url = url.into(), "database.url", message);
         }
         accepted(|c| c.database.url = "postgres://x/y".into());
-        limits(
-            |c, n| c.database.max_connections = n,
-            &[1, 100],
-            &[0, 101],
-            "database.max_connections",
-            "must be between 1 and 100",
-        );
     }
 
     #[test]
@@ -1082,21 +982,6 @@ mod tests {
             "crates_io.db_dump_url",
             HTTPS,
         );
-        rule(|c| c.crates_io.api_url = http(), "crates_io.api_url", HTTPS);
-        limits(
-            |c, n| c.crates_io.api_max_requests_per_second = n,
-            &[0.5, 1.0],
-            &[0.0, 1.5, -1.0],
-            "crates_io.api_max_requests_per_second",
-            "must be above 0 and at most 1 (crates.io data access policy)",
-        );
-        limits(
-            |c, n| c.crates_io.static_max_concurrent_downloads = n,
-            &[1, 16],
-            &[0, 17],
-            "crates_io.static_max_concurrent_downloads",
-            "must be between 1 and 16",
-        );
         let politeness = "must be above 0 and at most 20 (our own politeness bound)";
         limits(
             |c, n| c.crates_io.static_requests_per_second = n,
@@ -1133,35 +1018,11 @@ mod tests {
         for stage in Stage::ALL {
             let key = |field: &str| format!("stages.{}.{field}", stage.name());
             limits(
-                |c, n| stage_mut(c, stage).concurrency = n,
-                &[1, 3],
-                &[0],
-                &key("concurrency"),
-                "must be at least 1",
-            );
-            let lease = |c: &mut Config, n| {
-                let s = stage_mut(c, stage);
-                s.lease_secs = n;
-                s.heartbeat_secs = 1;
-            };
-            limits(
-                lease,
+                |c, n| stage_mut(c, stage).lease_secs = n,
                 &[10, 11],
                 &[9],
                 &key("lease_secs"),
                 "must be at least 10",
-            );
-            let heartbeat = |c: &mut Config, n| {
-                let s = stage_mut(c, stage);
-                s.lease_secs = 100;
-                s.heartbeat_secs = n;
-            };
-            limits(
-                heartbeat,
-                &[1, 50],
-                &[0, 51],
-                &key("heartbeat_secs"),
-                "must be at least 1 and at most half of lease_secs",
             );
             limits(
                 |c, n| stage_mut(c, stage).max_attempts = n,
@@ -1190,11 +1051,6 @@ mod tests {
                 "must be at least 1 and not above backoff_cap_secs",
             );
         }
-        rule(
-            |c| c.stages.sandbox.concurrency = 4,
-            "stages.sandbox.concurrency",
-            "must not exceed sandbox.slots",
-        );
         limits(
             |c, n| c.triage.dynamic_deadline_hours = n,
             &[1, 12],
@@ -1206,19 +1062,13 @@ mod tests {
 
     #[test]
     fn sandbox_resource_rules() {
-        let cores =
-            "slots times vcpus_per_slot must not exceed host_cores minus host_reserved_cores";
-        let reserved = "must be at least 1 and leave at least one core for VMs";
-        // No slots leaves the sandbox stage above the slot count.
-        let expected = [
-            (
-                "stages.sandbox.concurrency",
-                "must not exceed sandbox.slots",
-            ),
-            ("sandbox.slots", "must be at least 1"),
-        ];
-        let issues = issues_after(|c| c.sandbox.slots = 0);
-        assert_eq!(issues, expected.map(|(k, m)| (k.to_owned(), m.to_owned())));
+        limits(
+            |c, n| c.sandbox.slots = n,
+            &[1, 3],
+            &[0],
+            "sandbox.slots",
+            "must be at least 1",
+        );
         limits(
             |c, n| c.sandbox.vcpus_per_slot = n,
             &[1],
@@ -1226,33 +1076,6 @@ mod tests {
             "sandbox.vcpus_per_slot",
             "must be at least 1",
         );
-        limits(
-            |c, n| c.sandbox.host_reserved_cores = n,
-            &[1],
-            &[0],
-            "sandbox.host_reserved_cores",
-            reserved,
-        );
-        let issues = issues_after(|c| c.sandbox.host_reserved_cores = 4);
-        let expected = [
-            (
-                "sandbox.host_reserved_cores".to_owned(),
-                reserved.to_owned(),
-            ),
-            ("sandbox.slots".to_owned(), format!("{cores} (0)")),
-        ];
-        assert_eq!(issues, expected);
-        rule(
-            |c| c.sandbox.vcpus_per_slot = 2,
-            "sandbox.slots",
-            &format!("{cores} (3)"),
-        );
-        rule(
-            |c| c.sandbox.host_cores = 3,
-            "sandbox.slots",
-            &format!("{cores} (2)"),
-        );
-        accepted(|c| c.sandbox.host_cores = 6);
         limits(
             |c, n| c.sandbox.memory_mib_per_slot = n,
             &[1024, 4096],
@@ -1266,13 +1089,6 @@ mod tests {
             &[511],
             "sandbox.scratch_mib_per_slot",
             "must be at least 512",
-        );
-        limits(
-            |c, n| c.sandbox.host_memory_budget_mib = n,
-            &[38_912, 40_960],
-            &[38_911],
-            "sandbox.host_memory_budget_mib",
-            "slots, scratch and images need 38912 MiB, more than the budget",
         );
         limits(
             |c, n| c.sandbox.check_timeout_secs = n,
@@ -1341,13 +1157,6 @@ mod tests {
             &[59],
             "sandbox.warm.timeout_secs",
             "must be at least 60",
-        );
-        limits(
-            |c, n| c.sandbox.warm.as_mut().unwrap().max_image_mib = n,
-            &[14_336],
-            &[14_337],
-            "sandbox.warm.max_image_mib",
-            "must fit into images_tmpfs_mib",
         );
         limits(
             |c, n| c.sandbox.slot_uid_base = n,
@@ -1527,7 +1336,6 @@ mod tests {
         c.instance.run_dir = "run".into();
         c.telemetry.log_filter.clear();
         c.database.url = "mysql://x".into();
-        c.database.max_connections = 0;
         let crates = &mut c.crates_io;
         crates.user_agent = "curl".into();
         crates.index_url = http();
@@ -1535,25 +1343,19 @@ mod tests {
         crates.rss_updates_url = http();
         crates.rss_new_crates_url = http();
         crates.db_dump_url = http();
-        crates.api_url = http();
-        crates.api_max_requests_per_second = 2.0;
-        crates.static_max_concurrent_downloads = 0;
         crates.static_requests_per_second = 0.0;
         crates.index_requests_per_second = 0.0;
         crates.rss_poll_interval_secs = 0;
         crates.db_dump_refresh_hours = 0;
         for stage in Stage::ALL {
             *stage_mut(c, stage) = StageConfig {
-                concurrency: 0,
                 lease_secs: 0,
-                heartbeat_secs: 0,
                 max_attempts: 0,
                 max_infrastructure_retries: 5000,
                 backoff_base_secs: 0,
                 backoff_cap_secs: 0,
             };
         }
-        c.stages.sandbox.concurrency = 100;
         c.triage.dynamic_deadline_hours = 0;
         c.storage.disk_alert_percent = 0;
         c.storage.raw_log_retention_days = 0;
@@ -1589,7 +1391,6 @@ mod tests {
         s.rootfs_image = "f".into();
         s.slots_dir = "g".into();
         s.check_timeout_secs = 0;
-        s.host_reserved_cores = 0;
         s.memory_mib_per_slot = 0;
         s.scratch_mib_per_slot = 0;
         s.slot_uid_base = 0;
@@ -1598,7 +1399,6 @@ mod tests {
         warm.min_jobs = 0;
         warm.max_probes = 0;
         warm.timeout_secs = 0;
-        warm.max_image_mib = u64::MAX;
     }
 
     fn keys(issues: Vec<(String, String)>) -> Vec<String> {
@@ -1613,29 +1413,25 @@ mod tests {
 
     const ORDER_BEFORE_SANDBOX: &str = concat!(
         "instance.name instance.data_dir instance.run_dir telemetry.log_filter ",
-        "database.url database.max_connections ",
+        "database.url ",
         "crates_io.user_agent crates_io.index_url crates_io.static_url ",
         "crates_io.rss_updates_url crates_io.rss_new_crates_url crates_io.db_dump_url ",
-        "crates_io.api_url crates_io.api_max_requests_per_second ",
-        "crates_io.static_max_concurrent_downloads crates_io.static_requests_per_second ",
+        "crates_io.static_requests_per_second ",
         "crates_io.index_requests_per_second crates_io.rss_poll_interval_secs ",
         "crates_io.db_dump_refresh_hours ",
-        "stages.fetch.concurrency stages.fetch.lease_secs stages.fetch.heartbeat_secs ",
+        "stages.fetch.lease_secs ",
         "stages.fetch.max_attempts stages.fetch.max_infrastructure_retries ",
         "stages.fetch.backoff_base_secs ",
-        "stages.static_analysis.concurrency stages.static_analysis.lease_secs ",
-        "stages.static_analysis.heartbeat_secs stages.static_analysis.max_attempts ",
+        "stages.static_analysis.lease_secs stages.static_analysis.max_attempts ",
         "stages.static_analysis.max_infrastructure_retries ",
         "stages.static_analysis.backoff_base_secs ",
-        "stages.sandbox.lease_secs stages.sandbox.heartbeat_secs stages.sandbox.max_attempts ",
+        "stages.sandbox.lease_secs stages.sandbox.max_attempts ",
         "stages.sandbox.max_infrastructure_retries stages.sandbox.backoff_base_secs ",
-        "stages.analysis.concurrency stages.analysis.lease_secs ",
-        "stages.analysis.heartbeat_secs stages.analysis.max_attempts ",
+        "stages.analysis.lease_secs stages.analysis.max_attempts ",
         "stages.analysis.max_infrastructure_retries stages.analysis.backoff_base_secs ",
-        "stages.finalize.concurrency stages.finalize.lease_secs ",
-        "stages.finalize.heartbeat_secs stages.finalize.max_attempts ",
+        "stages.finalize.lease_secs stages.finalize.max_attempts ",
         "stages.finalize.max_infrastructure_retries stages.finalize.backoff_base_secs ",
-        "stages.sandbox.concurrency triage.dynamic_deadline_hours",
+        "triage.dynamic_deadline_hours",
     );
 
     const ORDER_AFTER_SANDBOX: &str = concat!(
@@ -1649,56 +1445,25 @@ mod tests {
         "web.listen",
     );
 
-    const ORDER_SANDBOX_SLOTS: &str = concat!(
-        "sandbox.slots sandbox.vcpus_per_slot sandbox.host_reserved_cores ",
+    const ORDER_SANDBOX: &str = concat!(
+        "sandbox.slots sandbox.vcpus_per_slot ",
         "sandbox.memory_mib_per_slot sandbox.scratch_mib_per_slot ",
         "sandbox.check_timeout_secs sandbox.firecracker_bin sandbox.vmjail_bin ",
         "sandbox.fake_internet_bin sandbox.fake_internet_authority sandbox.kernel_image ",
         "sandbox.rootfs_image sandbox.slots_dir sandbox.warm.min_jobs ",
-        "sandbox.warm.max_probes sandbox.warm.timeout_secs sandbox.warm.max_image_mib ",
-        "sandbox.slot_uid_base sandbox.slot_gid_base",
-    );
-
-    const ORDER_SANDBOX_CORES: &str = concat!(
-        "sandbox.host_reserved_cores sandbox.slots sandbox.memory_mib_per_slot ",
-        "sandbox.scratch_mib_per_slot sandbox.host_memory_budget_mib ",
-        "sandbox.check_timeout_secs sandbox.firecracker_bin sandbox.vmjail_bin ",
-        "sandbox.fake_internet_bin sandbox.fake_internet_authority sandbox.kernel_image ",
-        "sandbox.rootfs_image sandbox.slots_dir sandbox.warm.min_jobs ",
-        "sandbox.warm.max_probes sandbox.warm.timeout_secs sandbox.warm.max_image_mib ",
+        "sandbox.warm.max_probes sandbox.warm.timeout_secs ",
         "sandbox.slot_uid_base sandbox.slot_gid_base",
     );
 
     #[test]
-    fn issues_come_in_rule_order_when_no_slot_is_configured() {
+    fn issues_come_in_rule_order() {
         let issues = issues_after(|c| {
             break_the_common_rules(c);
             break_the_sandbox_paths(c);
             c.sandbox.slots = 0;
             c.sandbox.vcpus_per_slot = 0;
         });
-        let expected = order(&[
-            ORDER_BEFORE_SANDBOX,
-            ORDER_SANDBOX_SLOTS,
-            ORDER_AFTER_SANDBOX,
-        ]);
-        assert_eq!(keys(issues), expected);
-    }
-
-    #[test]
-    fn issues_come_in_rule_order_when_the_slots_exceed_cores_and_memory() {
-        let issues = issues_after(|c| {
-            break_the_common_rules(c);
-            break_the_sandbox_paths(c);
-            c.sandbox.slots = 9;
-            c.sandbox.vcpus_per_slot = 2;
-            c.sandbox.host_memory_budget_mib = 1;
-        });
-        let expected = order(&[
-            ORDER_BEFORE_SANDBOX,
-            ORDER_SANDBOX_CORES,
-            ORDER_AFTER_SANDBOX,
-        ]);
+        let expected = order(&[ORDER_BEFORE_SANDBOX, ORDER_SANDBOX, ORDER_AFTER_SANDBOX]);
         assert_eq!(keys(issues), expected);
     }
 }

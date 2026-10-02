@@ -37,8 +37,6 @@ PostgreSQL clusters are created with data checksums enabled.
 | Scratch tmpfs | 3 × 4 GiB cap |
 | Headroom and page cache | the rest |
 
-`sandbox.host_memory_budget_mib` enforces the sandbox part at startup.
-
 ## Storage budget
 
 Target 100 to 200 GB in steady state. Measured on 2026-09-25 over the first
