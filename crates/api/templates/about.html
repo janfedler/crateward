@@ -12,20 +12,10 @@
 <h1>About Crateward</h1>
 <p><a href="../">Back to the numbers</a></p>
 
-<p>Crateward is a supply chain scanner for crates.io, run by one person on
-one server. It looks at every new crate version for signs of malicious
-behavior, such as a build script that reads credentials or talks to the
-network, and reports what it finds to the people who can act on it.</p>
-
-<h2>What it reads from crates.io</h2>
-<p>Crateward uses only public read access, as the
-<a href="https://crates.io/data-access">crates.io data access policy</a>
-describes: the RSS feeds of new versions, the sparse index, the crate files
-on the static host, and the daily database dump. It does not call the
-crates.io API. It downloads each crate file once and keeps its own copy,
-and it limits its own request rate. Every request carries the user agent
-<code>crateward/0.1 (+https://crateward.com/about; security@janfedler.de)</code>.
-If these requests cause trouble, please write to the address below.</p>
+<p>Crateward is a supply chain scanner for crates.io. It looks at every new
+crate version for signs of malicious behavior, such as a build script that
+reads credentials or talks to the network, and reports what it finds to the
+people who can act on it.</p>
 
 <h2>How a version is analyzed</h2>
 <p>Every version gets a static analysis of its files. A version whose build

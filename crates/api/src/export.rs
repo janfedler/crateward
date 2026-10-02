@@ -481,10 +481,8 @@ mod tests {
         assert!(!index.contains("<script"));
         let about = String::from_utf8(files[1].1.clone()).unwrap();
         assert!(!about.contains("<script"));
-        // The user agent points at this page.
-        assert!(
-            about.contains("crateward/0.1 (+https://crateward.com/about; security@janfedler.de)")
-        );
+        // The user agent points at this page, which names the contact.
+        assert!(about.contains("security@janfedler.de"));
     }
 
     #[test]

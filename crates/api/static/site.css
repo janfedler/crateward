@@ -16,4 +16,11 @@ td { color: var(--fg-primary); font-weight: 500; }
 tr:first-child > th, tr:first-child > td { border-top: 1px solid var(--border-default); }
 .muted { color: var(--fg-muted); font-size: 14px; }
 main > p.muted:last-child { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--border-default); }
+/* One line of small links; each item stays whole when the line wraps. */
+footer { width: min(100% - 2.5rem, 760px - 2.5rem); margin: 0 auto 3rem; padding-top: 1.5rem; display: flex;
+         flex-wrap: wrap; gap: .4rem 1.5rem; font-size: 13px; color: var(--fg-muted);
+         border-top: 1px solid var(--border-default); }
+footer > * { white-space: nowrap; }
+footer a { color: var(--fg-secondary); text-decoration-color: var(--border-subtle); }
+footer a:hover { color: var(--fg-primary); }
 @media (max-width: 640px) { main { padding-top: 2.5rem; } th, td { padding-right: .6rem; } }
