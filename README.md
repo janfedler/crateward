@@ -127,7 +127,7 @@ cargo xtask canary          # a crate that steals a honeytoken must be caught
 * [Testing](docs/TESTING.md), [operations](docs/OPERATIONS.md) and [runbook](docs/RUNBOOK.md)
 * [Security checklist](docs/SECURITY_CHECKLIST.md) and [disclosure workflow](docs/DISCLOSURE.md)
 * [Dependencies](docs/DEPENDENCIES.md), with one line of justification each
-* [Deployment](deploy/README.md) and the [launch write up](docs/WRITEUP.md) (draft)
+* [Deployment](deploy/README.md)
 
 ## Security
 
