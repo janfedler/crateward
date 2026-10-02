@@ -381,16 +381,16 @@ fn end_text(raw: &str) -> String {
 /// `HOST_ADDRESS`). Every name the guest looks up resolves to it.
 const FAKE_INTERNET: &str = "10.0.2.1";
 
-/// An address as a reader should see it: the fake internet by name, since
-/// its address says nothing about where the build wanted to go.
+/// An address as a reader should see it: the fake internet's by its port
+/// alone (`:443`), since its address says nothing about where the build
+/// wanted to go.
 #[must_use]
 pub fn address(text: &str) -> String {
     match text.strip_prefix(FAKE_INTERNET) {
         Some("") => "fake internet".to_owned(),
-        Some(rest) => rest.strip_prefix(':').map_or_else(
-            || text.to_owned(),
-            |port| format!("fake internet, port {port}"),
-        ),
+        Some(rest) => rest
+            .strip_prefix(':')
+            .map_or_else(|| text.to_owned(), |port| format!(":{port}")),
         None => text.to_owned(),
     }
 }
@@ -771,7 +771,7 @@ mod tests {
             view.alerts,
             [
                 "Honeytoken aws_key left the VM through https://evil.example/up",
-                "Honeytoken ssh_key left the VM through fake internet, port 4444",
+                "Honeytoken ssh_key left the VM through :4444",
                 "Process 4 tried to tamper: bpf cmd 5",
                 "Planted file /home/b/.aws/credentials changed or disappeared",
             ]
@@ -780,10 +780,10 @@ mod tests {
             view.connections[0].detail,
             "SNI evil.example; inside TLS: POST /up, host evil.example"
         );
-        assert_eq!(view.connections[0].dst, "fake internet, port 443");
+        assert_eq!(view.connections[0].dst, ":443");
         assert_eq!(view.connections[1].detail, "");
         assert_eq!(view.connections[1].dst, "203.0.113.9:80");
-        assert_eq!(view.sockets[0].3, "fake internet, port 443");
+        assert_eq!(view.sockets[0].3, ":443");
         assert_eq!(view.network_notes, ["2 UDP datagrams other than DNS"]);
         assert_eq!(view.sensitive[0].mode, "read");
         assert_eq!(view.sockets[0].4, "stream");
@@ -813,7 +813,7 @@ mod tests {
 
     #[test]
     fn the_fake_internet_is_named() {
-        assert_eq!(address("10.0.2.1:53"), "fake internet, port 53");
+        assert_eq!(address("10.0.2.1:53"), ":53");
         assert_eq!(address("10.0.2.1"), "fake internet");
         for other in ["10.0.2.10:80", "10.0.2.2:1", "/home/b/x", "tls://a.example"] {
             assert_eq!(address(other), other);
