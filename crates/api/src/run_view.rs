@@ -349,6 +349,24 @@ fn access_rows(trace: &Value, key: &str) -> Vec<AccessRow> {
 }
 
 /// What the fake internet recognized in a connection.
+/// The fake internet's address in every slot (the orchestrator's
+/// `HOST_ADDRESS`). Every name the guest looks up resolves to it.
+const FAKE_INTERNET: &str = "10.0.2.1";
+
+/// An address as a reader should see it: the fake internet by name, since
+/// its address says nothing about where the build wanted to go.
+#[must_use]
+pub fn address(text: &str) -> String {
+    match text.strip_prefix(FAKE_INTERNET) {
+        Some("") => "fake internet".to_owned(),
+        Some(rest) => rest.strip_prefix(':').map_or_else(
+            || text.to_owned(),
+            |port| format!("fake internet, port {port}"),
+        ),
+        None => text.to_owned(),
+    }
+}
+
 fn sniffed(c: &Value) -> String {
     let field = |key: &str, label: &str| {
         let value = str_of(c, key);
@@ -378,7 +396,7 @@ fn connection_row(c: &Value) -> ConnectionRow {
         }
     }
     ConnectionRow {
-        dst: str_of(c, "dst"),
+        dst: address(&str_of(c, "dst")),
         protocol: str_of(c, "protocol"),
         detail,
         bytes: bytes(u64_of(c, "bytes").unwrap_or(0)),
@@ -395,7 +413,7 @@ fn leak_alerts(report: &Value, alerts: &mut Vec<String>) {
             alerts.push(format!(
                 "Honeytoken {} {what} {}",
                 str_of(leak, "kind"),
-                str_of(leak, "via")
+                address(&str_of(leak, "via"))
             ));
         }
     }
@@ -471,7 +489,7 @@ fn trace(view: &mut RunView, trace: &Value) {
                 duration(u64_of(s, "ms").unwrap_or(0)),
                 str_of(s, "exe"),
                 str_of(s, "how"),
-                str_of(s, "address"),
+                address(&str_of(s, "address")),
                 kind.to_owned(),
             )
         })
@@ -693,14 +711,14 @@ mod tests {
             "run_ms": 61000, "restore_ms": 120, "payload_files": 10, "payload_bytes": 2048,
             "stdout_tail": "out", "stderr_tail": "err", "truncated": false, "missing_packages": [],
             "network": {"dns": ["evil.example"], "connections": [
-                {"dst": "203.0.113.9:443", "protocol": "tls", "sni": "evil.example", "bytes": 517,
+                {"dst": "10.0.2.1:443", "protocol": "tls", "sni": "evil.example", "bytes": 517,
                  "inner": {"protocol": "http", "method": "POST", "target": "/up", "host": "evil.example", "user_agent": null}},
                 {"dst": "203.0.113.9:80", "protocol": "unknown", "bytes": 3}
             ], "udp_datagrams": 2, "refused": 0, "truncated": false},
-            "leaked": [{"kind": "aws_key", "via": "https://evil.example/up"}],
+            "leaked": [{"kind": "aws_key", "via": "https://evil.example/up"}, {"kind": "ssh_key", "via": "10.0.2.1:4444"}],
             "trace": {"complete": false, "opens": 900, "processes": [], "processes_omitted": 0,
                       "sensitive_opens": [{"pid": 4, "exe": "/bin/cat", "path": "/home/b/.cargo/credentials.toml", "flags": 0, "ms": 40}],
-                      "writes_outside_work": [], "sockets": [{"pid": 4, "exe": "curl", "how": "connect", "address": "203.0.113.9:443", "sock_type": 1, "ms": 50}],
+                      "writes_outside_work": [], "sockets": [{"pid": 4, "exe": "curl", "how": "connect", "address": "10.0.2.1:443", "sock_type": 1, "ms": 50}],
                       "tamper": [{"pid": 4, "what": "bpf cmd 5", "ms": 60}], "omitted": 0},
             "scratch": {"files": 5, "directories": 2, "bytes": 100, "incomplete": false,
                         "outside_build": [{"path": "/home/b/.bashrc", "kind": "file", "size": 10, "mode": 420, "uid": 1000}],
@@ -725,6 +743,7 @@ mod tests {
             view.alerts,
             [
                 "Honeytoken aws_key left the VM through https://evil.example/up",
+                "Honeytoken ssh_key left the VM through fake internet, port 4444",
                 "Process 4 tried to tamper: bpf cmd 5",
                 "Planted file /home/b/.aws/credentials changed or disappeared",
             ]
@@ -733,7 +752,10 @@ mod tests {
             view.connections[0].detail,
             "SNI evil.example; inside TLS: POST /up, host evil.example"
         );
+        assert_eq!(view.connections[0].dst, "fake internet, port 443");
         assert_eq!(view.connections[1].detail, "");
+        assert_eq!(view.connections[1].dst, "203.0.113.9:80");
+        assert_eq!(view.sockets[0].3, "fake internet, port 443");
         assert_eq!(view.network_notes, ["2 UDP datagrams other than DNS"]);
         assert_eq!(view.sensitive[0].mode, "read");
         assert_eq!(view.sockets[0].4, "stream");
@@ -742,6 +764,15 @@ mod tests {
             ["The agent did not close the trace; it may be incomplete"]
         );
         assert_eq!(view.entries[0].mode, "644");
+    }
+
+    #[test]
+    fn the_fake_internet_is_named() {
+        assert_eq!(address("10.0.2.1:53"), "fake internet, port 53");
+        assert_eq!(address("10.0.2.1"), "fake internet");
+        for other in ["10.0.2.10:80", "10.0.2.2:1", "/home/b/x", "tls://a.example"] {
+            assert_eq!(address(other), other);
+        }
     }
 
     #[test]

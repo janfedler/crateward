@@ -40,6 +40,7 @@
 {% if run.dns.is_empty() && run.connections.is_empty() && run.sockets.is_empty() && run.network_notes.is_empty() %}
 <p class="muted">No network activity.</p>
 {% else %}
+<p class="muted">The VM has no internet. Every name it looks up resolves to 10.0.2.1, the fake internet, which accepts every connection and records what was sent; it is shown as "fake internet" below. The name the build wanted is in the lookups, the HTTP host and the TLS SNI.</p>
 {% if !run.dns.is_empty() %}<p>Looked up {% for d in run.dns %}<code class="chip">{{ d }}</code> {% endfor %}</p>{% endif %}
 {% if !run.connections.is_empty() %}
 <table>

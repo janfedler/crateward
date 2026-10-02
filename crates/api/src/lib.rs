@@ -459,7 +459,11 @@ fn evidence_view(e: Evidence) -> EvidenceView {
         signal: e.signal,
         source: e.source.name().to_owned(),
         package: e.package.unwrap_or_default(),
-        location: e.location.unwrap_or_default(),
+        location: e
+            .location
+            .as_deref()
+            .map(run_view::address)
+            .unwrap_or_default(),
         summary: e.summary,
         code_url: String::new(),
     }
