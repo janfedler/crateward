@@ -11,27 +11,16 @@ scores the risk with reasons that link to file, line and trace evidence.
 
 ## Features
 
-* **Every new version, statically.** Build scripts, proc macros and library
-  code are parsed with `syn` across all `cfg` branches and checked with
-  YARA-X rules and a diff against the previous version, without executing
-  anything on the host.
-* **Build time code, dynamically.** Versions whose build runs their own code
-  are built with `cargo check` in a fresh Firecracker microVM, restored from
-  a clean snapshot in about 65 ms and destroyed afterwards.
-* **Kernel level tracing.** eBPF programs in the guest record processes,
-  file opens, connections, `ptrace`, `bpf` and mounts.
-* **A fake internet.** The VM has no uplink, so DNS, HTTP, HTTPS and raw
-  packets reach a sink that answers and records everything.
-* **Honeytokens.** Each job gets fresh decoy credentials whose appearance
-  on the network, in the trace or on the scratch disk is evidence of theft.
-* **Explainable verdicts.** Every score lists its reasons with links to the
-  evidence and states its coverage, never just "clean".
-* **Runs without a human.** Retries, circuit breakers, hourly canary crates
-  and quarantine on any escape indicator keep it going, with alerts only for
-  what needs the maintainer.
-* **Defense in depth.** A rootless jail, cgroup limits, seccomp, Landlock
-  sandboxed parsers, a host integrity manifest and 13 fuzz targets stand
-  between hostile input and the host, and no secret ever enters the guest.
+* **Static analysis.** Every new version is parsed and scanned, never run on
+  the host.
+* **Dynamic analysis.** Build time code runs in a fresh, offline
+  Firecracker microVM.
+* **Kernel tracing.** eBPF records processes, files and connections.
+* **A fake internet.** Every network attempt is answered and recorded.
+* **Honeytokens.** Decoy credentials reveal theft.
+* **Explainable verdicts.** Every score links to its evidence.
+* **Runs unattended.** Retries, breakers, canaries and quarantine.
+* **Defense in depth.** Jails, seccomp, Landlock and fuzzing.
 
 ## How it works
 
