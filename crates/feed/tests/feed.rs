@@ -2,8 +2,8 @@
 //!
 //! The mock serves the two RSS feeds, sparse index files and `config.json`
 //! over plain HTTP on localhost, answers conditional requests with 304, and
-//! counts requests per path. Needs `CRATEWARD_TEST_DATABASE_URL` (see the
-//! store tests in `crateward_core`).
+//! counts requests per path. The database setup is
+//! `crateward_core::testing`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
@@ -15,7 +15,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use crateward_core::http::{ClientConfig, HttpError, PoliteClient};
 use crateward_core::job::{JobId, Stage};
-use crateward_core::store::Store;
+use crateward_core::testing::TestDb;
 use crateward_feed::poller::{Feed, FeedError, Urls};
 use http_body_util::Full;
 use hyper::{Request, Response, StatusCode};
@@ -121,58 +121,6 @@ fn index_line(name: &str, version: &str, extra: &str) -> String {
     )
 }
 
-async fn test_store(schema: &str) -> Option<Store> {
-    let Ok(config) = std::env::var("CRATEWARD_TEST_DATABASE_URL") else {
-        assert!(
-            std::env::var("CRATEWARD_REQUIRE_DB").is_err(),
-            "database required"
-        );
-        eprintln!("skipping: CRATEWARD_TEST_DATABASE_URL is not set");
-        return None;
-    };
-    let (client, connection) = tokio_postgres::connect(&config, tokio_postgres::NoTls)
-        .await
-        .unwrap();
-    tokio::spawn(connection);
-    client
-        .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE; CREATE SCHEMA {schema}; SET search_path TO {schema}"))
-        .await
-        .unwrap();
-    let mut store = Store::from_client(client);
-    store.migrate().await.unwrap();
-    Some(store)
-}
-
-/// Another connection to the schema of a test.
-async fn connect(schema: &str) -> Store {
-    let (client, connection) = tokio_postgres::connect(
-        &std::env::var("CRATEWARD_TEST_DATABASE_URL").unwrap(),
-        tokio_postgres::NoTls,
-    )
-    .await
-    .unwrap();
-    tokio::spawn(connection);
-    client
-        .batch_execute(&format!("SET search_path TO {schema}"))
-        .await
-        .unwrap();
-    Store::from_client(client)
-}
-
-async fn drop_schema(schema: &str) {
-    let (client, connection) = tokio_postgres::connect(
-        &std::env::var("CRATEWARD_TEST_DATABASE_URL").unwrap(),
-        tokio_postgres::NoTls,
-    )
-    .await
-    .unwrap();
-    tokio::spawn(connection);
-    client
-        .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
-        .await
-        .unwrap();
-}
-
 fn client() -> PoliteClient {
     PoliteClient::new(&ClientConfig {
         user_agent: "crateward-test/0 (+https://example.com)".into(),
@@ -185,10 +133,10 @@ fn client() -> PoliteClient {
 
 #[tokio::test]
 async fn new_versions_become_prioritized_jobs_exactly_once() {
-    let schema = format!("feed_test_{}", std::process::id());
-    let Some(store) = test_store(&schema).await else {
+    let Some(db) = TestDb::new("feed").await else {
         return;
     };
+    let store = db.migrated().await;
     let state: Shared = Arc::default();
     let base = start_mock(Arc::clone(&state)).await;
     {
@@ -276,7 +224,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
 
     // The new crate with a native link comes first. The name keeps its
     // published casing from the index, not the feed's.
-    let check = connect(&schema).await;
+    let check = db.store().await;
     let first_claim = check
         .claim(Stage::Fetch, "t", Duration::from_secs(30))
         .await
@@ -295,21 +243,21 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
         check.count_by_state().await.unwrap().get("Discovered"),
         Some(&3)
     );
-    drop_schema(&schema).await;
+    db.drop().await;
 }
 
 /// A feed against the mock, in a schema of its own.
 struct World {
     state: Shared,
     feed: Feed,
-    schema: String,
+    db: TestDb,
 }
 
 impl World {
     /// The feeds are empty and the retry delay is zero.
     async fn new(test: &str) -> Option<Self> {
-        let schema = format!("feed_{test}_{}", std::process::id());
-        let store = test_store(&schema).await?;
+        let db = TestDb::new(&format!("feed_{test}")).await?;
+        let store = db.migrated().await;
         let state: Shared = Arc::default();
         let base = start_mock(Arc::clone(&state)).await;
         let urls = Urls {
@@ -319,11 +267,7 @@ impl World {
         };
         let mut feed = Feed::new(client(), client(), urls, store);
         feed.index_retry = Duration::ZERO;
-        let world = Self {
-            state,
-            feed,
-            schema,
-        };
+        let world = Self { state, feed, db };
         world.serve("/rss/crates.xml", rss(&[]));
         world.serve("/rss/updates.xml", rss(&[]));
         Some(world)
@@ -340,7 +284,7 @@ impl World {
 
     /// The queued jobs as name and priority, sorted by name.
     async fn jobs(&self) -> Vec<(String, i16)> {
-        let store = connect(&self.schema).await;
+        let store = self.db.store().await;
         let mut jobs = Vec::new();
         while let Some(job) = store
             .claim(Stage::Fetch, "t", Duration::from_secs(30))
@@ -354,7 +298,7 @@ impl World {
     }
 
     async fn finish(self) {
-        drop_schema(&self.schema).await;
+        self.db.drop().await;
     }
 }
 
@@ -393,7 +337,9 @@ async fn priority_adds_new_crates_popularity_and_build_time_signals() {
     let Some(mut world) = World::new("priority").await else {
         return;
     };
-    connect(&world.schema)
+    world
+        .db
+        .store()
         .await
         .upsert_crate_stats(&[
             ("busy".into(), 5000, 100),

@@ -10,6 +10,7 @@ use std::path::Path;
 use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
+use crate::images::download;
 use crate::{TaskError, io, read_toml, run_in};
 
 #[derive(Debug, Deserialize)]
@@ -29,27 +30,9 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let pin: Pin = read_toml(root, repo::FIRECRACKER_PIN)?;
 
     let dir = root.join(build::GUEST_BIN);
-    let archive = dir.join(format!("firecracker-{}.tgz", pin.version));
-    let archive_str = archive.to_string_lossy().into_owned();
-    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
-
-    if !archive.exists() {
-        run_in(
-            &dir,
-            "curl",
-            &["-sSfL", "--proto", "=https", "-o", &archive_str, &pin.url],
-            &[],
-        )?;
-    }
-
-    let digest = crate::images::sha256_file(&archive)?;
-    if digest != pin.sha256 {
-        std::fs::remove_file(&archive).map_err(io(&archive))?;
-        return Err(TaskError::Check(format!(
-            "firecracker archive has SHA-256 {digest}, pinned {}; deleted it",
-            pin.sha256
-        )));
-    }
+    let name = format!("firecracker-{}.tgz", pin.version);
+    let archive = download(&dir, &name, &pin.url, &pin.sha256)?;
+    let archive_str = archive.to_string_lossy();
 
     let release = format!("release-{}-x86_64", pin.version);
     let member = format!("{release}/firecracker-{}-x86_64", pin.version);

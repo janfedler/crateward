@@ -21,8 +21,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crateward_core::paths::{build, guest, host};
 use crateward_core::protocol::{ExitStatus, JobSpec, WallClock, Workspace};
@@ -33,29 +35,15 @@ use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
 use crateward_orchestrator::firecracker::vm::{BootSpec, Vm};
 use tokio::time::Instant;
 
+use common::{kernel, root};
+
 const SLOTS: u32 = 3;
-
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .map(Path::to_path_buf)
-        .unwrap()
-}
-
-fn now() -> WallClock {
-    let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    WallClock {
-        secs: since.as_secs(),
-        nanos: since.subsec_nanos(),
-    }
-}
 
 fn job(script: &str) -> JobInput {
     JobInput {
         spec: JobSpec {
             job_id: 1,
-            wall_clock: now(),
+            wall_clock: WallClock::now(),
             argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
             env: vec![("PATH".into(), "/usr/bin:/bin".into())],
             cwd: "/tmp".into(),
@@ -136,12 +124,7 @@ async fn sequential_jobs_leave_nothing_behind() {
     let _ = std::fs::remove_dir_all(&work);
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
-    let kernel = std::fs::read_dir(root().join(build::GUEST_OUT))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|e| e == "bzImage"))
-        .expect("run `cargo xtask guest-kernel` first");
+    let kernel = kernel();
     let spec = BootSpec {
         kernel,
         rootfs: root().join(build::ROOTFS_IMAGE),

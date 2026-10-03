@@ -21,7 +21,7 @@ pub mod worker;
 
 use std::time::Duration;
 
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::store::{Policies, Store};
@@ -32,18 +32,11 @@ use crate::worker::Analyzer;
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Analyzer;
 
-fn fatal(reason: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: reason.to_string(),
-    }
-}
-
 /// Runs the analysis and finalize stages until SIGTERM or `Ctrl-C`.
 ///
 /// # Errors
 ///
-/// Returns [`ComponentError::Fatal`] if startup or the job store fails.
+/// Returns a [`ComponentError`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {

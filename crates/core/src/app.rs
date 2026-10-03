@@ -27,17 +27,15 @@ use crate::store::{Policies, Store};
 /// Exit code for an invalid configuration (`EX_CONFIG`).
 pub const EXIT_CONFIG: u8 = 78;
 
-/// Why a component stopped.
+/// Why a component stopped: it could not continue, and systemd restarts
+/// it. [`run_component`] logs it with the component's name.
 #[derive(Debug, thiserror::Error)]
-pub enum ComponentError {
-    /// The component could not continue. systemd restarts it.
-    #[error("{component} stopped: {reason}")]
-    Fatal {
-        /// The component.
-        component: Component,
-        /// What went wrong.
-        reason: String,
-    },
+#[error("{0}")]
+pub struct ComponentError(String);
+
+/// A [`ComponentError`] for `reason`, for use with `map_err`.
+pub fn fatal(reason: impl std::fmt::Display) -> ComponentError {
+    ComponentError(reason.to_string())
 }
 
 #[derive(Debug, Parser)]

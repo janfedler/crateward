@@ -6,9 +6,7 @@
 //! cases record the static reports up front, so they need no child. The
 //! cases that fill in missing reports run the sandboxed child and skip on
 //! kernels that refuse the sandbox, unless `CRATEWARD_REQUIRE_SANDBOX` is
-//! set. The database comes from `CRATEWARD_TEST_DATABASE_URL`. Without it the
-//! tests skip, unless `CRATEWARD_REQUIRE_DB=1`, which CI sets so that a
-//! missing database fails instead of passing silently.
+//! set. The database setup is `crateward_core::testing`.
 
 #![allow(
     clippy::unwrap_used,
@@ -18,56 +16,29 @@
     missing_docs
 )]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
 use crateward_core::digest::Sha256Digest;
-use crateward_core::failure::FailureClass;
-use crateward_core::job::{Limits, Stage, StageLimits, Triage};
-use crateward_core::retry::RetryPolicy;
+use crateward_core::failure::{Failure, FailureClass};
+use crateward_core::job::Triage;
 use crateward_core::sandbox;
-use crateward_core::store::{CrateFile, NewJob, Policies, Review, Store, StoredJob};
+use crateward_core::store::{CrateFile, NewJob, Review, Store, StoredJob};
+use crateward_core::testing::{TestDb, policies};
 use crateward_core::verdict::{Coverage, RiskLevel, StaticOnlyReason, Verdict};
 
 use crateward_static_analysis::analyze::{ANALYZER_VERSION, AnalyzeLimits, StaticReport, analyze};
 use crateward_static_analysis::diff::diff;
 use crateward_static_analysis::sandboxed::analyze_in_sandbox;
 use crateward_static_analysis::triage::Decision;
-use crateward_static_analysis::worker::{Analyzer, Failure};
+use crateward_static_analysis::worker::Analyzer;
 use crateward_static_analysis::yara::Rules;
 use serde_json::{Value, json};
 
 const EXE: &str = env!("CARGO_BIN_EXE_crateward_static_analysis");
-
-static LABS: AtomicU32 = AtomicU32::new(0);
-
-async fn connect(config: &str, schema: &str) -> Store {
-    let (client, connection) = tokio_postgres::connect(config, tokio_postgres::NoTls)
-        .await
-        .unwrap();
-    tokio::spawn(connection);
-    let set = format!("SET search_path TO {schema}");
-    client.batch_execute(&set).await.unwrap();
-    Store::from_client(client)
-}
-
-fn policies() -> Policies {
-    let policy = RetryPolicy::new(Duration::from_secs(60), Duration::from_secs(600)).unwrap();
-    Policies {
-        limits: Limits::uniform(StageLimits {
-            max_attempts: 3,
-            max_infrastructure_retries: 2,
-        }),
-        backoff: Stage::ALL
-            .iter()
-            .map(|stage| (stage.name(), policy))
-            .collect::<BTreeMap<_, _>>(),
-    }
-}
 
 /// Whether this host lets the child enter its sandbox.
 fn sandbox_available() -> bool {
@@ -128,8 +99,7 @@ fn reasons(list: &[&str]) -> Vec<String> {
 
 /// A migrated private schema, a blob store and the worker in front of them.
 struct Lab {
-    admin: tokio_postgres::Client,
-    schema: String,
+    db: TestDb,
     dir: PathBuf,
     store: Store,
     blobs: BlobStore,
@@ -138,30 +108,14 @@ struct Lab {
 
 impl Lab {
     async fn start() -> Option<Self> {
-        let Ok(config) = std::env::var("CRATEWARD_TEST_DATABASE_URL") else {
-            assert!(
-                std::env::var("CRATEWARD_REQUIRE_DB").is_err(),
-                "CRATEWARD_REQUIRE_DB is set but CRATEWARD_TEST_DATABASE_URL is not"
-            );
-            eprintln!("skipping: CRATEWARD_TEST_DATABASE_URL is not set");
-            return None;
-        };
-        let n = LABS.fetch_add(1, Ordering::SeqCst);
-        let schema = format!("static_{}_{n}", std::process::id());
-        let (admin, connection) = tokio_postgres::connect(&config, tokio_postgres::NoTls)
-            .await
-            .unwrap();
-        tokio::spawn(connection);
-        let create = format!("CREATE SCHEMA {schema}");
-        admin.batch_execute(&create).await.unwrap();
-        let mut store = connect(&config, &schema).await;
-        store.migrate().await.unwrap();
-        let dir = std::env::temp_dir().join(format!("cw-static-{}-{n}", std::process::id()));
+        let db = TestDb::new("static").await?;
+        let store = db.migrated().await;
+        let dir = std::env::temp_dir().join(format!("cw-{}", db.schema()));
         let _ = std::fs::remove_dir_all(&dir);
         let blobs = BlobStore::open(&dir).unwrap();
         let analyzer = Analyzer::new(
-            connect(&config, &schema).await,
-            connect(&config, &schema).await,
+            db.store().await,
+            db.store().await,
             blobs.clone(),
             PathBuf::from(EXE),
             (50, 1000),
@@ -169,8 +123,7 @@ impl Lab {
             Duration::from_secs(30),
         );
         Some(Self {
-            admin,
-            schema,
+            db,
             dir,
             store,
             blobs,
@@ -179,8 +132,7 @@ impl Lab {
     }
 
     async fn finish(self) {
-        let drop = format!("DROP SCHEMA {} CASCADE", self.schema);
-        self.admin.batch_execute(&drop).await.unwrap();
+        self.db.drop().await;
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 
@@ -292,10 +244,11 @@ impl Lab {
     async fn report_columns(&self, job: &StoredJob) -> (bool, Option<String>) {
         let query = format!(
             "SELECT build_time_code, max_severity FROM {}.static_reports WHERE sha256 = $1",
-            self.schema
+            self.db.schema()
         );
         let row = self
-            .admin
+            .db
+            .admin()
             .query_one(&query, &[&job.cksum.as_bytes().as_slice()])
             .await
             .unwrap();
@@ -304,8 +257,12 @@ impl Lab {
 
     /// Changes a stored version, as an older or damaged database could hold it.
     async fn set_version(&self, job: &StoredJob, version: &str) {
-        let update = format!("UPDATE {}.jobs SET version = $1 WHERE id = $2", self.schema);
-        self.admin
+        let update = format!(
+            "UPDATE {}.jobs SET version = $1 WHERE id = $2",
+            self.db.schema()
+        );
+        self.db
+            .admin()
             .execute(&update, &[&version, &job.id.0])
             .await
             .unwrap();

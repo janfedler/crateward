@@ -12,6 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::escalation::HumanEscalation;
+
 /// How a stage attempt failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -75,6 +77,76 @@ impl FailureClass {
             Self::Infrastructure => AutomatedResponse::RetryAndReportToCircuitBreaker,
             Self::Permanent => AutomatedResponse::FailJob,
             Self::SuspectedCompromise => AutomatedResponse::EnterQuarantine,
+        }
+    }
+}
+
+/// Why a stage attempt failed. Its class decides what happens next.
+#[derive(Debug, thiserror::Error)]
+#[error("{}: {message}", class.name())]
+pub struct Failure {
+    /// The class, for the state machine.
+    pub class: FailureClass,
+    /// What happened.
+    pub message: String,
+    /// An alert to raise, beyond what the class implies.
+    pub escalation: Option<HumanEscalation>,
+}
+
+impl Failure {
+    /// A failure of `class`.
+    pub fn new(class: FailureClass, message: impl std::fmt::Display) -> Self {
+        Self {
+            class,
+            message: message.to_string(),
+            escalation: None,
+        }
+    }
+
+    /// A [`FailureClass::Transient`] failure.
+    pub fn transient(message: impl std::fmt::Display) -> Self {
+        Self::new(FailureClass::Transient, message)
+    }
+
+    /// A [`FailureClass::Infrastructure`] failure.
+    pub fn infrastructure(message: impl std::fmt::Display) -> Self {
+        Self::new(FailureClass::Infrastructure, message)
+    }
+
+    /// A [`FailureClass::Permanent`] failure.
+    pub fn permanent(message: impl std::fmt::Display) -> Self {
+        Self::new(FailureClass::Permanent, message)
+    }
+
+    /// A [`FailureClass::SuspectedCompromise`] failure.
+    pub fn compromise(message: impl std::fmt::Display) -> Self {
+        Self::new(FailureClass::SuspectedCompromise, message)
+    }
+
+    /// The same failure, with an alert to raise.
+    #[must_use]
+    pub const fn escalate(mut self, escalation: HumanEscalation) -> Self {
+        self.escalation = Some(escalation);
+        self
+    }
+}
+
+/// The job store being unavailable is never the job's fault.
+#[cfg(feature = "store")]
+impl From<crate::store::StoreError> for Failure {
+    fn from(error: crate::store::StoreError) -> Self {
+        Self::infrastructure(error)
+    }
+}
+
+/// A request that may succeed later is transient, any other is permanent.
+#[cfg(feature = "http")]
+impl From<crate::http::HttpError> for Failure {
+    fn from(error: crate::http::HttpError) -> Self {
+        if error.is_transient() {
+            Self::transient(error)
+        } else {
+            Self::permanent(error)
         }
     }
 }

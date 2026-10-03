@@ -11,12 +11,11 @@
 //! builds of the same inputs produce the same image.
 
 use std::path::Path;
-use std::process::Command;
 
 use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
-use crate::{TaskError, io, read_toml, run_in};
+use crate::{TaskError, copy, io, output, read, read_toml, run_in};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,33 +98,13 @@ fn unmet(requirements: &[Requirement], config: &str) -> Vec<String> {
         .collect()
 }
 
-fn read(path: &Path) -> Result<String, TaskError> {
-    std::fs::read_to_string(path).map_err(io(path))
-}
-
-fn output(program: &str, args: &[&str], dir: &Path) -> Result<String, TaskError> {
-    let out = Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .map_err(|e| TaskError::Command(format!("cannot start {program}: {e}")))?;
-    if !out.status.success() {
-        return Err(TaskError::Command(format!(
-            "{program} {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-}
-
 /// Fetches exactly the pinned commit into `src`, reusing an existing clone.
 fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
     if !src.join(".git").exists() {
         std::fs::create_dir_all(src).map_err(|e| TaskError::Io(src.to_path_buf(), e))?;
         run_in(src, "git", &["init", "--quiet"], &[])?;
     }
-    let head = output("git", &["rev-parse", "HEAD"], src).unwrap_or_default();
+    let head = output(src, "git", &["rev-parse", "HEAD"]).unwrap_or_default();
     if head != source.commit {
         eprintln!(
             "xtask: fetching {} at {} ({})",
@@ -144,14 +123,14 @@ fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
             &[],
         )?;
     }
-    let head = output("git", &["rev-parse", "HEAD"], src)?;
+    let head = output(src, "git", &["rev-parse", "HEAD"])?;
     if head != source.commit {
         return Err(TaskError::Check(format!(
             "kernel source is at {head}, expected {}",
             source.commit
         )));
     }
-    let version = output("make", &["-s", "kernelversion"], src)?;
+    let version = output(src, "make", &["-s", "kernelversion"])?;
     if version != source.version {
         return Err(TaskError::Check(format!(
             "kernel source reports version {version}, kernel.toml expects {}",
@@ -251,25 +230,21 @@ fn compile(build: &Build, src: &Path, dir: &Path) -> Result<(), TaskError> {
 fn publish(build: &Path, out_dir: &Path, version: &str) -> Result<(), TaskError> {
     let name = format!("kernel-{version}");
     let image = out_dir.join(format!("{name}.bzImage"));
-    copy(&build.join("arch/x86/boot/bzImage"), &image)?;
+    copy(&build.join("arch/x86/boot/bzImage"), &image, 0o644)?;
     copy(
         &build.join(".config"),
         &out_dir.join(format!("{name}.config")),
+        0o644,
     )?;
     let digest = crate::images::blake3_file(&image)?;
     eprintln!("xtask: wrote {} (blake3 {digest})", image.display());
     Ok(())
 }
 
-fn copy(from: &Path, to: &Path) -> Result<(), TaskError> {
-    std::fs::copy(from, to)
-        .map(|_| ())
-        .map_err(|e| TaskError::Io(from.to_path_buf(), e))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::scratch;
 
     #[test]
     fn parses_set_and_unset_requirements() {
@@ -296,13 +271,6 @@ mod tests {
                 "CONFIG_D is not set, wanted y".to_owned(),
             ]
         );
-    }
-
-    fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("cw-kernel-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
     }
 
     #[test]
@@ -358,10 +326,11 @@ mod tests {
         let dir = scratch("no-image");
         let out = dir.join("out");
         std::fs::create_dir_all(&out).unwrap();
-        let Err(TaskError::Io(path, _)) = publish(&dir.join("build"), &out, "1") else {
-            panic!("the missing image was not reported");
-        };
-        assert_eq!(path, dir.join("build/arch/x86/boot/bzImage"));
+        let error = publish(&dir.join("build"), &out, "1")
+            .unwrap_err()
+            .to_string();
+        let image = dir.join("build/arch/x86/boot/bzImage");
+        assert_eq!(error, format!("{} is missing", image.display()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use crateward_core::cratesio::download_url;
 use crateward_core::digest::Sha256Digest;
-use crateward_core::failure::FailureClass;
+use crateward_core::failure::Failure;
 use crateward_core::http::{HttpError, PoliteClient};
 use crateward_core::job::{JobEvent, Stage};
 use crateward_core::name::CrateName;
@@ -20,60 +20,14 @@ use crate::resolve::{LockedPackage, Resolution, locked_packages, resolve};
 use crate::sandboxed::{MAX_CRATE_BYTES, validate_in_sandbox};
 use crateward_core::blobs::{Blob, BlobStore};
 
-/// How a fetch failed. The class decides the automated response.
-#[derive(Debug, thiserror::Error)]
-#[error("{}: {message}", class.name())]
-pub struct FetchFailure {
-    /// Failure class for the state machine.
-    pub class: FailureClass,
-    /// What happened.
-    pub message: String,
-}
-
-impl FetchFailure {
-    /// A download whose digest differs from the index. The body arrived
-    /// complete, so crates.io, its CDN or the path to it served the wrong
-    /// bytes: an infrastructure failure. It does not use up the job's
-    /// attempts and counts toward the fetch circuit breaker, so a tampered
-    /// or broken mirror stops the stage and raises an alert instead of
-    /// failing job after job (THREAT_MODEL, downloads).
-    fn checksum_mismatch(name: &CrateName, version: &semver::Version) -> Self {
-        Self::infrastructure(format!("checksum mismatch for {name} {version}"))
-    }
-
-    fn infrastructure(message: impl std::fmt::Display) -> Self {
-        Self {
-            class: FailureClass::Infrastructure,
-            message: message.to_string(),
-        }
-    }
-
-    fn permanent(message: impl std::fmt::Display) -> Self {
-        Self {
-            class: FailureClass::Permanent,
-            message: message.to_string(),
-        }
-    }
-}
-
-impl From<HttpError> for FetchFailure {
-    fn from(error: HttpError) -> Self {
-        let class = if error.is_transient() {
-            FailureClass::Transient
-        } else {
-            FailureClass::Permanent
-        };
-        Self {
-            class,
-            message: error.to_string(),
-        }
-    }
-}
-
-impl From<StoreError> for FetchFailure {
-    fn from(error: StoreError) -> Self {
-        Self::infrastructure(error)
-    }
+/// A download whose digest differs from the index. The body arrived
+/// complete, so crates.io, its CDN or the path to it served the wrong bytes:
+/// an infrastructure failure. It does not use up the job's attempts and
+/// counts toward the fetch circuit breaker, so a tampered or broken mirror
+/// stops the stage and raises an alert instead of failing job after job
+/// (THREAT_MODEL, downloads).
+fn checksum_mismatch(name: &CrateName, version: &semver::Version) -> Failure {
+    Failure::infrastructure(format!("checksum mismatch for {name} {version}"))
 }
 
 /// What fetching one job produced.
@@ -200,9 +154,9 @@ impl Fetcher {
     /// # Errors
     ///
     /// Returns the failure class for the state machine.
-    pub async fn fetch(&self, job: &StoredJob) -> Result<FetchResult, FetchFailure> {
-        let name = CrateName::parse(&job.name).map_err(FetchFailure::permanent)?;
-        let version = semver::Version::parse(&job.version).map_err(FetchFailure::permanent)?;
+    pub async fn fetch(&self, job: &StoredJob) -> Result<FetchResult, Failure> {
+        let name = CrateName::parse(&job.name).map_err(Failure::permanent)?;
+        let version = semver::Version::parse(&job.version).map_err(Failure::permanent)?;
         let originals = self.setup.originals.as_deref();
         if self
             .ensure_crate(&name, &version, &job.cksum, originals)
@@ -222,7 +176,7 @@ impl Fetcher {
             &version,
         )
         .await
-        .map_err(FetchFailure::infrastructure)?;
+        .map_err(Failure::infrastructure)?;
         let (lockfile, error, packages) = match &resolution {
             Resolution::Locked(lock) => match locked_packages(lock) {
                 Ok(packages) => (Some(lock.as_str()), None, packages),
@@ -255,7 +209,7 @@ impl Fetcher {
         name: &CrateName,
         version: &semver::Version,
         packages: &[LockedPackage],
-    ) -> Result<Option<String>, FetchFailure> {
+    ) -> Result<Option<String>, Failure> {
         let mut problem = None;
         for package in packages {
             if package.name == name.as_str() && package.version == version.to_string() {
@@ -294,7 +248,7 @@ impl Fetcher {
         version: &semver::Version,
         sha256: &Sha256Digest,
         originals: Option<&Path>,
-    ) -> Result<Option<CrateFile>, FetchFailure> {
+    ) -> Result<Option<CrateFile>, Failure> {
         if let Some(file) = self.store.crate_file(sha256).await? {
             return Ok(Some(file));
         }
@@ -332,7 +286,7 @@ impl Fetcher {
         name: &CrateName,
         version: &semver::Version,
         sha256: &Sha256Digest,
-    ) -> Result<Option<Vec<u8>>, FetchFailure> {
+    ) -> Result<Option<Vec<u8>>, Failure> {
         let url = download_url(&self.setup.dl, name, version);
         let Some(mut response) = self.downloads.stream(&url).await? else {
             return Ok(None);
@@ -341,7 +295,7 @@ impl Fetcher {
         let mut hasher = sha2::Sha256::new();
         while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
             if u64::try_from(bytes.len() + chunk.len()).unwrap_or(u64::MAX) > MAX_CRATE_BYTES {
-                return Err(FetchFailure::permanent(format!(
+                return Err(Failure::permanent(format!(
                     "{name} {version} exceeds {MAX_CRATE_BYTES} bytes"
                 )));
             }
@@ -351,7 +305,7 @@ impl Fetcher {
         let digest: [u8; 32] = hasher.finalize().into();
         if &Sha256Digest::from_bytes(digest) != sha256 {
             tracing::warn!(%name, %version, expected = %sha256, "checksum mismatch");
-            return Err(FetchFailure::checksum_mismatch(name, version));
+            return Err(checksum_mismatch(name, version));
         }
         Ok(Some(bytes))
     }
@@ -363,7 +317,7 @@ impl Fetcher {
         name: &CrateName,
         version: &semver::Version,
         bytes: Arc<Vec<u8>>,
-    ) -> Result<(ArchiveReport, Option<Blob>), FetchFailure> {
+    ) -> Result<(ArchiveReport, Option<Blob>), Failure> {
         let exe = self.setup.exe.clone();
         let blobs = self.setup.blobs.clone();
         let (name, version) = (name.to_string(), version.to_string());
@@ -378,19 +332,20 @@ impl Fetcher {
             Ok::<_, std::io::Error>((report, blob))
         })
         .await
-        .map_err(FetchFailure::infrastructure)?
-        .map_err(FetchFailure::infrastructure)
+        .map_err(Failure::infrastructure)?
+        .map_err(Failure::infrastructure)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crateward_core::failure::FailureClass;
 
     #[test]
     fn checksum_mismatches_feed_the_circuit_breaker() {
         let name: CrateName = "serde".parse().unwrap();
-        let failure = FetchFailure::checksum_mismatch(&name, &semver::Version::new(1, 0, 0));
+        let failure = checksum_mismatch(&name, &semver::Version::new(1, 0, 0));
         // Only infrastructure failures are counted by the breaker
         // (`Store::stage_counts`).
         assert_eq!(failure.class, FailureClass::Infrastructure);

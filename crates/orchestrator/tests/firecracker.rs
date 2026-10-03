@@ -15,33 +15,24 @@
 // Test helpers outside `#[test]` functions are still test code.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+mod common;
+
+use std::path::PathBuf;
+use std::time::Duration;
 
 use crateward_core::paths::{build, guest, host};
 use crateward_core::protocol::{ExitStatus, JobSpec, WallClock};
 use crateward_orchestrator::firecracker::vm::{BootSpec, Isolation, JailConfig, Launch, Vm};
 use tokio::time::Instant;
 
+use common::{kernel, root};
+
 /// Subordinate IDs used by the jail tests. Inside the test user's range
 /// (`/etc/subuid`), away from its start where image builds map root.
 const TEST_SUBID_BASE: u32 = 160_000;
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .map(Path::to_path_buf)
-        .unwrap()
-}
-
 fn boot_spec() -> BootSpec {
-    let kernel = std::fs::read_dir(root().join(build::GUEST_OUT))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|e| e == "bzImage"))
-        .expect("run `cargo xtask guest-kernel` first");
+    let kernel = kernel();
     BootSpec {
         kernel,
         rootfs: root().join(build::ROOTFS_IMAGE),
@@ -84,18 +75,10 @@ fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
     }
 }
 
-fn now() -> WallClock {
-    let since = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    WallClock {
-        secs: since.as_secs(),
-        nanos: since.subsec_nanos(),
-    }
-}
-
 fn job(argv: &[&str]) -> JobSpec {
     JobSpec {
         job_id: 1,
-        wall_clock: now(),
+        wall_clock: WallClock::now(),
         argv: argv.iter().map(ToString::to_string).collect(),
         env: vec![("PATH".into(), "/usr/bin:/bin".into())],
         cwd: "/tmp".into(),
@@ -233,7 +216,7 @@ async fn snapshot_and_restore_twice(jailed: bool) {
             .parse()
             .unwrap();
         assert!(
-            now().secs.abs_diff(guest) <= 5,
+            WallClock::now().secs.abs_diff(guest) <= 5,
             "guest clock {guest} is off"
         );
         drop(agent);

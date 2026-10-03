@@ -1,15 +1,11 @@
 //! The `crateward` tool, run as the maintainer runs it: a process with a
 //! configuration file, arguments in, text and an exit code out.
 //!
-//! The commands that use the job store need `CRATEWARD_TEST_DATABASE_URL`
-//! (for example `host=/var/run/postgresql dbname=crateward_test`). Each test
-//! works in its own schema, dropped at the end. Without the variable those
-//! tests skip, unless `CRATEWARD_REQUIRE_DB=1`, which CI sets so that a
-//! missing database fails instead of passing silently.
+//! The commands that use the job store get their database from
+//! `crateward_core::testing`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -17,9 +13,9 @@ use std::time::Duration;
 
 use crateward_core::breaker::BreakerState;
 use crateward_core::escalation::HumanEscalation;
-use crateward_core::job::{JobEvent, JobId, JobState, Limits, Stage, StageLimits, mermaid_diagram};
-use crateward_core::retry::RetryPolicy;
-use crateward_core::store::{CrateFile, NewJob, PauseReason, Policies, Review, Store};
+use crateward_core::job::{JobEvent, JobId, JobState, Stage, mermaid_diagram};
+use crateward_core::store::{CrateFile, NewJob, PauseReason, Review, Store};
+use crateward_core::testing::{TestDb, policies};
 use crateward_core::verdict::{Coverage, RiskLevel, Verdict};
 use serde_json::{Value, json};
 
@@ -361,59 +357,30 @@ fn recording_into_a_missing_directory_fails() {
 
 // The commands that use the job store.
 
-static SCHEMAS: AtomicU32 = AtomicU32::new(0);
-
-async fn connect(config: &str) -> tokio_postgres::Client {
-    let (client, connection) = tokio_postgres::connect(config, tokio_postgres::NoTls)
-        .await
-        .unwrap();
-    tokio::spawn(connection);
-    client
-}
-
 /// A migrated private schema. `store` seeds it. `url` is what the tool
 /// connects with.
 struct Db {
-    admin: tokio_postgres::Client,
-    schema: String,
+    db: TestDb,
     url: String,
     store: Store,
 }
 
 impl Db {
     async fn new() -> Option<Self> {
-        let Ok(config) = std::env::var("CRATEWARD_TEST_DATABASE_URL") else {
-            assert!(
-                std::env::var("CRATEWARD_REQUIRE_DB").is_err(),
-                "CRATEWARD_REQUIRE_DB is set but CRATEWARD_TEST_DATABASE_URL is not"
-            );
-            eprintln!("skipping: CRATEWARD_TEST_DATABASE_URL is not set");
-            return None;
-        };
-        let n = SCHEMAS.fetch_add(1, Ordering::SeqCst);
-        let schema = format!("cli_{}_{n}", std::process::id());
-        let admin = connect(&config).await;
-        admin
-            .batch_execute(&format!("CREATE SCHEMA {schema}"))
-            .await
-            .unwrap();
-        let client = connect(&config).await;
-        client
-            .batch_execute(&format!("SET search_path TO {schema}"))
-            .await
-            .unwrap();
-        let mut store = Store::from_client(client);
-        store.migrate().await.unwrap();
+        let db = TestDb::new("cli").await?;
+        let store = db.migrated().await;
         // The configuration wants a URL: each `key=value` becomes a
         // parameter, and the session option selects the schema.
-        let pairs: String = config.split_whitespace().map(|p| format!("{p}&")).collect();
-        let url = format!("postgresql:///?{pairs}options=-c%20search_path%3D{schema}");
-        Some(Self {
-            admin,
-            schema,
-            url,
-            store,
-        })
+        let pairs: String = db
+            .config()
+            .split_whitespace()
+            .map(|p| format!("{p}&"))
+            .collect();
+        let url = format!(
+            "postgresql:///?{pairs}options=-c%20search_path%3D{}",
+            db.schema()
+        );
+        Some(Self { db, url, store })
     }
 
     async fn job(&self, name: &str, version: &str, index_entry: Value) -> JobId {
@@ -435,24 +402,7 @@ impl Db {
     }
 
     async fn drop(self) {
-        self.admin
-            .batch_execute(&format!("DROP SCHEMA {} CASCADE", self.schema))
-            .await
-            .unwrap();
-    }
-}
-
-fn policies() -> Policies {
-    let policy = RetryPolicy::new(Duration::from_secs(60), Duration::from_secs(600)).unwrap();
-    Policies {
-        limits: Limits::uniform(StageLimits {
-            max_attempts: 3,
-            max_infrastructure_retries: 2,
-        }),
-        backoff: Stage::ALL
-            .iter()
-            .map(|stage| (stage.name(), policy))
-            .collect::<BTreeMap<_, _>>(),
+        self.db.drop().await;
     }
 }
 

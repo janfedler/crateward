@@ -1,25 +1,19 @@
 //! The job page, as a browser gets it: the real router on a loopback port,
 //! in front of a private schema that holds a seeded job.
 //!
-//! Needs `CRATEWARD_TEST_DATABASE_URL` (for example
-//! `host=/var/run/postgresql dbname=crateward_test`). Each test works in its
-//! own schema, dropped at the end. Without the variable the tests skip,
-//! unless `CRATEWARD_REQUIRE_DB=1`, which CI sets so that a missing database
-//! fails instead of passing silently.
+//! The database setup is `crateward_core::testing`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use std::collections::BTreeMap;
 use std::future::IntoFuture;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use crateward_api::{AppState, router};
 use crateward_core::app::Stop;
-use crateward_core::job::{JobEvent, JobId, Limits, Stage, StageLimits, Triage};
-use crateward_core::retry::RetryPolicy;
-use crateward_core::store::{CrateFile, DisclosureKind, NewJob, Policies, Review, Store};
+use crateward_core::job::{JobEvent, JobId, Stage, Triage};
+use crateward_core::store::{CrateFile, DisclosureKind, NewJob, Review, Store};
+use crateward_core::testing::{TestDb, policies};
 use crateward_core::verdict::{
     Coverage, Evidence, EvidenceSource, RiskLevel, StaticOnlyReason, Verdict,
 };
@@ -29,60 +23,26 @@ use tokio::net::{TcpListener, TcpStream};
 
 const CKSUM: &str = "abababababababababababababababababababababababababababababababab";
 
-static SCHEMAS: AtomicU32 = AtomicU32::new(0);
-
-async fn connect(config: &str, schema: &str) -> Store {
-    let (client, connection) = tokio_postgres::connect(config, tokio_postgres::NoTls)
-        .await
-        .unwrap();
-    tokio::spawn(connection);
-    let set = format!("SET search_path TO {schema}");
-    client.batch_execute(&set).await.unwrap();
-    Store::from_client(client)
-}
-
 /// A migrated private schema with the dashboard in front of it.
 struct Dashboard {
-    admin: tokio_postgres::Client,
-    schema: String,
+    db: TestDb,
     store: Store,
     port: u16,
 }
 
 impl Dashboard {
     async fn start() -> Option<Self> {
-        let Ok(config) = std::env::var("CRATEWARD_TEST_DATABASE_URL") else {
-            assert!(
-                std::env::var("CRATEWARD_REQUIRE_DB").is_err(),
-                "CRATEWARD_REQUIRE_DB is set but CRATEWARD_TEST_DATABASE_URL is not"
-            );
-            eprintln!("skipping: CRATEWARD_TEST_DATABASE_URL is not set");
-            return None;
-        };
-        let n = SCHEMAS.fetch_add(1, Ordering::SeqCst);
-        let schema = format!("api_{}_{n}", std::process::id());
-        let (admin, connection) = tokio_postgres::connect(&config, tokio_postgres::NoTls)
-            .await
-            .unwrap();
-        tokio::spawn(connection);
-        let create = format!("CREATE SCHEMA {schema}");
-        admin.batch_execute(&create).await.unwrap();
-        let mut store = connect(&config, &schema).await;
-        store.migrate().await.unwrap();
+        let db = TestDb::new("api").await?;
+        let store = db.migrated().await;
         let state = AppState {
-            reader: connect(&config, &schema).await,
-            writer: connect(&config, &schema).await,
+            reader: db.store().await,
+            writer: db.store().await,
             stop: Stop::install().unwrap(),
         };
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(axum::serve(listener, router(Arc::new(state), port)).into_future());
-        Some(Self {
-            admin,
-            schema,
-            store,
-            port,
-        })
+        Some(Self { db, store, port })
     }
 
     /// The status and body of a `GET`.
@@ -139,31 +99,17 @@ impl Dashboard {
         let insert = format!(
             "INSERT INTO {}.job_events (job_id, at, from_state, to_state, event, effect, worker)
              VALUES ($1, {at}, 'Scored', 'Finalized', $2::text::jsonb, '{{}}'::jsonb, 'w-raw')",
-            self.schema
+            self.db.schema()
         );
-        self.admin
+        self.db
+            .admin()
             .execute(&insert, &[&job.0, &event])
             .await
             .unwrap();
     }
 
     async fn drop(self) {
-        let drop = format!("DROP SCHEMA {} CASCADE", self.schema);
-        self.admin.batch_execute(&drop).await.unwrap();
-    }
-}
-
-fn policies() -> Policies {
-    let policy = RetryPolicy::new(Duration::from_secs(60), Duration::from_secs(600)).unwrap();
-    Policies {
-        limits: Limits::uniform(StageLimits {
-            max_attempts: 3,
-            max_infrastructure_retries: 2,
-        }),
-        backoff: Stage::ALL
-            .iter()
-            .map(|stage| (stage.name(), policy))
-            .collect::<BTreeMap<_, _>>(),
+        self.db.drop().await;
     }
 }
 

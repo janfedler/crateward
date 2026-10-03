@@ -24,6 +24,7 @@ thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+crateward_core = { workspace = true, features = ["testing"] }
 tokio-postgres.workspace = true
 
 [lints]

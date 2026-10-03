@@ -41,7 +41,7 @@ use std::io::{self, Read};
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use crateward_core::app::ComponentError;
+use crateward_core::app::{ComponentError, fatal};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::sandbox::{self, FsAccess, Limits};
@@ -58,12 +58,11 @@ pub const SLOT: &str = "slot";
 ///
 /// # Errors
 ///
-/// Always returns [`ComponentError::Fatal`] explaining that.
+/// Always returns a [`ComponentError`] explaining that.
 pub fn run(_config: &Config) -> Result<(), ComponentError> {
-    Err(ComponentError::Fatal {
-        component: COMPONENT,
-        reason: "the fake internet runs per slot and is started by the orchestrator".into(),
-    })
+    Err(fatal(
+        "the fake internet runs per slot and is started by the orchestrator",
+    ))
 }
 
 /// Runs the per slot server if `args` names it (`slot <uid>`): opens the

@@ -16,7 +16,9 @@
     missing_docs
 )]
 
-use std::path::{Path, PathBuf};
+mod common;
+
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,13 +31,7 @@ use crateward_orchestrator::firecracker::vm::{BootSpec, JobDrives};
 use crateward_orchestrator::honeytokens::Honeytokens;
 use crateward_orchestrator::worker::{JobFiles, RunPlan, Sandbox, WorkerSetup};
 
-fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .map(Path::to_path_buf)
-        .unwrap()
-}
+use common::{kernel, root};
 
 #[tokio::test]
 #[ignore = "run through `cargo xtask canary`"]
@@ -46,12 +42,7 @@ async fn canaries_give_their_known_results() {
     let _ = std::fs::remove_dir_all(&work);
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
-    let kernel = std::fs::read_dir(root().join(build::GUEST_OUT))
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|e| e == "bzImage"))
-        .expect("run `cargo xtask guest-kernel` first");
+    let kernel = kernel();
     let fake_internet =
         root().join("target/x86_64-unknown-linux-musl/release/crateward_fake_internet");
     assert!(

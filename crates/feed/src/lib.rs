@@ -26,7 +26,7 @@ pub mod poller;
 
 use std::time::Duration;
 
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::http::{ClientConfig, PoliteClient};
@@ -37,13 +37,6 @@ use crate::poller::{Feed, FeedError, Urls};
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Feed;
-
-fn fatal(reason: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: reason.to_string(),
-    }
-}
 
 async fn start(config: &Config) -> Result<Feed, FeedError> {
     let c = &config.crates_io;
@@ -112,7 +105,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
 ///
 /// # Errors
 ///
-/// Returns [`ComponentError::Fatal`] if the feed cannot start or hits a
+/// Returns a [`ComponentError`] if the feed cannot start or hits a
 /// permanent error, and systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;

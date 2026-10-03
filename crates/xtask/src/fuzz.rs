@@ -6,11 +6,10 @@
 //! target runs for at least 150 seconds from the seed corpus (TESTING.md).
 
 use std::path::Path;
-use std::process::Command;
 
 use crateward_core::paths::repo;
 
-use crate::{TaskError, io};
+use crate::{TaskError, io, nested_cargo, run_command};
 
 /// Runs each target for `seconds`.
 ///
@@ -43,21 +42,8 @@ pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
             "-rss_limit_mb=2048",
             "-max_len=1048576",
         ];
-        eprintln!("xtask: running cargo {} in fuzz", args.join(" "));
-        // The outer cargo exports its toolchain. Removing it lets the
-        // package's own `rust-toolchain.toml` choose.
-        let status = Command::new("cargo")
-            .args(args)
-            .current_dir(root.join(repo::FUZZ))
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .env_remove("RUSTC")
-            .env_remove("RUSTDOC")
-            .env_remove("CARGO")
-            .env_remove("RUSTFLAGS")
-            .env_remove("CARGO_ENCODED_RUSTFLAGS")
-            .status()
-            .map_err(|e| TaskError::Command(format!("cannot start cargo fuzz: {e}")))?;
-        if !status.success() {
+        if let Err(error) = run_command(nested_cargo(&root.join(repo::FUZZ)).args(args)) {
+            eprintln!("xtask: {error}");
             failed.push(target.clone());
         }
     }

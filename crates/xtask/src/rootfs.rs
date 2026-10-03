@@ -25,7 +25,8 @@ use std::path::{Path, PathBuf};
 use crateward_core::paths::{build, guest, repo};
 use serde::Deserialize;
 
-use crate::{TaskError, io, read_toml, run_in};
+use crate::images::download;
+use crate::{TaskError, io, read, read_toml, run_in};
 
 /// The guest agent, as the image tarball names it.
 const AGENT_IN_IMAGE: &str = in_image(guest::AGENT);
@@ -85,10 +86,10 @@ struct Component {
 ///
 /// Fails if a build step fails.
 pub fn run(root: &Path) -> Result<(), TaskError> {
-    let manifest_text = read(root, repo::ROOTFS_PIN)?;
+    let manifest_text = read(&root.join(repo::ROOTFS_PIN))?;
     let manifest: Manifest = toml::from_str(&manifest_text)
         .map_err(|e| TaskError::Check(format!("{}: {e}", repo::ROOTFS_PIN)))?;
-    let hook_text = read(root, repo::ROOTFS_HOOK)?;
+    let hook_text = read(&root.join(repo::ROOTFS_HOOK))?;
     let epoch = manifest.image.source_date_epoch.to_string();
 
     let work = root.join(build::ROOTFS_WORK);
@@ -117,12 +118,6 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     }
 
     pack_image(root, &tarball, &manifest.image.compression, &epoch)
-}
-
-/// Reads a text file at `path` under `root`.
-fn read(root: &Path, path: &str) -> Result<String, TaskError> {
-    let file = root.join(path);
-    std::fs::read_to_string(&file).map_err(io(&file))
 }
 
 /// The name of the cached base tarball. It holds a digest of the inputs, so
@@ -364,25 +359,7 @@ impl Component {
     /// Downloads the archive unless `downloads` has it and checks the pinned
     /// SHA-256. An archive with another digest is deleted.
     fn fetch(&self, downloads: &Path) -> Result<PathBuf, TaskError> {
-        let name = self.archive_name()?;
-        let archive = downloads.join(name);
-
-        if !archive.exists() {
-            let target = archive.to_string_lossy();
-            let args = ["-sSfL", "--proto", "=https", "-o", &target, &self.url];
-            run_in(downloads, "curl", &args, &[])?;
-        }
-
-        let digest = crate::images::sha256_file(&archive)?;
-        if digest != self.sha256 {
-            std::fs::remove_file(&archive).map_err(io(&archive))?;
-            return Err(TaskError::Check(format!(
-                "{name} has SHA-256 {digest}, pinned {}; deleted it",
-                self.sha256
-            )));
-        }
-
-        Ok(archive)
+        download(downloads, self.archive_name()?, &self.url, &self.sha256)
     }
 
     /// Unpacks the archive into `prefix`:
@@ -560,18 +537,7 @@ mod stage_tests {
     use std::process::Command;
 
     use super::*;
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cw-rootfs-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn write(path: &Path, text: &str) {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
-    }
+    use crate::testing::{scratch, write};
 
     fn succeeds(program: &str, args: &[&str]) {
         let status = Command::new(program).args(args).status().unwrap();
@@ -833,7 +799,7 @@ mod stage_tests {
         let pin = dir.join(repo::RUST_PIN);
         write(
             &pin,
-            &format!(
+            format!(
                 "version = \"1.0\"\n[[component]]\ndir = \"comp\"\nurl = \"https://example.invalid/rust-1.0-x86_64.tar.xz\"\nsha256 = \"{}\"\n",
                 sha256.unwrap_or(&digest)
             ),

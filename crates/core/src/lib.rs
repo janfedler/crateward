@@ -48,4 +48,6 @@ pub mod retry;
 pub mod sandbox;
 #[cfg(feature = "store")]
 pub mod store;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod verdict;

@@ -17,6 +17,8 @@ mod guest_kernel;
 mod images;
 mod release;
 mod rootfs;
+#[cfg(test)]
+mod testing;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -143,6 +145,24 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
     move |e| TaskError::Io(path.to_path_buf(), e)
 }
 
+/// Reads a text file.
+fn read(path: &Path) -> Result<String, TaskError> {
+    std::fs::read_to_string(path).map_err(io(path))
+}
+
+/// Copies a file with `mode`, creating the target's directory.
+fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), TaskError> {
+    use std::os::unix::fs::PermissionsExt as _;
+    if !from.is_file() {
+        return Err(TaskError::Check(format!("{} is missing", from.display())));
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(io(parent))?;
+    }
+    std::fs::copy(from, to).map_err(io(to))?;
+    std::fs::set_permissions(to, std::fs::Permissions::from_mode(mode)).map_err(io(to))
+}
+
 /// Reads and parses a TOML file at `path` under `root`.
 fn read_toml<T: DeserializeOwned>(root: &Path, path: &str) -> Result<T, TaskError> {
     let file = root.join(path);
@@ -170,12 +190,25 @@ fn run_in(
     args: &[&str],
     envs: &[(&str, &str)],
 ) -> Result<(), TaskError> {
-    let rendered = format!("{program} {}", args.join(" "));
-    eprintln!("xtask: running {rendered}");
-    let status = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .envs(envs.iter().copied())
-        .current_dir(dir)
+        .current_dir(dir);
+    run_command(&mut command)
+}
+
+/// Runs `command` and fails unless it exits successfully.
+fn run_command(command: &mut Command) -> Result<(), TaskError> {
+    let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy()).collect();
+    let rendered = format!(
+        "{} {}",
+        command.get_program().to_string_lossy(),
+        args.join(" ")
+    );
+    eprintln!("xtask: running {rendered}");
+
+    let status = command
         .status()
         .map_err(|error| TaskError::Command(format!("cannot start {rendered}: {error}")))?;
     if status.success() {
@@ -185,6 +218,42 @@ fn run_in(
             "{rendered} failed with {status}"
         )))
     }
+}
+
+/// Runs a command in `dir` and returns its trimmed standard output.
+fn output(dir: &Path, program: &str, args: &[&str]) -> Result<String, TaskError> {
+    let out = Command::new(program)
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| TaskError::Command(format!("cannot start {program}: {e}")))?;
+    if !out.status.success() {
+        return Err(TaskError::Command(format!(
+            "{program} {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// `cargo` in `dir`, for a package with its own workspace and toolchain
+/// file. The outer cargo exports its toolchain. Removing it lets the
+/// package's own `rust-toolchain.toml` choose.
+fn nested_cargo(dir: &Path) -> Command {
+    let mut command = Command::new("cargo");
+    command.current_dir(dir);
+    for name in [
+        "RUSTUP_TOOLCHAIN",
+        "RUSTC",
+        "RUSTDOC",
+        "CARGO",
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+    ] {
+        command.env_remove(name);
+    }
+    command
 }
 
 fn ci() -> Result<(), TaskError> {

@@ -1,101 +1,23 @@
 //! Integration tests of the job store against a real PostgreSQL.
 //!
-//! Set `CRATEWARD_TEST_DATABASE_URL` (for example
-//! `host=/var/run/postgresql dbname=crateward_dev`). Each test works in its
-//! own schema, dropped at the end. Without the variable the tests skip,
-//! unless `CRATEWARD_REQUIRE_DB=1`, which CI sets so that a missing database
-//! fails instead of passing silently.
+//! The database setup is [`crateward_core::testing`].
 
-#![cfg(feature = "store")]
+#![cfg(feature = "testing")]
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use crateward_core::breaker::{BreakerState, Counts};
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
-use crateward_core::job::{JobEvent, JobId, JobState, Limits, Stage, StageLimits, Triage};
+use crateward_core::job::{JobEvent, JobId, JobState, Stage, Triage};
 use crateward_core::name::CrateName;
-use crateward_core::retry::RetryPolicy;
 use crateward_core::store::{
-    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, NewJob, PauseReason, Policies,
-    Review, Store, StoreError,
+    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, NewJob, PauseReason, Review,
+    StoreError,
 };
+use crateward_core::testing::{TestDb, policies};
 use crateward_core::verdict::{Coverage, RiskLevel, Verdict};
-
-static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-struct TestDb {
-    config: String,
-    schema: String,
-}
-
-impl TestDb {
-    async fn new() -> Option<Self> {
-        let Ok(config) = std::env::var("CRATEWARD_TEST_DATABASE_URL") else {
-            assert!(
-                std::env::var("CRATEWARD_REQUIRE_DB").is_err(),
-                "CRATEWARD_REQUIRE_DB is set but CRATEWARD_TEST_DATABASE_URL is not"
-            );
-            eprintln!("skipping: CRATEWARD_TEST_DATABASE_URL is not set");
-            return None;
-        };
-        let schema = format!(
-            "test_{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::SeqCst)
-        );
-        let db = Self { config, schema };
-        let admin = db.raw().await;
-        admin
-            .batch_execute(&format!("CREATE SCHEMA {}", db.schema))
-            .await
-            .unwrap();
-        Some(db)
-    }
-
-    async fn raw(&self) -> tokio_postgres::Client {
-        let (client, connection) = tokio_postgres::connect(&self.config, tokio_postgres::NoTls)
-            .await
-            .unwrap();
-        tokio::spawn(connection);
-        client
-    }
-
-    /// A store whose session uses the test schema.
-    async fn store(&self) -> Store {
-        let client = self.raw().await;
-        client
-            .batch_execute(&format!("SET search_path TO {}", self.schema))
-            .await
-            .unwrap();
-        Store::from_client(client)
-    }
-
-    async fn drop(self) {
-        self.raw()
-            .await
-            .batch_execute(&format!("DROP SCHEMA {} CASCADE", self.schema))
-            .await
-            .unwrap();
-    }
-}
-
-fn policies() -> Policies {
-    let policy = RetryPolicy::new(Duration::from_secs(60), Duration::from_secs(600)).unwrap();
-    Policies {
-        limits: Limits::uniform(StageLimits {
-            max_attempts: 3,
-            max_infrastructure_retries: 2,
-        }),
-        backoff: Stage::ALL
-            .iter()
-            .map(|s| (s.name(), policy))
-            .collect::<BTreeMap<_, _>>(),
-    }
-}
 
 fn new_job(name: &str, version: &str, priority: i16) -> NewJob {
     NewJob {
@@ -112,7 +34,7 @@ const LEASE: Duration = Duration::from_secs(30);
 
 #[tokio::test]
 async fn migrations_are_idempotent() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -126,7 +48,7 @@ async fn migrations_are_idempotent() {
 
 #[tokio::test]
 async fn enqueue_is_idempotent_per_canonical_name_and_version() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -171,7 +93,7 @@ async fn enqueue_is_idempotent_per_canonical_name_and_version() {
 
 #[tokio::test]
 async fn claims_follow_priority_stage_and_skip_locked_rows() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -219,7 +141,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
 
 #[tokio::test]
 async fn complete_advances_releases_and_records() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -292,7 +214,7 @@ async fn complete_advances_releases_and_records() {
 
 #[tokio::test]
 async fn a_transient_failure_backs_off() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -327,7 +249,7 @@ async fn a_transient_failure_backs_off() {
 
 #[tokio::test]
 async fn expired_leases_are_reaped_and_cost_an_attempt() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -359,7 +281,7 @@ async fn expired_leases_are_reaped_and_cost_an_attempt() {
 
 #[tokio::test]
 async fn sandbox_start_keeps_the_lease_for_the_run() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -403,7 +325,7 @@ async fn sandbox_start_keeps_the_lease_for_the_run() {
 
 #[tokio::test]
 async fn static_reports_fetches_and_popularity_round_trip() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -493,7 +415,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
 
 #[tokio::test]
 async fn a_suspected_compromise_quarantines_everything_until_lifted() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -552,7 +474,7 @@ async fn a_suspected_compromise_quarantines_everything_until_lifted() {
 
 #[tokio::test]
 async fn an_open_breaker_or_pause_stops_only_its_stages() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -623,7 +545,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
 
 #[tokio::test]
 async fn alerts_are_recorded_and_marked() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -665,7 +587,7 @@ async fn alerts_are_recorded_and_marked() {
 
 #[tokio::test]
 async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -729,7 +651,7 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
 
 #[tokio::test]
 async fn old_unflagged_runs_lose_their_raw_data_only() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -773,12 +695,14 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
         store.set_review(job, review, None).await.unwrap();
         jobs.push(job);
     }
-    let raw = db.raw().await;
+    let raw = db.admin();
     raw.batch_execute(&format!(
         "SET search_path TO {}; UPDATE jobs SET state = 'Done';
          UPDATE job_runs SET recorded_at = now() - interval '9 days'
          WHERE job_id IN ({}, {})",
-        db.schema, jobs[0].0, jobs[1].0
+        db.schema(),
+        jobs[0].0,
+        jobs[1].0
     ))
     .await
     .unwrap();
@@ -810,7 +734,7 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
 
 #[tokio::test]
 async fn findings_are_reported_resolved_and_only_then_published() {
-    let Some(db) = TestDb::new().await else {
+    let Some(db) = TestDb::new("test").await else {
         return;
     };
     let mut store = db.store().await;
@@ -937,13 +861,14 @@ async fn findings_are_reported_resolved_and_only_then_published() {
     let record = store.disclosure(gone).await.unwrap().unwrap();
     assert!(record.reported_on.is_some() && record.resolved_on.is_some());
     // The database refuses a vulnerability without a report.
-    let raw = db.raw().await;
+    let raw = db.admin();
     let refused = raw
         .batch_execute(&format!(
             "SET search_path TO {}; UPDATE disclosures
              SET kind = 'vulnerability', reported_to = NULL, reported_at = NULL
              WHERE job_id = {}",
-            db.schema, gone.0
+            db.schema(),
+            gone.0
         ))
         .await;
     assert!(refused.is_err());

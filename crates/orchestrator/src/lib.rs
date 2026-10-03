@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
 use crateward_core::config::{Config, SandboxConfig, WarmConfig};
@@ -61,19 +61,12 @@ pub const COMPONENT: Component = Component::Orchestrator;
 /// Memory for Firecracker itself on top of guest memory.
 const VMM_OVERHEAD_MIB: u64 = 256;
 
-fn fatal(reason: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: reason.to_string(),
-    }
-}
-
 /// Runs the component until SIGTERM or `Ctrl-C`: reconciles leftovers,
 /// boots a clean VM for the base snapshot, then runs one worker per slot.
 ///
 /// # Errors
 ///
-/// Returns [`ComponentError::Fatal`] if startup or the job store fails.
+/// Returns a [`ComponentError`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     // Reconciliation removes every slot's leftovers, so a second instance
     // would tear down the first one's jails. The lock is taken before the

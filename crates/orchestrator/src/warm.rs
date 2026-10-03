@@ -29,6 +29,7 @@ use std::time::Duration;
 use crateward_core::child::ChildError;
 use crateward_core::config::{SandboxConfig, WarmConfig};
 use crateward_core::digest::Sha256Digest;
+use crateward_core::failure::Failure;
 use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::paths::guest;
@@ -39,7 +40,7 @@ use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
 use crate::scratch::ScratchReport;
 use crate::trace::TraceSummary;
-use crate::worker::{Failure, JobFiles, Locked, RunPlan, RunReport, Sandbox};
+use crate::worker::{JobFiles, Locked, RunPlan, RunReport, Sandbox};
 
 /// A crate version.
 type Key = (String, String);

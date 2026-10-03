@@ -33,7 +33,7 @@ pub mod yara;
 use std::error::Error;
 use std::time::Duration;
 
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
@@ -45,13 +45,6 @@ use crate::worker::Analyzer;
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::StaticAnalysis;
-
-fn fatal(reason: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: reason.to_string(),
-    }
-}
 
 async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
     let url = config.database.url.expose_secret();
@@ -79,7 +72,7 @@ async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
 ///
 /// # Errors
 ///
-/// Returns [`ComponentError::Fatal`] if startup or the job store fails.
+/// Returns a [`ComponentError`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {

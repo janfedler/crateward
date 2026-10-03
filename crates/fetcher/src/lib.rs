@@ -34,7 +34,7 @@ pub mod worker;
 use std::error::Error;
 use std::time::Duration;
 
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::http::{ClientConfig, Fetched, PoliteClient};
@@ -49,13 +49,6 @@ use crateward_core::blobs::BlobStore;
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Fetcher;
-
-fn fatal(reason: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: reason.to_string(),
-    }
-}
 
 /// The index's `config.json`, as far as the fetcher reads it.
 #[derive(Deserialize)]
@@ -120,7 +113,7 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
 ///
 /// # Errors
 ///
-/// Returns [`ComponentError::Fatal`] if the fetcher cannot start or the
+/// Returns a [`ComponentError`] if the fetcher cannot start or the
 /// store fails, and systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;

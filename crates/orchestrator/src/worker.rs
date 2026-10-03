@@ -14,7 +14,7 @@ use crateward_core::blobs::BlobStore;
 use crateward_core::breaker::BreakerState;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::escalation::HumanEscalation;
-use crateward_core::failure::FailureClass;
+use crateward_core::failure::Failure;
 use crateward_core::job::{BuildOutcome, JobEvent, RunKind, Stage};
 use crateward_core::name::CrateName;
 use crateward_core::paths::{guest, host};
@@ -41,46 +41,6 @@ const OUTPUT_LIMIT: u32 = 4 * 1024 * 1024;
 
 /// Extra wall clock the host allows beyond the guest's own timeout.
 const HOST_MARGIN: Duration = Duration::from_secs(60);
-
-/// Why a run could not happen. The job is not at fault for any of these.
-#[derive(Debug, thiserror::Error)]
-#[error("{}: {message}", class.name())]
-pub struct Failure {
-    /// Retry class.
-    pub class: FailureClass,
-    /// What happened.
-    pub message: String,
-    /// An alert to raise, beyond what the failure class implies.
-    pub escalation: Option<HumanEscalation>,
-}
-
-impl Failure {
-    fn new(class: FailureClass, message: impl std::fmt::Display) -> Self {
-        Self {
-            class,
-            message: message.to_string(),
-            escalation: None,
-        }
-    }
-
-    fn infrastructure(message: impl std::fmt::Display) -> Self {
-        Self::new(FailureClass::Infrastructure, message)
-    }
-
-    fn permanent(message: impl std::fmt::Display) -> Self {
-        Self::new(FailureClass::Permanent, message)
-    }
-
-    fn compromise(message: impl std::fmt::Display) -> Self {
-        Self::new(FailureClass::SuspectedCompromise, message)
-    }
-}
-
-impl From<StoreError> for Failure {
-    fn from(error: StoreError) -> Self {
-        Self::infrastructure(error)
-    }
-}
 
 /// What one VM run produced, as stored in `job_runs.report`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -769,7 +729,7 @@ fn job_input(
     JobInput {
         spec: JobSpec {
             job_id,
-            wall_clock: now(),
+            wall_clock: WallClock::now(),
             argv: plan.argv.clone(),
             env,
             cwd: plan.cwd.clone(),
@@ -847,11 +807,10 @@ impl<'a> TryFrom<&'a JobEnd> for Ended<'a> {
             JobEnd::DecoyTouched => Err(Failure::compromise(
                 "something read the decoy in the jail root",
             )),
-            JobEnd::KvmError(reason) => Err(Failure {
-                class: FailureClass::Infrastructure,
-                message: format!("KVM error: {reason}"),
-                escalation: Some(HumanEscalation::KvmError),
-            }),
+            JobEnd::KvmError(reason) => {
+                Err(Failure::infrastructure(format!("KVM error: {reason}"))
+                    .escalate(HumanEscalation::KvmError))
+            }
             // A VM that died without a report and without a known reason: ours.
             JobEnd::UnexpectedExit(reason) => Err(Failure::infrastructure(format!(
                 "the VM ended unexpectedly: {reason}"
@@ -1011,20 +970,11 @@ async fn make_scratch(mib: u64, path: &Path) -> Result<(), Failure> {
     }
 }
 
-fn now() -> WallClock {
-    let since = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    WallClock {
-        secs: since.as_secs(),
-        nanos: since.subsec_nanos(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::firecracker::agent::RunOutcome;
+    use crateward_core::failure::FailureClass;
     use crateward_fake_internet::server::hex;
 
     fn finished(exit: ExitStatus) -> JobEnd {

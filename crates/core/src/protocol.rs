@@ -137,6 +137,20 @@ pub struct WallClock {
     pub nanos: u32,
 }
 
+impl WallClock {
+    /// The host's current time.
+    #[must_use]
+    pub fn now() -> Self {
+        let since = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        Self {
+            secs: since.as_secs(),
+            nanos: since.subsec_nanos(),
+        }
+    }
+}
+
 /// Which output stream a chunk came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutputStream {

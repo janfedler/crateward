@@ -34,7 +34,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Router, middleware};
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::attack;
 use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
@@ -125,13 +125,6 @@ pub fn stylesheet_version() -> &'static str {
         format!("{:012x}", hasher.finish() & 0xffff_ffff_ffff)
     });
     &VERSION
-}
-
-fn fatal(reason: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: reason.to_string(),
-    }
 }
 
 /// Connections of the dashboard.

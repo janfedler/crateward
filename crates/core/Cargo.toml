@@ -26,6 +26,8 @@ sandbox = ["dep:rustix", "dep:landlock"]
 blobs = ["dep:blake3", "dep:zstd"]
 # The host integrity manifest (ADR 0008).
 integrity = ["dep:blake3"]
+# Setup for tests against a real PostgreSQL. Tests only.
+testing = ["store"]
 
 [dependencies]
 blake3 = { workspace = true, optional = true }

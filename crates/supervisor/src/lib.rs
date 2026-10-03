@@ -38,7 +38,7 @@ pub mod notify;
 use std::path::Path;
 use std::time::Duration;
 
-use crateward_core::app::{self, ComponentError, Stop};
+use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::breaker::{Change, Counts};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
@@ -57,13 +57,6 @@ const WORKER: &str = "supervisor";
 
 /// Run reports trimmed per round at most, so one round stays short.
 const TRIM_BATCH: i64 = 500;
-
-fn fatal(error: impl std::fmt::Display) -> ComponentError {
-    ComponentError::Fatal {
-        component: COMPONENT,
-        reason: error.to_string(),
-    }
-}
 
 /// Everything one round needs.
 struct Supervisor<'a> {

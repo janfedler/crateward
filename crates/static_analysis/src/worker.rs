@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
 use crateward_core::digest::Sha256Digest;
-use crateward_core::failure::FailureClass;
+use crateward_core::failure::Failure;
 use crateward_core::job::{JobEvent, JobId, Stage, Triage};
 use crateward_core::name::CrateName;
 use crateward_core::store::{Policies, Store, StoreError, StoredJob, heartbeat};
@@ -29,38 +29,6 @@ const BATCH_BYTES: usize = 512 * 1024 * 1024;
 
 /// Reports by the SHA-256 of their crate file.
 type Reports = BTreeMap<Sha256Digest, StaticReport>;
-
-/// Why a job's static analysis failed.
-#[derive(Debug, thiserror::Error)]
-#[error("{}: {message}", class.name())]
-pub struct Failure {
-    /// Retry class.
-    pub class: FailureClass,
-    /// What happened.
-    pub message: String,
-}
-
-impl Failure {
-    fn infrastructure(message: impl std::fmt::Display) -> Self {
-        Self {
-            class: FailureClass::Infrastructure,
-            message: message.to_string(),
-        }
-    }
-
-    fn permanent(message: impl std::fmt::Display) -> Self {
-        Self {
-            class: FailureClass::Permanent,
-            message: message.to_string(),
-        }
-    }
-}
-
-impl From<StoreError> for Failure {
-    fn from(error: StoreError) -> Self {
-        Self::infrastructure(error)
-    }
-}
 
 /// A locked package as the fetch stage recorded it.
 #[derive(Debug, Clone, Deserialize)]

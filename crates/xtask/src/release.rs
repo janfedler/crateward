@@ -17,13 +17,12 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crateward_core::paths::{build, bundle, repo};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{TaskError, io, musl_cc, read_toml, run};
+use crate::{TaskError, copy, io, musl_cc, output, read_toml, run};
 
 /// Service binaries, from the host build.
 const SERVICES: &[&str] = &[
@@ -36,35 +35,6 @@ const SERVICES: &[&str] = &[
     "crateward_api",
     "crateward_supervisor",
 ];
-
-fn output(root: &Path, program: &str, args: &[&str]) -> Result<String, TaskError> {
-    let out = Command::new(program)
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|e| TaskError::Command(format!("cannot start {program}: {e}")))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
-    } else {
-        Err(TaskError::Command(format!(
-            "{program} {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&out.stderr).trim()
-        )))
-    }
-}
-
-fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), TaskError> {
-    use std::os::unix::fs::PermissionsExt as _;
-    if !from.is_file() {
-        return Err(TaskError::Check(format!("{} is missing", from.display())));
-    }
-    if let Some(parent) = to.parent() {
-        std::fs::create_dir_all(parent).map_err(io(parent))?;
-    }
-    std::fs::copy(from, to).map_err(io(to))?;
-    std::fs::set_permissions(to, std::fs::Permissions::from_mode(mode)).map_err(io(to))
-}
 
 /// The one file in `dir` whose name starts with `prefix` and ends with
 /// `suffix`, for the versioned kernel image.
@@ -543,18 +513,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cw-release-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    fn write(path: &Path, bytes: impl AsRef<[u8]>) {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, bytes).unwrap();
-    }
+    use crate::testing::{scratch, write};
 
     fn mode(path: &Path) -> u32 {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777

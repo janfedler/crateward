@@ -9,12 +9,12 @@
 //! it from.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
-use crate::{TaskError, io, read_toml, run_in};
+use crate::images::download;
+use crate::{TaskError, io, nested_cargo, read_toml, run_command, run_in};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,27 +29,9 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
     let pin: Pin = read_toml(root, repo::BPF_LINKER_PIN)?;
 
     let dir = root.join(build::GUEST_BIN);
-    let archive = dir.join(format!("bpf-linker-{}.tar.zst", pin.version));
-    let archive_str = archive.to_string_lossy().into_owned();
-    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
-
-    if !archive.exists() {
-        run_in(
-            &dir,
-            "curl",
-            &["-sSfL", "--proto", "=https", "-o", &archive_str, &pin.url],
-            &[],
-        )?;
-    }
-
-    let digest = crate::images::sha256_file(&archive)?;
-    if digest != pin.sha256 {
-        std::fs::remove_file(&archive).map_err(io(&archive))?;
-        return Err(TaskError::Check(format!(
-            "bpf-linker archive has SHA-256 {digest}, pinned {}; deleted it",
-            pin.sha256
-        )));
-    }
+    let name = format!("bpf-linker-{}.tar.zst", pin.version);
+    let archive = download(&dir, &name, &pin.url, &pin.sha256)?;
+    let archive_str = archive.to_string_lossy();
 
     // Extracted every time, so the binary always matches the archive.
     run_in(
@@ -70,7 +52,6 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
 /// lacks its license section.
 pub fn run(root: &Path) -> Result<(), TaskError> {
     let bin = linker(root)?;
-    let package = root.join(repo::GUEST_EBPF);
     let target_dir = root.join(build::EBPF_WORK);
 
     let path = std::env::var_os("PATH").unwrap_or_default();
@@ -78,31 +59,13 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     paths.extend(std::env::split_paths(&path));
     let path = std::env::join_paths(paths).map_err(|e| TaskError::Command(format!("PATH: {e}")))?;
 
-    // The outer cargo exports its toolchain. Removing it lets the package's
-    // own `rust-toolchain.toml` choose.
-    let cargo = |args: &[&str]| -> Result<(), TaskError> {
-        let rendered = format!("cargo {}", args.join(" "));
-        eprintln!("xtask: running {rendered} in crates/guest_ebpf");
-        let status = Command::new("cargo")
-            .args(args)
-            .current_dir(&package)
-            .env("PATH", &path)
-            .env("CARGO_TARGET_DIR", &target_dir)
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .env_remove("RUSTC")
-            .env_remove("RUSTDOC")
-            .env_remove("CARGO")
-            .env_remove("RUSTFLAGS")
-            .env_remove("CARGO_ENCODED_RUSTFLAGS")
-            .status()
-            .map_err(|e| TaskError::Command(format!("cannot start {rendered}: {e}")))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(TaskError::Command(format!(
-                "{rendered} failed with {status}"
-            )))
-        }
+    let cargo = |args: &[&str]| {
+        run_command(
+            nested_cargo(&root.join(repo::GUEST_EBPF))
+                .args(args)
+                .env("PATH", &path)
+                .env("CARGO_TARGET_DIR", &target_dir),
+        )
     };
 
     cargo(&["fmt", "--check"])?;
