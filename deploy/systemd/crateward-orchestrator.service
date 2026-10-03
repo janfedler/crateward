@@ -15,8 +15,10 @@ Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
 ExecStart=/usr/local/lib/crateward/bin/crateward_orchestrator
 Restart=on-failure
 RestartSec=10
-# Jobs are drained after SIGTERM. A sandbox run may take its full timeout.
-TimeoutStopSec=15min
+# Running jobs finish after SIGTERM. A full build may take
+# sandbox.full_timeout_secs (45 minutes), plus the payload, the scratch
+# scan and cleanup. A test keeps this above the configured timeout.
+TimeoutStopSec=60min
 # ADR 0002: the rootless jail needs newuidmap and newgidmap (setuid), user,
 # mount, network, IPC and UTS namespaces, /dev/kvm and /dev/net/tun, and a
 # delegated cgroup subtree for the slot limits. Every jailed Firecracker

@@ -15,7 +15,7 @@ Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
 ExecStart=/usr/local/lib/crateward/bin/crateward_api
 Restart=on-failure
 RestartSec=10
-# Jobs are drained after SIGTERM. A sandbox run may take its full timeout.
+# The current step finishes after SIGTERM.
 TimeoutStopSec=15min
 NoNewPrivileges=yes
 ProtectSystem=strict

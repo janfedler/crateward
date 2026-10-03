@@ -194,6 +194,24 @@ mod tests {
         assert!(playbook.contains(&format!("cargo-{version}-x86_64-unknown-linux-gnu")));
     }
 
+    /// systemd waits long enough for the orchestrator to finish a full build
+    /// after SIGTERM, with ten minutes left for the rest of the run.
+    #[test]
+    fn the_orchestrator_may_finish_a_full_build_when_stopped() {
+        let config =
+            crateward_core::config::Config::from_toml(&read("config/crateward.example.toml"))
+                .unwrap();
+        let unit = read("deploy/systemd/crateward-orchestrator.service");
+        let minutes: u64 = unit
+            .lines()
+            .find_map(|line| line.strip_prefix("TimeoutStopSec="))
+            .and_then(|value| value.strip_suffix("min"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(minutes * 60 >= config.sandbox.full_timeout_secs + 600);
+    }
+
     /// Every unit the playbooks install and remove exists, and every unit
     /// in `deploy/systemd` is installed and removed.
     #[test]
