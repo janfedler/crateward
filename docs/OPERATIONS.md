@@ -132,11 +132,13 @@ orchestrator finishes its running jobs after SIGTERM. `systemctl restart`
 waits for it, and a second orchestrator refuses to start while the first
 holds `orchestrator.lock` in `sandbox.slots_dir`.
 
+## Decoys
+
 The decoys in `supervisor.decoys` look like credentials. Backups, indexers
 and anything else that reads the home directories must exclude them, or
 they raise a sandbox escape indicator.
 
 ## Backups
 
-Encrypted offsite backups with tested restores are required. Backups must
-exclude the decoys listed in `supervisor.decoys`.
+Encrypted offsite backups with tested restores are required. They must
+exclude the [decoys](#decoys).

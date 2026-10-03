@@ -80,8 +80,8 @@ again.
 
 ## What the playbook cannot know
 
-* The decoys in `supervisor.decoys` must be excluded from backups and
-  indexers.
+* The [decoys](../docs/OPERATIONS.md#decoys) must be excluded from
+  backups and indexers.
 * The firewall allowlist follows the configuration. A new external service
   needs its host in the configuration, or for the image builder in
   `crates/cli/src/egress.rs`.
