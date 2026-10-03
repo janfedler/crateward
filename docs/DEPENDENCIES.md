@@ -62,11 +62,11 @@ All pinned by commit SHA.
 | `Swatinem/rust-cache` | Caches build output between CI runs. |
 | `taiki-e/install-action` | Installs prebuilt, checksum verified `cargo-deny`, `cargo-audit` and `cargo-vet` binaries. |
 
-## Third party binaries (planned)
+## Third party binaries
 
 | Binary | Why |
 |--------|-----|
-| Firecracker 1.17 | The microVM monitor ([ADR 0002](adr/0002-firecracker-rootless-jail.md)). Jailed without its jailer ([ADR 0002](adr/0002-firecracker-rootless-jail.md)). |
+| Firecracker 1.17 | The microVM monitor, jailed without its jailer ([ADR 0002](adr/0002-firecracker-rootless-jail.md)). |
 | `newuidmap`, `newgidmap` (Debian `uidmap`) | Write the ID maps of each jail's user namespace. |
 | PostgreSQL | Job queue and result store ([ADR 0001](adr/0001-one-server-postgres-queue.md)). |
 | htmx 2.0.11 and `htmx-ext-sse` 2.2.4 (0BSD) | Vendored in `crates/api/static`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test ([ADR 0009](adr/0009-scoring-and-dashboard.md)). |
