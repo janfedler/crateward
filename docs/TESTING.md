@@ -53,15 +53,6 @@ cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-thre
 cargo xtask soak --jobs 50  # needs a delegated cgroup, so xtask starts a systemd user scope
 ```
 
-Results on the production server (2026-09-24):
-
-* Boot to a ready agent takes about 430 ms.
-* Restoring a snapshot into a new jail, including the jail setup and
-  cgroup, reaches a ready agent in 60 to 68 ms at the median and at most
-  92 ms.
-* 50 jobs take about 12.5 seconds. The resident memory of the test process
-  grew by 4 KiB over them, and nothing was left behind.
-
 The only programs these tests start inside the VM are the guest agent and
 standard tools of the guest image.
 
