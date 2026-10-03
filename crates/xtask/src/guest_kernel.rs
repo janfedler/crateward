@@ -171,9 +171,9 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let manifest: Manifest = read_toml(root, repo::KERNEL_PIN)?;
 
     let src = root.join(build::KERNEL_WORK).join("src");
-    let build = root.join(build::KERNEL_WORK).join("build");
+    let build_dir = root.join(build::KERNEL_WORK).join("build");
     let out_dir = root.join(build::GUEST_OUT);
-    for dir in [&build, &out_dir] {
+    for dir in [&build_dir, &out_dir] {
         std::fs::create_dir_all(dir).map_err(io(dir))?;
     }
 
@@ -182,10 +182,10 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         &manifest.config,
         &root.join(repo::KERNEL_INPUTS),
         &src,
-        &build,
+        &build_dir,
     )?;
-    compile(&manifest.build, &src, &build)?;
-    publish(&build, &out_dir, &manifest.source.version)
+    compile(&manifest.build, &src, &build_dir)?;
+    publish(&build_dir, &out_dir, &manifest.source.version)
 }
 
 /// The `make` argument that names the build directory.
