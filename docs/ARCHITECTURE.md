@@ -208,8 +208,8 @@ Notes on the design:
 ## Triage and capacity
 
 Crates.io publishes on the order of 500 versions per hour at busy times (one
-sample from the RSS feed on 2026-09-24: 514 versions in 60 minutes). Three
-vCPUs cannot run all of them, so:
+sample from the RSS feed on 2026-09-24: 514 versions in 60 minutes). One
+vCPU per core cannot run all of them, so:
 
 * Every version gets static analysis.
 * A version gets a VM run only if it has build time code of its own (a build

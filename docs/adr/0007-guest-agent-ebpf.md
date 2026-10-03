@@ -7,8 +7,8 @@
 
 Dynamic analysis must see which processes a build starts, which files they
 open and where they connect, including processes that detach or
-daemonize. `rustc` makes many system calls, and only three vCPUs run VMs,
-so overhead matters.
+daemonize. `rustc` makes many system calls, and VMs get only one vCPU
+per core, so overhead matters.
 
 ## Decision
 

@@ -39,7 +39,9 @@ PostgreSQL clusters are created with data checksums enabled.
 
 ## Capacity
 
-Three VM slots of one vCPU each. Static analysis runs on every version.
+One VM slot of one vCPU per core, with one core left for the host
+(`sandbox.slots`, `sandbox.vcpus_per_slot`). Static analysis runs on every
+version.
 Dynamic analysis runs by priority, and jobs that wait longer than
 `triage.dynamic_deadline_hours` are scored as static only. The dashboard
 publishes the share of versions with dynamic results.
