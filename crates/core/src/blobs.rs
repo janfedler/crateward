@@ -69,6 +69,7 @@ impl BlobStore {
     pub fn open(root: &Path) -> Result<Self, BlobError> {
         let blobs = root.join("blobs");
         std::fs::create_dir_all(&blobs).map_err(io(&blobs))?;
+
         Ok(Self {
             root: root.to_path_buf(),
         })
@@ -122,6 +123,7 @@ impl BlobStore {
         file.write_all(&compressed).map_err(io(&temp))?;
         file.sync_all().map_err(io(&temp))?;
         std::fs::rename(&temp, &path).map_err(io(&path))?;
+
         Ok(Blob {
             blake3: digest,
             tar_bytes,
@@ -168,6 +170,7 @@ mod tests {
             .join("../../target/blob-tests")
             .join(format!("{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+
         BlobStore::open(&dir).unwrap()
     }
 

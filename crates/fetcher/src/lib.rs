@@ -65,6 +65,7 @@ async fn download_template(index: &PoliteClient, root: &str) -> Result<String, B
 
     let config: IndexConfig =
         serde_json::from_slice(&body).map_err(|e| format!("index config.json: {e}"))?;
+
     Ok(config.dl)
 }
 
@@ -108,6 +109,7 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
 
     let policies = Policies::from_config(&config.stages)?;
     let lease = Duration::from_secs(config.stages.fetch.lease_secs);
+
     Ok(Fetcher::new(
         store, heartbeats, downloads, index, setup, policies, lease,
     ))
@@ -121,6 +123,7 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
 /// store fails, and systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(async {
         let mut fetcher = start(config).await.map_err(fatal)?;
         let stop = Stop::install().map_err(fatal)?;

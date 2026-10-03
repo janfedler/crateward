@@ -411,6 +411,7 @@ pub fn analyze(
     let dropped = report.findings.len().saturating_sub(limits.max_findings);
     report.findings.truncate(limits.max_findings);
     report.findings_dropped = u32::try_from(dropped).unwrap_or(u32::MAX);
+
     Ok(report)
 }
 

@@ -177,6 +177,7 @@ mod tests {
 
     fn script(messages: &[HostMessage]) -> Script {
         let input = messages.iter().flat_map(|m| encode(m).unwrap()).collect();
+
         Script {
             input: Cursor::new(input),
             output: Vec::new(),

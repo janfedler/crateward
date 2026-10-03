@@ -643,6 +643,7 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
     }
 
     scanner.scan.file_cfg = file_cfg;
+
     scanner.scan
 }
 

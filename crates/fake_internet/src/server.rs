@@ -311,6 +311,7 @@ impl Read for Replay<'_> {
         }
 
         self.prefix = rest;
+
         Ok(n)
     }
 }
@@ -489,6 +490,7 @@ pub fn serve(
     }
 
     serve_tcp(&listener, &log, tls.as_ref());
+
     Ok(())
 }
 
@@ -512,6 +514,7 @@ mod tests {
     impl Write for Sink {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             self.0.lock().unwrap().extend_from_slice(buf);
+
             Ok(buf.len())
         }
 

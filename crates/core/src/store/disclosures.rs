@@ -150,6 +150,7 @@ impl Store {
                 &[&job.0, &kind.name(), &reported_to, &reference, &note],
             )
             .await?;
+
         Ok(Ok(()))
     }
 
@@ -179,6 +180,7 @@ impl Store {
                 &[&job.0, &note],
             )
             .await?;
+
         Ok(Ok(()))
     }
 
@@ -213,6 +215,7 @@ impl Store {
                 &[&job.0, &reference],
             )
             .await?;
+
         Ok(if updated == 1 {
             Ok(())
         } else {
@@ -268,6 +271,7 @@ impl Store {
                 &[&job.0, &slug],
             )
             .await?;
+
         Ok(Ok(()))
     }
 
@@ -323,6 +327,7 @@ impl Store {
                 &[&job.0],
             )
             .await?;
+
         rows.iter().map(|r| Ok(r.try_get(0)?)).collect()
     }
 

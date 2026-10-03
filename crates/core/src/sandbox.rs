@@ -108,6 +108,7 @@ pub fn isolate_network() -> Result<(), SandboxError> {
     std::fs::write("/proc/self/uid_map", format!("0 {uid} 1")).map_err(io("writing uid_map"))?;
     std::fs::write("/proc/self/gid_map", format!("0 {gid} 1")).map_err(io("writing gid_map"))?;
     unshare(Namespaces::Network).map_err(io("unsharing the network namespace"))?;
+
     Ok(())
 }
 
@@ -227,5 +228,6 @@ pub fn unavailable(error: &impl std::fmt::Display) -> bool {
 pub fn enter(limits: Limits, access: &FsAccess) -> Result<(), SandboxError> {
     isolate_network()?;
     limit(limits)?;
+
     restrict_fs(access)
 }

@@ -54,6 +54,7 @@ impl RetryPolicy {
         let exponent = attempt.saturating_sub(1).min(63);
         let factor = 1_u64 << exponent;
         let factor = u32::try_from(factor).unwrap_or(u32::MAX);
+
         self.base.saturating_mul(factor).min(self.cap)
     }
 
@@ -61,6 +62,7 @@ impl RetryPolicy {
     pub fn delay<R: rand::Rng + ?Sized>(&self, attempt: u32, rng: &mut R) -> Duration {
         let ceiling = self.ceiling(attempt);
         let millis = u64::try_from(ceiling.as_millis()).unwrap_or(u64::MAX);
+
         Duration::from_millis(rng.random_range(0..=millis))
     }
 }

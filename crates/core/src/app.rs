@@ -135,6 +135,7 @@ impl Stop {
 
             sender.send_replace(true);
         });
+
         Ok(Self(receiver))
     }
 
@@ -188,6 +189,7 @@ fn init_tracing(config: &Config) -> Result<(), Box<dyn std::error::Error + Send 
     };
 
     let builder = tracing_subscriber::fmt().with_env_filter(filter);
+
     match config.telemetry.log_format {
         LogFormat::Json => builder.json().try_init(),
         LogFormat::Pretty => builder.pretty().try_init(),
@@ -202,6 +204,7 @@ mod tests {
 
     fn stop() -> (watch::Sender<bool>, Stop) {
         let (sender, receiver) = watch::channel(false);
+
         (sender, Stop(receiver))
     }
 

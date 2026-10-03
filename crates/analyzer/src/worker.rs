@@ -91,6 +91,7 @@ impl Analyzer {
         self.store
             .complete(job.id, &worker, event, &self.policies, false)
             .await?;
+
         Ok(true)
     }
 
@@ -149,6 +150,7 @@ impl Analyzer {
             "scored"
         );
         self.store.record_verdict(job.id, &verdict).await?;
+
         Ok(escalate)
     }
 
@@ -177,6 +179,7 @@ impl Analyzer {
             .map_err(|e| AnalyzeError::Data(format!("version: {e}")))?;
         let canonical = job.name.to_ascii_lowercase().replace('-', "_");
         let previous = self.store.previous_profile(&canonical, &version).await?;
+
         Ok(score(&Inputs {
             name: &job.name,
             coverage: job.job.coverage_now(),
@@ -219,6 +222,7 @@ impl Analyzer {
         self.store
             .complete(job.id, &worker, JobEvent::Finalized, &self.policies, false)
             .await?;
+
         Ok(true)
     }
 }

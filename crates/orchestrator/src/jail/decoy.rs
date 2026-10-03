@@ -28,6 +28,7 @@ fn plant_at(path: &Path) -> std::io::Result<()> {
         .mode(0o444)
         .open(path)?;
     file.write_all(b"[default]\naws_access_key_id = AKIACRATEWARDDECOY00\n")?;
+
     file.set_times(
         FileTimes::new()
             .set_accessed(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
@@ -86,6 +87,7 @@ pub fn atime_works(dir: &Path) -> std::io::Result<bool> {
     File::open(&probe)?.read_to_end(&mut buffer)?;
     let after = touched_at(&probe);
     std::fs::remove_file(&probe)?;
+
     Ok(!before && after)
 }
 
@@ -105,6 +107,7 @@ mod tests {
         ));
 
         std::fs::create_dir_all(&dir).unwrap();
+
         dir
     }
 

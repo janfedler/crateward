@@ -157,6 +157,7 @@ impl<R: Read> Read for Counting<R> {
                 .get()
                 .saturating_add(u64::try_from(n).unwrap_or(u64::MAX)),
         );
+
         Ok(n)
     }
 }
@@ -286,6 +287,7 @@ fn inspect<R: Read>(
     };
 
     findings.push(finding);
+
     None
 }
 
@@ -409,6 +411,7 @@ mod tests {
         let tar = builder.into_inner().unwrap();
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         io::Write::write_all(&mut gz, &tar).unwrap();
+
         gz.finish().unwrap()
     }
 

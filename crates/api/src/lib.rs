@@ -124,6 +124,7 @@ pub fn stylesheet_version() -> &'static str {
         DASHBOARD_CSS.hash(&mut hasher);
         format!("{:012x}", hasher.finish() & 0xffff_ffff_ffff)
     });
+
     &VERSION
 }
 
@@ -157,6 +158,7 @@ impl From<askama::Error> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         tracing::error!(error = %self.0, "request failed");
+
         (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
     }
 }
@@ -205,6 +207,7 @@ async fn overview_data(store: &Store) -> Result<OverviewData, StoreError> {
 
 async fn overview(State(state): State<Arc<AppState>>) -> Page {
     let o = overview_data(&state.reader).await?;
+
     Ok(Html(OverviewPage { o }.render()?))
 }
 
@@ -235,6 +238,7 @@ async fn events(
 async fn inbox(State(state): State<Arc<AppState>>) -> Page {
     let rows = state.reader.inbox().await?;
     let unreported = state.reader.unreported().await?;
+
     Ok(Html(
         InboxPage {
             rows: rows.into_iter().map(Row::from).collect(),
@@ -292,6 +296,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
         .into_iter()
         .map(Row::from)
         .collect();
+
     Ok(Html(
         JobsPage {
             rows,
@@ -327,6 +332,7 @@ fn code_url(name: &str, version: &str, file: &str, line: Option<u64>) -> String 
     };
 
     let anchor = line.map(|l| format!("#L{l}")).unwrap_or_default();
+
     format!(
         "https://crates.io/crates/{}/{}/code/{}{anchor}",
         encode(name),
@@ -338,6 +344,7 @@ fn code_url(name: &str, version: &str, file: &str, line: Option<u64>) -> String 
 /// A finding's place in the crates.io code viewer.
 fn finding_url(f: &serde_json::Value, name: &str, version: &str) -> String {
     let line = f.get("line").and_then(serde_json::Value::as_u64);
+
     code_url(name, version, &text(f, "file"), line)
 }
 
@@ -443,6 +450,7 @@ fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, Str
         .duration_since(e.at)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     let kind = e.event.get("kind").and_then(serde_json::Value::as_str);
+
     (
         ago(secs),
         e.from,
@@ -454,6 +462,7 @@ fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, Str
 
 fn evidence_view(e: Evidence) -> EvidenceView {
     let techniques = attack::techniques(&e.signal, e.location.as_deref());
+
     EvidenceView {
         techniques,
         points: e.points,
@@ -562,6 +571,7 @@ async fn run_report(
     // safe whatever the database holds.
     let kind: String = kind.chars().filter(char::is_ascii_alphanumeric).collect();
     let disposition = format!("attachment; filename=\"crateward-job-{id}-{kind}.json\"");
+
     Ok((
         [
             (header::CONTENT_TYPE, "application/json".to_owned()),
@@ -594,6 +604,7 @@ async fn review(
     }
 
     tracing::info!(job = id, decision = decision.name(), "review recorded");
+
     Ok(Redirect::to(&format!("/jobs/{id}")).into_response())
 }
 
@@ -635,6 +646,7 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
 /// Fails if the database or the listening socket cannot be set up.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(async {
         let url = config.database.url.expose_secret();
         let reader = Store::connect(url).await.map_err(fatal)?;

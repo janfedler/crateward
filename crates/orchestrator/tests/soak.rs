@@ -104,6 +104,7 @@ fn host_links() -> String {
         .args(["-br", "link"])
         .output()
         .unwrap();
+
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 

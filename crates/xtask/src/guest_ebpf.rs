@@ -85,6 +85,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     std::fs::create_dir_all(&out_dir).map_err(io(&out_dir))?;
     std::fs::write(&out, &object).map_err(io(&out))?;
     eprintln!("xtask: eBPF programs in {}", out.display());
+
     Ok(())
 }
 

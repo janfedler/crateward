@@ -25,6 +25,7 @@ pub struct Question {
 
 fn u16_at(data: &[u8], at: usize) -> Option<u16> {
     let bytes = data.get(at..at.checked_add(2)?)?;
+
     Some(u16::from_be_bytes([*bytes.first()?, *bytes.get(1)?]))
 }
 
@@ -130,6 +131,7 @@ mod tests {
         q.push(0);
         q.extend_from_slice(&qtype.to_be_bytes());
         q.extend_from_slice(&1_u16.to_be_bytes());
+
         q
     }
 

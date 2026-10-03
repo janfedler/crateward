@@ -48,6 +48,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     check_playbooks(&root.join(repo::ANSIBLE))?;
     check_install_script(&root.join(repo::INSTALL_SCRIPT))?;
     check_units(&root.join(repo::UNITS))?;
+
     check_firewall(root)
 }
 
@@ -106,6 +107,7 @@ fn check_units(units: &Path) -> Result<(), TaskError> {
     }
 
     eprintln!("xtask: {} units verify", names.len());
+
     Ok(())
 }
 
@@ -165,6 +167,7 @@ fn check_firewall(root: &Path) -> Result<(), TaskError> {
         "nft -c on the firewall",
     )?;
     eprintln!("xtask: the firewall loads");
+
     Ok(())
 }
 
@@ -176,6 +179,7 @@ mod tests {
 
     fn read(relative: &str) -> String {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
         std::fs::read_to_string(root.join(relative)).unwrap()
     }
 

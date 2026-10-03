@@ -46,5 +46,6 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         pin.version,
         dir.display()
     );
+
     Ok(())
 }

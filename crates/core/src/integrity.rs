@@ -78,6 +78,7 @@ pub fn covered(config: &Config, bin_dir: &Path) -> Result<Vec<PathBuf>, Integrit
 
     files.sort();
     files.dedup();
+
     Ok(files)
 }
 

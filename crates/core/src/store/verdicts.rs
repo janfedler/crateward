@@ -111,6 +111,7 @@ impl Store {
                 &[&job.0, &score, &verdict.level.name(), &value, &version],
             )
             .await?;
+
         Ok(())
     }
 
@@ -132,6 +133,7 @@ impl Store {
             .map_err(|e| corrupt(job.0, format!("verdict: {e}")))?;
         let review: String = row.try_get(1)?;
         let review = Review::parse(&review).ok_or_else(|| corrupt(job.0, "review"))?;
+
         Ok(Some((verdict, review)))
     }
 
@@ -156,6 +158,7 @@ impl Store {
                 &[&job.0, &review.name(), &note],
             )
             .await?;
+
         Ok(updated == 1)
     }
 
@@ -185,6 +188,7 @@ impl Store {
                 &[&version, &limit],
             )
             .await?;
+
         rows.iter().map(super::stored).collect()
     }
 

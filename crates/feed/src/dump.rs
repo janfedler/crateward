@@ -232,6 +232,7 @@ impl Read for ChannelReader {
             .unwrap_or_default()
             .copy_from_slice(self.current.get(..n).unwrap_or_default());
         self.current = self.current.slice(n..);
+
         Ok(n)
     }
 }
@@ -265,6 +266,7 @@ pub async fn refresh(client: &PoliteClient, url: &str, store: &Store) -> Result<
         .into_iter()
         .map(|s| (s.name, s.downloads, s.reverse_dependencies))
         .collect();
+
     Ok(store.upsert_crate_stats(&rows).await?)
 }
 
@@ -296,6 +298,7 @@ mod tests {
     fn gzip(tar: &[u8]) -> Vec<u8> {
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         std::io::Write::write_all(&mut gz, tar).unwrap();
+
         gz.finish().unwrap()
     }
 
@@ -315,6 +318,7 @@ mod tests {
             .map(|s| (s.name, s.downloads, s.reverse_dependencies))
             .collect();
         stats.sort();
+
         stats
     }
 

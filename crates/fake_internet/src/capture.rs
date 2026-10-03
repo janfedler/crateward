@@ -67,6 +67,7 @@ fn ports(proto: u8, payload: &[u8]) -> Option<(u16, u16)> {
 
     let src = u16::from_be_bytes(payload.get(0..2)?.try_into().ok()?);
     let dst = u16::from_be_bytes(payload.get(2..4)?.try_into().ok()?);
+
     Some((src, dst))
 }
 
@@ -82,6 +83,7 @@ pub fn describe(frame: &[u8]) -> Option<String> {
 
     let ethertype = u16::from_be_bytes(frame.get(12..14)?.try_into().ok()?);
     let packet = frame.get(14..).unwrap_or_default();
+
     match ethertype {
         ETHERTYPE_ARP => None,
         ETHERTYPE_IPV4 => {
@@ -155,6 +157,7 @@ mod tests {
         f.extend_from_slice(&src_mac);
         f.extend_from_slice(&ethertype.to_be_bytes());
         f.extend_from_slice(packet);
+
         f
     }
 
@@ -163,6 +166,7 @@ mod tests {
     fn ipv4(proto: u8) -> Vec<u8> {
         let mut p = vec![0x45, 0, 0, 20, 0, 0, 0, 0, 64, proto, 0, 0];
         p.extend_from_slice(&[10, 0, 2, 2, 10, 0, 2, 1]);
+
         p
     }
 

@@ -82,6 +82,7 @@ pub fn parse(manifest: &str, files: &BTreeSet<String>) -> ManifestFacts {
                 .collect()
         })
         .unwrap_or_default();
+
     ManifestFacts {
         build_script,
         proc_macro,

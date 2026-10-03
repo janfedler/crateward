@@ -127,6 +127,7 @@ impl Failure {
     #[must_use]
     pub const fn escalate(mut self, escalation: HumanEscalation) -> Self {
         self.escalation = Some(escalation);
+
         self
     }
 }

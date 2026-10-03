@@ -78,12 +78,14 @@ fn gunzip(bytes: &[u8], limit: u64) -> std::io::Result<Vec<u8>> {
     flate2::read::GzDecoder::new(bytes)
         .take(limit)
         .read_to_end(&mut tar)?;
+
     Ok(tar)
 }
 
 /// Keeps the original `.crate` file, named by its digest.
 fn keep_original(dir: &Path, sha256: &Sha256Digest, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+
     std::fs::write(dir.join(format!("{sha256}.crate")), bytes)
 }
 
@@ -148,6 +150,7 @@ impl Fetcher {
         self.store
             .complete(job.id, &self.worker, event, &self.policies, false)
             .await?;
+
         Ok(true)
     }
 
@@ -202,6 +205,7 @@ impl Fetcher {
             resolved = error.is_none(),
             "fetched"
         );
+
         Ok(FetchResult::Fetched)
     }
 
@@ -290,6 +294,7 @@ impl Fetcher {
         };
 
         self.store.record_crate_file(&file).await?;
+
         Ok(Some(file))
     }
 

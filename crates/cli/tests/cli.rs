@@ -53,6 +53,7 @@ fn run(tool: impl AsRef<Path>, config: Option<&Path>, args: &[&str]) -> Ran {
     }
 
     let output = command.output().unwrap();
+
     Ran {
         code: output.status.code().unwrap(),
         out: String::from_utf8(output.stdout).unwrap(),
@@ -106,6 +107,7 @@ impl Site {
 
         let config = dir.join("crateward.toml");
         std::fs::write(&config, Self::config_text(&dir, database_url)).unwrap();
+
         Self { dir, config }
     }
 

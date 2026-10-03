@@ -106,6 +106,7 @@ impl CgroupTree {
 
         let tree = Self { root };
         tree.prepare()?;
+
         Ok(tree)
     }
 
@@ -120,6 +121,7 @@ impl CgroupTree {
         };
 
         tree.prepare()?;
+
         Ok(tree)
     }
 
@@ -183,6 +185,7 @@ impl CgroupTree {
         }
 
         slot.set("pids.max", &limits.pids.to_string())?;
+
         Ok(slot)
     }
 
@@ -213,6 +216,7 @@ impl CgroupTree {
     /// Fails if the directory cannot be listed.
     pub fn slots(&self) -> Result<Vec<String>, CgroupError> {
         let entries = std::fs::read_dir(&self.root).map_err(io(&self.root))?;
+
         Ok(entries
             .filter_map(Result::ok)
             .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -245,6 +249,7 @@ impl SlotCgroup {
     /// Fails if `cgroup.events` cannot be read.
     pub fn populated(&self) -> Result<bool, CgroupError> {
         let events = read(&self.path.join("cgroup.events"))?;
+
         Ok(events.lines().any(|line| line == "populated 1"))
     }
 
@@ -256,6 +261,7 @@ impl SlotCgroup {
     /// Fails if the file cannot be read.
     pub fn event(&self, file: &str, key: &str) -> Result<u64, CgroupError> {
         let text = read(&self.path.join(file))?;
+
         Ok(text
             .lines()
             .find_map(|line| line.strip_prefix(key)?.trim().parse().ok())
@@ -303,6 +309,7 @@ impl SlotCgroup {
         }
 
         self.kill_and_wait()?;
+
         std::fs::remove_dir(&self.path).map_err(io(&self.path))
     }
 }

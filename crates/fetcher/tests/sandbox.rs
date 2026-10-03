@@ -51,6 +51,7 @@ fn crate_file(entries: &[(&str, tar::EntryType, &[u8], &str)]) -> Vec<u8> {
 
     let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gz.write_all(&builder.into_inner().unwrap()).unwrap();
+
     gz.finish().unwrap()
 }
 

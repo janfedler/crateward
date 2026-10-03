@@ -37,6 +37,7 @@ fn ca_params() -> CertificateParams {
     params.distinguished_name = name;
     params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
     params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
+
     params
 }
 
@@ -48,6 +49,7 @@ fn ca_params() -> CertificateParams {
 pub fn generate_ca() -> Result<(String, String), rcgen::Error> {
     let key = KeyPair::generate()?;
     let cert = ca_params().self_signed(&key)?;
+
     Ok((cert.pem(), key.serialize_pem()))
 }
 
@@ -85,6 +87,7 @@ impl Authority {
     pub fn from_pem(cert_pem: &str, key_pem: &str) -> Result<Self, AuthorityError> {
         let key = KeyPair::from_pem(key_pem)?;
         let ca = pem_der(cert_pem).ok_or(AuthorityError::NotPem)?;
+
         Ok(Self {
             issuer: Issuer::new(ca_params(), key),
             ca,
@@ -98,6 +101,7 @@ impl Authority {
         let cert = params.signed_by(&key, &self.issuer).ok()?;
         let der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der()));
         let signer = any_supported_type(&der).ok()?;
+
         Some(Arc::new(CertifiedKey::new(
             vec![cert.der().clone(), self.ca.clone()],
             signer,
@@ -120,6 +124,7 @@ impl Authority {
 
         let leaf = self.issue(name).or_else(|| self.issue(FALLBACK_NAME))?;
         leaves.insert(name.to_owned(), Arc::clone(&leaf));
+
         Some(leaf)
     }
 }
@@ -139,6 +144,7 @@ fn pem_der(pem: &str) -> Option<CertificateDer<'static>> {
         .take_while(|l| !l.starts_with("-----END"))
         .collect();
     let der = base64_decode(&body).filter(|der| !der.is_empty())?;
+
     Some(CertificateDer::from(der))
 }
 
@@ -184,6 +190,7 @@ pub fn server_config(
     authority: Arc<Authority>,
 ) -> Result<Arc<rustls::ServerConfig>, rustls::Error> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
+
     Ok(Arc::new(
         rustls::ServerConfig::builder_with_provider(provider)
             .with_safe_default_protocol_versions()?

@@ -130,6 +130,7 @@ pub(super) async fn insert_pause(
             &[&reason.name(), &stages, &job, &detail],
         )
         .await?;
+
     Ok(inserted == 1)
 }
 
@@ -146,6 +147,7 @@ pub(super) async fn insert_alert(
         ],
     )
     .await?;
+
     Ok(())
 }
 
@@ -161,6 +163,7 @@ impl Store {
             .client
             .query_one("SELECT extract(epoch FROM now())::bigint", &[])
             .await?;
+
         Ok(row.try_get(0)?)
     }
 
@@ -225,6 +228,7 @@ impl Store {
                 &[&stage.name(), &state.name(), &since, &reopened],
             )
             .await?;
+
         Ok(())
     }
 
@@ -299,6 +303,7 @@ impl Store {
                 &[&reason.name()],
             )
             .await?;
+
         Ok(deleted == 1)
     }
 
@@ -385,6 +390,7 @@ impl Store {
                 &[&dedup_key],
             )
             .await?;
+
         Ok(row.try_get(0)?)
     }
 
@@ -417,6 +423,7 @@ impl Store {
                     .await?
             }
         };
+
         Ok(())
     }
 
@@ -437,6 +444,7 @@ impl Store {
                 &[&canary, &passed, detail],
             )
             .await?;
+
         Ok(())
     }
 

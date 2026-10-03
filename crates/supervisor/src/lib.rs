@@ -102,6 +102,7 @@ impl Supervisor<'_> {
 
         self.escape().await?;
         self.canaries().await?;
+
         self.alerts().await
     }
 
@@ -246,6 +247,7 @@ impl Supervisor<'_> {
 /// Percent of the filesystem holding `path` in use.
 fn usage(path: &Path) -> Option<u8> {
     let stat = rustix::fs::statvfs(path).ok()?;
+
     Some(checks::used_percent(
         stat.f_blocks,
         stat.f_bfree,
@@ -260,6 +262,7 @@ fn usage(path: &Path) -> Option<u8> {
 /// Fails if the database or the HTTP client cannot be set up.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(async {
         let mut store = Store::connect(config.database.url.expose_secret())
             .await

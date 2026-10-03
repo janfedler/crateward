@@ -48,6 +48,7 @@ pub fn diff(
 ) -> VersionDiff {
     let old: HashSet<_> = previous.findings.iter().map(key).collect();
     let new: HashSet<_> = current.findings.iter().map(key).collect();
+
     VersionDiff {
         previous_version: previous_version.to_owned(),
         build_script_added: current.manifest.build_script.is_some()

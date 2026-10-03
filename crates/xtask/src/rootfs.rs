@@ -129,6 +129,7 @@ fn base_name(manifest_text: &str, hook_text: &str) -> String {
     hasher.update(hook_text.as_bytes());
 
     let key = hasher.finalize().to_hex();
+
     format!("base-{}.tar", key.get(..16).unwrap_or_default())
 }
 
@@ -148,6 +149,7 @@ fn base_layer(
 
     build_base(debian, hook_text, &base, epoch)?;
     remove_old_bases(work, &base)?;
+
     Ok(base)
 }
 
@@ -188,6 +190,7 @@ fn stage_file(source: &Path, target: &Path) -> Result<(), TaskError> {
     }
 
     std::fs::copy(source, target).map_err(io(source))?;
+
     Ok(())
 }
 
@@ -232,6 +235,7 @@ fn append_args(tarball: &str, epoch: &str, layer: &Layer<'_>) -> Vec<String> {
 fn append(root: &Path, tarball: &Path, epoch: &str, layer: &Layer<'_>) -> Result<(), TaskError> {
     let args = append_args(&tarball.to_string_lossy(), epoch, layer);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
+
     run_in(root, "tar", &args, &[])
 }
 
@@ -264,6 +268,7 @@ fn pack_image(
 
     let digest = crate::images::blake3_file(&image)?;
     eprintln!("xtask: wrote {} (blake3 {digest})", image.display());
+
     Ok(())
 }
 
@@ -339,6 +344,7 @@ fn stage_toolchain(root: &Path, work: &Path) -> Result<PathBuf, TaskError> {
     }
 
     eprintln!("xtask: staged Rust {} for the guest", pin.version);
+
     Ok(staging)
 }
 
@@ -505,6 +511,7 @@ pub fn bump_snapshot(root: &Path) -> Result<(), TaskError> {
 
     eprintln!("xtask: Debian snapshot {old} -> {today}");
     eprintln!("xtask: next: cargo xtask rootfs, cargo xtask canary, commit, cargo xtask release");
+
     Ok(())
 }
 
@@ -574,6 +581,7 @@ mod stage_tests {
                 ".",
             ],
         );
+
         base
     }
 

@@ -87,6 +87,7 @@ impl<'a, W: Write> Forwarder<'a, W> {
         }
 
         write_message(self.out, &GuestMessage::Exited(exit))?;
+
         Ok(())
     }
 
@@ -195,6 +196,7 @@ pub fn run_job<W: Write>(
     let stop = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(u64::from(spec.timeout_secs));
     let mut forwarder = Forwarder::new(out, spec.output_limit);
+
     std::thread::scope(|scope| {
         if let Some(tracer) = tracer {
             let sender = sender.clone();
@@ -295,6 +297,7 @@ fn supervise<W: Write>(
     // are killed here. A process that left the group with `setsid` dies with
     // the VM, which ends after every job.
     kill_group(pid);
+
     Ok(if timed_out {
         ExitStatus::TimedOut
     } else if let Some(code) = status.code() {

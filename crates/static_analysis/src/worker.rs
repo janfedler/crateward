@@ -134,6 +134,7 @@ impl Analyzer {
         self.store
             .complete(job.id, &worker, event, &policies, false)
             .await?;
+
         Ok(true)
     }
 
@@ -165,6 +166,7 @@ impl Analyzer {
 
         self.unrefreshable
             .extend(outdated.iter().filter(|sha| !reports.contains_key(sha)));
+
         Ok(reports.len())
     }
 
@@ -176,6 +178,7 @@ impl Analyzer {
     pub async fn process(&self, job: &StoredJob) -> Result<Decision, Failure> {
         let (decision, version_diff) = self.assess(job).await?;
         self.record(job, &decision, version_diff.as_ref()).await?;
+
         Ok(decision)
     }
 
@@ -205,6 +208,7 @@ impl Analyzer {
             .await?;
         let version_diff =
             diff_to_previous(report, &reports, history.previous.as_ref(), &dependencies);
+
         Ok((decide(report, &facts), version_diff))
     }
 
@@ -240,6 +244,7 @@ impl Analyzer {
     /// checksums. Packages without a SHA-256 checksum are left out.
     async fn dependencies(&self, job: &StoredJob) -> Result<Vec<(Locked, Sha256Digest)>, Failure> {
         let packages = self.store.fetch_packages(job.id).await?;
+
         Ok(packages
             .map(|value| parse_locked(&value))
             .unwrap_or_default()
@@ -304,6 +309,7 @@ impl Analyzer {
                 version_diff.map(json).as_ref(),
             )
             .await?;
+
         Ok(())
     }
 
@@ -394,6 +400,7 @@ impl Analyzer {
                 &json(report),
             )
             .await?;
+
         Ok(())
     }
 }
@@ -471,6 +478,7 @@ fn diff_to_previous(
     let old = reports.get(&previous.cksum)?;
     let current = dependencies.iter().map(|(p, _)| p.name.clone()).collect();
     let version = previous.version.to_string();
+
     Some(diff(report, old, &version, &current, &previous.names))
 }
 
@@ -479,6 +487,7 @@ fn diff_to_previous(
 fn json<T: serde::Serialize>(value: &T) -> serde_json::Value {
     let mut value = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
     scrub(&mut value);
+
     value
 }
 

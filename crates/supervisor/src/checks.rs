@@ -12,6 +12,7 @@ pub fn used_percent(total: u64, free: u64, available: u64) -> u8 {
     }
 
     let percent = (u128::from(used) * 100).div_ceil(u128::from(usable));
+
     u8::try_from(percent.min(100)).unwrap_or(100)
 }
 
@@ -38,6 +39,7 @@ pub fn canary_action(latest: &[(String, bool, i64)]) -> CanaryAction {
         .filter(|(_, passed, _)| !passed)
         .map(|(name, _, _)| name.clone())
         .collect();
+
     if failed.is_empty() {
         CanaryAction::AllPassed
     } else {
@@ -49,6 +51,7 @@ pub fn canary_action(latest: &[(String, bool, i64)]) -> CanaryAction {
 #[must_use]
 pub fn should_send(seconds_since_sent: Option<i64>, repeat_hours: u64) -> bool {
     let repeat = i64::try_from(repeat_hours.saturating_mul(3600)).unwrap_or(i64::MAX);
+
     seconds_since_sent.is_none_or(|since| since >= repeat)
 }
 
@@ -123,6 +126,7 @@ pub fn stray_processes(
 
     stray.sort_unstable();
     stray.dedup();
+
     stray
 }
 

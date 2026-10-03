@@ -95,6 +95,7 @@ fn run_validate(name: &str, version: &str) -> Result<(), Box<dyn Error>> {
     sandbox::enter(VALIDATE_LIMITS, &FsAccess::default())?;
     let stdin = io::stdin().lock().take(MAX_CRATE_BYTES);
     let report = validate(stdin, name, version, &ArchiveLimits::default());
+
     write_json(&report)
 }
 
@@ -102,6 +103,7 @@ fn write_json(value: &impl Serialize) -> Result<(), Box<dyn Error>> {
     let mut stdout = io::stdout().lock();
     serde_json::to_writer(&mut stdout, value)?;
     stdout.flush()?;
+
     Ok(())
 }
 
@@ -146,6 +148,7 @@ fn serve_relay(socket: &Path) -> Result<u16, Box<dyn Error>> {
             std::thread::spawn(move || relay(stream, &socket));
         }
     });
+
     Ok(port)
 }
 
@@ -167,6 +170,7 @@ fn resolve_access(workdir: &Path, cargo: &Path) -> FsAccess {
         .parent()
         .and_then(Path::parent)
         .map_or_else(|| PathBuf::from("/nonexistent"), Path::to_path_buf);
+
     FsAccess {
         read: vec![
             toolchain,
@@ -188,6 +192,7 @@ fn run_resolve(workdir: &Path, socket: &Path, cargo: &Path) -> Result<(), Box<dy
     write_cargo_config(workdir, port)?;
     sandbox::limit(RESOLVE_LIMITS)?;
     sandbox::restrict_fs(&resolve_access(workdir, cargo))?;
+
     write_json(&run_cargo(workdir, cargo)?)
 }
 
@@ -224,6 +229,7 @@ fn run_cargo(workdir: &Path, cargo: &Path) -> Result<ResolveOutcome, ChildError>
 fn last_lines(text: &str, count: usize) -> String {
     let mut lines: Vec<&str> = text.lines().rev().take(count).collect();
     lines.reverse();
+
     lines.join("\n")
 }
 

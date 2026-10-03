@@ -19,6 +19,7 @@ struct Mount {
 
 fn mounts() -> [Mount; 4] {
     let hardened = MountFlags::NOSUID | MountFlags::NODEV;
+
     [
         Mount {
             source: "proc",

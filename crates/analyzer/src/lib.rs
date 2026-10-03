@@ -39,6 +39,7 @@ pub const COMPONENT: Component = Component::Analyzer;
 /// Returns a [`ComponentError`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(async {
         let mut store = Store::connect(config.database.url.expose_secret())
             .await

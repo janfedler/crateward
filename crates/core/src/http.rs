@@ -169,6 +169,7 @@ impl PoliteClient {
             .https_only(!config.allow_plain_http)
             .redirect(reqwest::redirect::Policy::limited(3))
             .build()?;
+
         Ok(Self {
             client,
             pacer: Arc::new(Pacer::new(config.requests_per_second)),
@@ -250,6 +251,7 @@ impl PoliteClient {
         self.pacer.wait().await;
 
         let response = self.client.get(url).send().await?;
+
         match response.status().as_u16() {
             200 => Ok(Some(response)),
             404 | 410 | 451 => Ok(None),

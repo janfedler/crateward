@@ -149,6 +149,7 @@ pub fn plan(
     packages.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
     result.packages = packages;
     result.units = built.len();
+
     result
 }
 
@@ -175,6 +176,7 @@ fn script(plan: &Plan, probe_secs: u64) -> String {
     }
 
     out.push_str("[ -z \"$slow\" ] || echo \"crateward-warm: timed out:$slow\" >&2\n");
+
     out
 }
 
@@ -194,6 +196,7 @@ pub fn rejection(report: &RunReport) -> Option<String> {
     }
 
     let entry = unexpected_entry(scratch)?;
+
     Some(format!(
         "the scratch disk holds unexpected entries: {entry}"
     ))
@@ -320,6 +323,7 @@ pub async fn plan_from_store(
         .into_iter()
         .map(|(sha, blake3)| (hex(&sha), blake3))
         .collect();
+
     Ok(plan(
         &samples,
         &eligible,
@@ -351,6 +355,7 @@ pub fn machine(sandbox: &SandboxConfig, config: &WarmConfig) -> Option<(u8, u32)
     }
 
     let vcpus = sandbox.slots.saturating_mul(sandbox.vcpus_per_slot);
+
     Some((u8::try_from(vcpus).ok()?, u32::try_from(memory).ok()?))
 }
 
@@ -419,6 +424,7 @@ pub enum CheckError {
 
 fn image_io(path: &Path) -> impl FnOnce(std::io::Error) -> WarmError {
     let path = path.to_path_buf();
+
     move |source| WarmError::Image { path, source }
 }
 
@@ -461,6 +467,7 @@ pub async fn build(
 
     let result = replay(sandbox, builder, config, plan, spec, &files).await;
     files.remove();
+
     result.map(Some)
 }
 
@@ -548,6 +555,7 @@ async fn pack(
     ));
 
     std::fs::rename(&staging, &named).map_err(image_io(&staging))?;
+
     Ok(named)
 }
 
@@ -615,6 +623,7 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
 fn blake3_file(path: &Path) -> std::io::Result<String> {
     let mut hasher = blake3::Hasher::new();
     hasher.update_reader(std::fs::File::open(path)?)?;
+
     Ok(hasher.finalize().to_hex().to_string())
 }
 
@@ -628,6 +637,7 @@ mod tests {
             deps.iter()
                 .map(|(n, v)| (((*n).to_owned(), (*v).to_owned()), format!("sum-{n}-{v}"))),
         );
+
         Sample {
             name: name.into(),
             version: "1.0.0".into(),
@@ -858,6 +868,7 @@ mod tests {
     fn rejected(change: Edit<RunReport>) -> Option<String> {
         let mut report = clean();
         change(&mut report);
+
         rejection(&report)
     }
 

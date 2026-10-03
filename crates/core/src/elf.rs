@@ -11,16 +11,19 @@ const PT_INTERP: u32 = 3;
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     let raw = bytes.get(offset..offset.checked_add(2)?)?;
+
     Some(u16::from_le_bytes(raw.try_into().ok()?))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     let raw = bytes.get(offset..offset.checked_add(4)?)?;
+
     Some(u32::from_le_bytes(raw.try_into().ok()?))
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     let raw = bytes.get(offset..offset.checked_add(8)?)?;
+
     Some(u64::from_le_bytes(raw.try_into().ok()?))
 }
 

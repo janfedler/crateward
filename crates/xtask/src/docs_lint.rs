@@ -169,6 +169,7 @@ fn prose_source(line: &str, kind: Kind) -> Option<&str> {
 fn strip_html_comments(line: &str, in_comment: &mut bool) -> String {
     let mut out = String::new();
     let mut rest = line;
+
     loop {
         if *in_comment {
             match rest.find("-->") {
@@ -272,6 +273,7 @@ fn autolink_end(chars: &[char], start: usize) -> Option<usize> {
     }
 
     let close = chars.get(start..)?.iter().position(|&c| c == '>');
+
     Some(close.map_or(chars.len(), |p| start + p + 1))
 }
 

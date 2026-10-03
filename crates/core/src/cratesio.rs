@@ -196,6 +196,7 @@ pub fn parse_pubtime(text: &str) -> Option<SystemTime> {
     let num = |from: usize, to: usize| text.get(from..to)?.parse::<u32>().ok();
     let (year, month, day) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
     let (hour, minute, second) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
+
     unix_time(year, month, day, hour, minute, second)
 }
 
@@ -228,6 +229,7 @@ fn unix_time(
     let days = era * 146_097 + doe - 719_468;
     let secs = days * 86_400 + i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second);
     let secs = u64::try_from(secs).ok()?;
+
     UNIX_EPOCH.checked_add(Duration::from_secs(secs))
 }
 
@@ -459,6 +461,7 @@ fn feed_item(name: Option<String>, version: Option<String>) -> Option<FeedItem> 
         .map(|v| semver::Version::parse(&v))
         .transpose()
         .ok()?;
+
     Some(FeedItem {
         name: CrateName::parse(&name?).ok()?,
         version,
@@ -588,6 +591,7 @@ mod tests {
     fn feed_of(items: &str) -> Feed {
         let xml =
             format!("<rss xmlns:crates=\"https://crates.io/\"><channel>{items}</channel></rss>");
+
         parse_feed(&xml).unwrap()
     }
 

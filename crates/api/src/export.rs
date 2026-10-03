@@ -182,6 +182,7 @@ pub fn render(
         // Serve the files as they are, without Jekyll processing.
         (".nojekyll".into(), Vec::new()),
     ]);
+
     Ok(files)
 }
 
@@ -277,6 +278,7 @@ pub async fn publish(
     )
     .await?;
     git(&checkout, key, &["push", "--quiet", "origin", branch]).await?;
+
     Ok(true)
 }
 
@@ -290,6 +292,7 @@ pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, ExportError>
     let canaries = store.latest_canaries().await?;
     let findings = store.published_findings().await?;
     let now = store.now_epoch().await?;
+
     render(&stats, &canaries, &findings, &format_utc(now))
 }
 
@@ -309,6 +312,7 @@ pub fn format_utc(secs: i64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
+
     format!(
         "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
         rest / 3600,
@@ -351,6 +355,7 @@ mod tests {
             std::env::temp_dir().join(format!("crateward-export-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+
         dir
     }
 
@@ -398,6 +403,7 @@ mod tests {
         );
         let bare = root.join("site.git");
         git_in(&seed, &["push", "--quiet", &bare.to_string_lossy(), "main"]);
+
         ExportConfig {
             repository: format!("file://{}", bare.display()),
             branch: "main".into(),

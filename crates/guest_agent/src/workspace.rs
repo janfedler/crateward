@@ -85,6 +85,7 @@ fn failed(
     path: impl AsRef<Path>,
 ) -> impl FnOnce(io::Error) -> WorkspaceError {
     let path = path.as_ref().to_owned();
+
     move |source| WorkspaceError::Io {
         action,
         path,
@@ -95,6 +96,7 @@ fn failed(
 /// For `map_err`: mounting `m` failed.
 fn mount_failed(m: &MountSpec) -> impl FnOnce(Errno) -> WorkspaceError {
     let (device, target) = (m.device.clone(), m.target.clone());
+
     move |source| WorkspaceError::Mount {
         device,
         target,
@@ -109,6 +111,7 @@ fn plain(path: &str) -> Result<&Path, WorkspaceError> {
         && !path.contains('\0')
         && p.components()
             .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
+
     if ok {
         Ok(p)
     } else {
@@ -223,6 +226,7 @@ fn make_dir(spec: &PathSpec) -> Result<(), WorkspaceError> {
 
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(spec.mode))
         .map_err(failed("chmod", path))?;
+
     chown(path, spec.owner)
 }
 
@@ -236,6 +240,7 @@ fn write_file(spec: &FileSpec) -> Result<(), WorkspaceError> {
         .map_err(failed("create", path))?;
     file.write_all(&spec.contents)
         .map_err(failed("write", path))?;
+
     chown(path, spec.path.owner)
 }
 

@@ -159,6 +159,7 @@ fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), TaskError> {
     }
 
     std::fs::copy(from, to).map_err(io(to))?;
+
     std::fs::set_permissions(to, std::fs::Permissions::from_mode(mode)).map_err(io(to))
 }
 
@@ -166,6 +167,7 @@ fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), TaskError> {
 fn read_toml<T: DeserializeOwned>(root: &Path, path: &str) -> Result<T, TaskError> {
     let file = root.join(path);
     let text = std::fs::read_to_string(&file).map_err(io(&file))?;
+
     toml::from_str(&text).map_err(|e| TaskError::Check(format!("{path}: {e}")))
 }
 
@@ -194,6 +196,7 @@ fn run_in(
         .args(args)
         .envs(envs.iter().copied())
         .current_dir(dir);
+
     run_command(&mut command)
 }
 
@@ -211,6 +214,7 @@ fn run_command(command: &mut Command) -> Result<(), TaskError> {
     let status = command
         .status()
         .map_err(|error| TaskError::Command(format!("cannot start {rendered}: {error}")))?;
+
     if status.success() {
         Ok(())
     } else {
@@ -312,6 +316,7 @@ fn ci() -> Result<(), TaskError> {
     run("cargo", &["audit"], &[])?;
     run("cargo", &["vet", "--locked"], &[])?;
     eprintln!("xtask: all checks passed");
+
     Ok(())
 }
 
@@ -348,6 +353,7 @@ fn guest_agent() -> Result<(), TaskError> {
     )?;
     let binary = workspace_root().join(build::GUEST_AGENT);
     let bytes = std::fs::read(&binary).map_err(io(&binary))?;
+
     match crateward_core::elf::is_static(&bytes) {
         Ok(true) => {
             eprintln!("xtask: {} is statically linked", binary.display());
@@ -366,6 +372,7 @@ fn guest_agent() -> Result<(), TaskError> {
 /// guest images and subordinate IDs, so it only runs on the server.
 fn soak(jobs: u32) -> Result<(), TaskError> {
     let jobs = jobs.to_string();
+
     run(
         "systemd-run",
         &[
@@ -420,6 +427,7 @@ fn canary() -> Result<(), TaskError> {
         // code. Installing `musl-tools` is the proper fix.
         &[("CC_x86_64_unknown_linux_musl", musl_cc())],
     )?;
+
     run(
         "systemd-run",
         &[
@@ -476,5 +484,6 @@ fn vendor() -> Result<(), TaskError> {
         &[],
     )?;
     eprintln!("xtask: wrote {}", build::VENDOR_ARCHIVE);
+
     Ok(())
 }

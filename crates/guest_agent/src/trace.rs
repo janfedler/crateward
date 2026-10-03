@@ -122,6 +122,7 @@ fn string(buffer: &[u8], len: i32) -> Vec<u8> {
     let len = usize::try_from(len).unwrap_or(0).min(buffer.len());
     let bytes = buffer.get(..len).unwrap_or_default();
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+
     bytes.get(..end).unwrap_or_default().to_vec()
 }
 
@@ -190,6 +191,7 @@ pub fn decode(record: &[u8], start_ns: u64) -> Option<TraceEvent> {
     let time_ns = u64_at(record, 16)?;
     let ms = u32::try_from(time_ns.saturating_sub(start_ns) / 1_000_000).unwrap_or(u32::MAX);
     let kind = event_kind(kind, record.get(HEADER_LEN..)?)?;
+
     Some(TraceEvent {
         ms,
         pid,
@@ -378,6 +380,7 @@ where
     P: TryFrom<&'a mut Program, Error = ProgramError>,
 {
     let program = ebpf.program_mut(name).ok_or(TraceError::NoProgram(name))?;
+
     program.try_into().map_err(TraceError::program(name))
 }
 
@@ -387,6 +390,7 @@ fn map<M: TryFrom<Map, Error = MapError>>(
     name: &'static str,
 ) -> Result<M, TraceError> {
     let map = ebpf.take_map(name).ok_or(TraceError::NoMap(name))?;
+
     M::try_from(map).map_err(|source| TraceError::Map { name, source })
 }
 
@@ -425,6 +429,7 @@ impl Tracer {
 
         let ring = map(&mut ebpf, "EVENTS")?;
         let dropped = map(&mut ebpf, "DROPPED")?;
+
         Ok(Self {
             _ebpf: ebpf,
             ring,
@@ -536,6 +541,7 @@ mod tests {
         }
 
         r.extend_from_slice(&time_ns.to_le_bytes());
+
         r
     }
 
@@ -549,6 +555,7 @@ mod tests {
         let mut a = args.to_vec();
         a.resize(ARGS_LEN, 0);
         r.extend_from_slice(&a);
+
         r
     }
 

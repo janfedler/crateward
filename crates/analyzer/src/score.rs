@@ -118,6 +118,7 @@ impl Groups {
 
         out.sort_by(|a, b| b.points.cmp(&a.points).then(a.signal.cmp(&b.signal)));
         let total = out.iter().map(|e| e.points).sum::<u32>().min(100);
+
         (total, out)
     }
 }
@@ -169,6 +170,7 @@ fn build_dir_package(path: &str) -> Option<String> {
     let rest = path.split("/debug/build/").nth(1)?;
     let dir = rest.split('/').next()?;
     let (package, hash) = dir.rsplit_once('-')?;
+
     (hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then(|| package.to_owned())
 }
 
@@ -176,6 +178,7 @@ fn build_dir_package(path: &str) -> Option<String> {
 fn build_script_package(exe: &str) -> Option<String> {
     let dir = exe.rsplit('/').nth(1)?;
     let (package, hash) = dir.rsplit_once('-')?;
+
     (hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit())).then(|| package.to_owned())
 }
 
@@ -219,6 +222,7 @@ fn persistence(path: &str) -> bool {
 /// Programs worth noting when a build script runs them.
 fn notable_program(exe: &str) -> Option<(&'static str, u32)> {
     let name = exe.rsplit('/').next().unwrap_or(exe);
+
     Some(match name {
         "curl" | "wget" => ("downloader", 5),
         "nc" | "ncat" | "netcat" | "socat" | "ssh" | "scp" => ("network-tool", 15),
@@ -235,6 +239,7 @@ fn notable_program(exe: &str) -> Option<(&'static str, u32)> {
 /// only code that runs at build time weighs much.
 fn static_points(f: &Finding) -> u32 {
     let build = f.context.runs_at_build_time();
+
     match (f.severity, build) {
         (Severity::High, true) => 30,
         (Severity::High, false) | (Severity::Medium, true) => 10,
@@ -729,6 +734,7 @@ pub fn score(inputs: &Inputs<'_>) -> Verdict {
     }
 
     let (score, evidence) = groups.finish();
+
     Verdict {
         score,
         level: RiskLevel::from_score(score),

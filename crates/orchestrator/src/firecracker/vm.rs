@@ -114,6 +114,7 @@ pub enum VmError {
 
 fn io_error(context: impl Into<String>) -> impl FnOnce(std::io::Error) -> VmError {
     let context = context.into();
+
     move |source| VmError::Io { context, source }
 }
 
@@ -351,6 +352,7 @@ impl Launch {
         crate::jail::host::prepare_root(&self.jail_root(), jail.vm_uid)?;
         let spec = self.jail_spec(jail, files, log);
         let ids = IdMap::for_slot(jail.vm_uid, jail.vm_gid);
+
         Ok(crate::jail::host::spawn(&jail.launcher, &spec, ids).await?)
     }
 }
@@ -380,6 +382,7 @@ impl Vm {
         };
 
         vm.wait_for_socket(&socket).await?;
+
         Ok(vm)
     }
 
@@ -427,6 +430,7 @@ impl Vm {
         };
 
         vm.api.put("/actions", &start).await?;
+
         Ok(vm)
     }
 
@@ -489,6 +493,7 @@ impl Vm {
         };
 
         api.put("/vsock", &vsock).await?;
+
         Ok(())
     }
 
@@ -681,6 +686,7 @@ impl Vm {
     /// Fails if the process cannot be reaped or the directory not removed.
     pub async fn destroy(mut self) -> Result<(), VmError> {
         self.kill().await?;
+
         self.remove().await
     }
 

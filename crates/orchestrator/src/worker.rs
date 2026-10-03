@@ -255,6 +255,7 @@ fn route(dst: &str, sniffed: &Sniffed) -> String {
 
 fn tail(bytes: &[u8]) -> String {
     let start = bytes.len().saturating_sub(OUTPUT_TAIL);
+
     String::from_utf8_lossy(bytes.get(start..).unwrap_or_default()).into_owned()
 }
 
@@ -323,6 +324,7 @@ impl SandboxWorker {
         lease: Duration,
     ) -> Self {
         let worker = format!("orchestrator-{}-slot{}", std::process::id(), sandbox.slot);
+
         Self {
             store,
             heartbeats: Arc::new(heartbeats),
@@ -388,6 +390,7 @@ impl SandboxWorker {
         let files = JobFiles::named(setup, canary.name);
         let result = self.sandbox.execute(0, spec, &tokens, &files, &plan).await;
         files.remove();
+
         result
     }
 
@@ -448,6 +451,7 @@ impl SandboxWorker {
         self.store
             .complete(job.id, &self.worker, event, &self.policies, false)
             .await?;
+
         Ok(true)
     }
 
@@ -473,6 +477,7 @@ impl SandboxWorker {
         let files = JobFiles::named(&self.sandbox.setup, &format!("job-{}", job.id.0));
         let result = self.run_with(job, &files).await;
         files.remove();
+
         result
     }
 
@@ -507,6 +512,7 @@ impl SandboxWorker {
                 &value,
             )
             .await?;
+
         Ok(report)
     }
 
@@ -589,6 +595,7 @@ impl JobFiles {
     #[must_use]
     pub fn named(setup: &WorkerSetup, stem: &str) -> Self {
         let file = |kind: &str| setup.work_dir.join(format!("{stem}.{kind}"));
+
         Self {
             payload: file("payload"),
             scratch: file("scratch"),
@@ -692,6 +699,7 @@ impl Sandbox {
         let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
         let in_trace = ended.trace.find(&values).into_iter().take(MAX_LISTED);
         let tokens_in_trace = leaks(tokens, in_trace);
+
         Ok(RunReport {
             scratch,
             tokens_on_disk,
@@ -722,6 +730,7 @@ impl Sandbox {
         make_scratch(self.setup.scratch_mib, &files.scratch).await?;
         crate::jail::acl::grant_user(&files.scratch, self.backend.slot_uid(self.slot))
             .map_err(Failure::infrastructure)?;
+
         Ok(stats)
     }
 }
@@ -752,6 +761,7 @@ fn job_input(
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .chain(tokens.env.clone())
         .collect();
+
     JobInput {
         spec: JobSpec {
             job_id,
@@ -918,6 +928,7 @@ pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
             guest::WARM_WORK
         )),
     });
+
     (mounts, Vec::new())
 }
 
@@ -941,6 +952,7 @@ async fn scan_scratch(
     let result =
         tokio::task::spawn_blocking(move || crate::scratch::scan_in_sandbox(&exe, &image, &spec))
             .await;
+
     match result {
         Ok(Ok(report)) => Some(report),
         Ok(Err(error)) => {
@@ -991,6 +1003,7 @@ async fn make_scratch(mib: u64, path: &Path) -> Result<(), Failure> {
         .status()
         .await
         .map_err(Failure::infrastructure)?;
+
     if status.success() {
         Ok(())
     } else {
@@ -1180,6 +1193,7 @@ mod tests {
     fn network_log(name: &str, contents: &[u8]) -> PathBuf {
         let path = std::env::temp_dir().join(format!("cw-netlog-{}-{name}", std::process::id()));
         std::fs::write(&path, contents).unwrap();
+
         path
     }
 

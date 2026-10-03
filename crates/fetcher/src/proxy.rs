@@ -172,6 +172,7 @@ pub fn serve(
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
     let listener = UnixListener::bind(socket)?;
     let target = Arc::new(target);
+
     Ok(tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             let (index, target) = (index.clone(), Arc::clone(&target));

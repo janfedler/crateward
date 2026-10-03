@@ -124,6 +124,7 @@ impl<'a> Reader<'a> {
     fn take(&mut self, n: usize) -> Option<&'a [u8]> {
         let out = self.data.get(self.at..self.at.checked_add(n)?)?;
         self.at += n;
+
         Some(out)
     }
 
@@ -133,6 +134,7 @@ impl<'a> Reader<'a> {
 
     fn u16(&mut self) -> Option<usize> {
         let b = self.take(2)?;
+
         Some(usize::from(u16::from_be_bytes([*b.first()?, *b.get(1)?])))
     }
 }

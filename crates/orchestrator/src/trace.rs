@@ -75,6 +75,7 @@ const TOOLCHAIN: [&str; 25] = [
 
 fn role(exe: &str) -> Role {
     let name = exe.rsplit('/').next().unwrap_or(exe);
+
     if name == "cargo" {
         Role::Cargo
     } else if name == "rustc" {
@@ -289,6 +290,7 @@ impl TraceBuilder {
             ended_ms: None,
             became_root: false,
         });
+
         self.summary.processes.last_mut()
     }
 

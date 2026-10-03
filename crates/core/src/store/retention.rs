@@ -54,6 +54,7 @@ impl Store {
                 &[&days, &limit],
             )
             .await?;
+
         Ok(trimmed)
     }
 }

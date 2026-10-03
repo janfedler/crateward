@@ -65,6 +65,7 @@ async fn start(config: &Config) -> Result<Feed, FeedError> {
 
     let mut feed = Feed::new(rss, index, urls, store);
     feed.popular_threshold = i64::from(config.triage.popular_min_reverse_dependencies);
+
     Ok(feed)
 }
 
@@ -104,6 +105,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
             tokio::time::sleep(every).await;
         }
     });
+
     Ok(())
 }
 
@@ -115,6 +117,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
 /// permanent error, and systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(async {
         let mut feed = start(config).await.map_err(fatal)?;
         spawn_dump_refresh(config)?;

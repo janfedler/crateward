@@ -381,6 +381,7 @@ pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
     }
 
     entry.submit(0);
+
     0
 }
 
@@ -449,6 +450,7 @@ pub fn file_open(ctx: LsmContext) -> i32 {
     }
 
     entry.submit(0);
+
     0
 }
 
@@ -502,6 +504,7 @@ pub fn socket_connect(ctx: LsmContext) -> i32 {
     let address: *const u8 = ctx.arg(1);
     let addr_len: u64 = ctx.arg(2);
     socket_event(KIND_CONNECT, socket, address, addr_len as u32);
+
     0
 }
 
@@ -612,6 +615,7 @@ pub fn sb_mount(ctx: LsmContext) -> i32 {
     }
 
     entry.submit(0);
+
     0
 }
 

@@ -98,6 +98,7 @@ impl From<ChildError> for io::Error {
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     command.env_clear();
+
     command
 }
 
@@ -120,6 +121,7 @@ fn drain(mut pipe: ChildStderr) -> String {
     let mut kept = Vec::new();
     let _ = pipe.by_ref().take(STDERR_LIMIT).read_to_end(&mut kept);
     let _ = io::copy(&mut pipe, &mut io::sink());
+
     String::from_utf8_lossy(&kept).trim().to_owned()
 }
 
@@ -151,6 +153,7 @@ impl Child {
             .stderr
             .take()
             .map(|pipe| std::thread::spawn(move || drain(pipe)));
+
         Ok(Self {
             name,
             process,
@@ -204,6 +207,7 @@ impl Child {
             .read_to_end(&mut out)
             .map_err(ChildError::io(self.name, "reading stdout"))?;
         self.finish(None)?;
+
         Ok(out)
     }
 
@@ -233,6 +237,7 @@ impl Child {
             .take()
             .and_then(|thread| thread.join().ok())
             .unwrap_or_default();
+
         Err(ChildError::Failed {
             child: self.name,
             status,
@@ -285,12 +290,14 @@ mod tests {
             .args(["-c", script])
             .stdin(Stdio::null())
             .stdout(Stdio::null());
+
         shell
     }
 
     fn shell_with_stdout(script: &str) -> Command {
         let mut shell = shell(script);
         shell.stdout(Stdio::piped());
+
         shell
     }
 

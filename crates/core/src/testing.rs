@@ -93,6 +93,7 @@ impl TestDb {
             .batch_execute(&format!("SET search_path TO {}", self.schema))
             .await
             .unwrap();
+
         client
     }
 
@@ -109,6 +110,7 @@ impl TestDb {
     pub async fn migrated(&self) -> Store {
         let mut store = self.store().await;
         store.migrate().await.unwrap();
+
         store
     }
 
@@ -128,6 +130,7 @@ impl TestDb {
 async fn connect(config: &str) -> Client {
     let (client, connection) = tokio_postgres::connect(config, NoTls).await.unwrap();
     tokio::spawn(connection);
+
     client
 }
 
@@ -140,6 +143,7 @@ async fn connect(config: &str) -> Client {
 #[must_use]
 pub fn policies() -> Policies {
     let policy = RetryPolicy::new(Duration::from_secs(60), Duration::from_secs(600)).unwrap();
+
     Policies {
         limits: Limits::uniform(StageLimits {
             max_attempts: 3,

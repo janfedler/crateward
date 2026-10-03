@@ -209,6 +209,7 @@ where
         .enable_all()
         .build()
         .map_err(CliError::Runtime)?;
+
     runtime.block_on(async {
         let store = Store::connect(config.database.url.expose_secret()).await?;
         action(store).await
@@ -250,6 +251,7 @@ async fn status(store: Store) -> Result<(), CliError> {
         "alerts waiting: {}",
         store.pending_alerts(1000).await?.len()
     );
+
     Ok(())
 }
 
@@ -268,6 +270,7 @@ fn breaker_close(config: &Path, stage: &str) -> Result<(), CliError> {
         .into_iter()
         .find(|s| s.name() == stage)
         .ok_or_else(|| CliError::UnknownStage(stage.to_owned()))?;
+
     with_store(&Config::load(config)?, |store| async move {
         store.set_breaker(stage, BreakerState::Closed).await?;
         out!("breaker of {} closed", stage.name());
@@ -278,6 +281,7 @@ fn breaker_close(config: &Path, stage: &str) -> Result<(), CliError> {
 fn config_check(path: &Path) -> Result<(), CliError> {
     Config::load(path)?;
     out!("{} is valid", path.display());
+
     Ok(())
 }
 

@@ -33,6 +33,7 @@ const TEST_SUBID_BASE: u32 = 160_000;
 
 fn boot_spec() -> BootSpec {
     let kernel = kernel();
+
     BootSpec {
         kernel,
         rootfs: root().join(build::ROOTFS_IMAGE),
@@ -49,6 +50,7 @@ fn scratch(name: &str) -> PathBuf {
         .join("target/vm-tests")
         .join(format!("{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
+
     dir
 }
 

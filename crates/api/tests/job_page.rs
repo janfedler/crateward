@@ -43,12 +43,14 @@ impl Dashboard {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(axum::serve(listener, router(Arc::new(state), port)).into_future());
+
         Some(Self { db, store, port })
     }
 
     /// The status and body of a `GET`.
     async fn get(&self, path: &str) -> (u16, String) {
         let (status, _, body) = self.fetch(path).await;
+
         (status, body)
     }
 
@@ -63,6 +65,7 @@ impl Dashboard {
         let text = String::from_utf8(raw).unwrap();
         let (head, body) = text.split_once("\r\n\r\n").unwrap();
         let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+
         (status, head.to_ascii_lowercase(), body.to_owned())
     }
 
@@ -142,6 +145,7 @@ fn evidence(
 /// escaping.
 fn verdict() -> Verdict {
     use EvidenceSource::{Diff, Disk, Network, Run, Static, Trace};
+
     Verdict {
         score: 85,
         level: RiskLevel::from_score(85),
@@ -267,6 +271,7 @@ fn table(html: &str, heading: &str) -> Vec<Row> {
     let after = &html[html.find(heading).unwrap()..];
     let start = after.find("<table").unwrap();
     let end = after.find("</table>").unwrap();
+
     after[start..end].split("<tr").skip(1).map(cells).collect()
 }
 
@@ -275,6 +280,7 @@ fn list(html: &str, heading: &str) -> Vec<String> {
     let after = &html[html.find(heading).unwrap()..];
     let end = after.find("</ul>").unwrap();
     let item = |item: &str| unescape(item.trim_end_matches("</li>"));
+
     after[..end].split("<li>").skip(1).map(item).collect()
 }
 
@@ -299,6 +305,7 @@ fn text(html: &str, open: &str, close: &str) -> String {
 /// The section of a run.
 fn run_section<'a>(html: &'a str, kind: &str) -> &'a str {
     let after = &html[html.find(&format!("<h2>Run: {kind}</h2>")).unwrap()..];
+
     &after[..after.find("</section>").unwrap()]
 }
 
@@ -349,6 +356,7 @@ async fn seed_full_job(db: &mut Dashboard) -> JobId {
         .await
         .unwrap()
         .unwrap();
+
     job
 }
 

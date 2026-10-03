@@ -123,6 +123,7 @@ fn sections(data: &[u8]) -> Result<(&[u8], &[u8]), BtfError> {
 
     let types = section(type_off, type_len).ok_or(BtfError::SectionOutOfBounds)?;
     let strings = section(str_off, str_len).ok_or(BtfError::SectionOutOfBounds)?;
+
     Ok((types, strings))
 }
 
@@ -193,6 +194,7 @@ fn extra_len(kind: u32, count: usize) -> Result<usize, BtfError> {
 
 fn read_member(data: &[u8], at: usize, kind_flag: bool) -> Result<Member, BtfError> {
     let offset = u32_at(data, at + 8)?;
+
     Ok(Member {
         name: u32_at(data, at)?,
         ty: u32_at(data, at + 4)?,
@@ -220,6 +222,7 @@ impl Btf {
         };
 
         btf.structs = btf.struct_index();
+
         Ok(btf)
     }
 
@@ -253,6 +256,7 @@ impl Btf {
     fn name(&self, offset: u32) -> Option<&str> {
         let rest = self.strings.get(usize_of(offset)..)?;
         let end = rest.iter().position(|&b| b == 0)?;
+
         std::str::from_utf8(rest.get(..end)?).ok()
     }
 
@@ -315,6 +319,7 @@ impl Btf {
         let bits = self
             .find(ty, member, 0)
             .ok_or_else(|| BtfError::NoMember(name.into(), member.into()))?;
+
         if bits % 8 == 0 {
             Ok(bits / 8)
         } else {
@@ -346,6 +351,7 @@ mod tests {
         let mut data = words(&header);
         data.extend_from_slice(types);
         data.extend_from_slice(strings);
+
         data
     }
 
@@ -390,6 +396,7 @@ mod tests {
         // 5: struct outer, with a bitfield (kind_flag set)
         push(&[outer, (1 << 31) | (KIND_STRUCT << 24) | 3, 32]);
         push(&[a, 1, 0, 0, 4, 64, c, 1, (4 << 24) | 196]);
+
         blob(&types, &strings)
     }
 

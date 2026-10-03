@@ -136,6 +136,7 @@ mod tests {
         }
 
         let tar = builder.into_inner().unwrap();
+
         analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap()
     }
 

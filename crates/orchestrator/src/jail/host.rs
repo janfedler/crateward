@@ -79,6 +79,7 @@ async fn expect_line(out: &mut BufReader<ChildStdout>, wanted: &str) -> Result<(
         .await
         .map_err(io("reading from the launcher"))?;
     let line = line.trim_end();
+
     if line == wanted {
         Ok(())
     } else if let Some(reason) = line.strip_prefix("error: ") {
@@ -98,6 +99,7 @@ async fn write_map(tool: &'static str, pid: u32, setup: u32, vm: u32) -> Result<
         .output()
         .await
         .map_err(io("running an ID map helper"))?;
+
     if output.status.success() {
         Ok(())
     } else {
@@ -188,6 +190,7 @@ pub fn prepare_root(root: &Path, vm_uid: u32) -> Result<(), JailError> {
     std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))
         .map_err(io("restricting the jail root"))?;
     super::acl::grant_user(root, vm_uid).map_err(io("setting the jail root ACL"))?;
+
     super::decoy::plant(root).map_err(io("planting the jail decoy"))
 }
 

@@ -35,6 +35,7 @@ fn workdir(name: &str) -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("sandbox-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+
     dir
 }
 
@@ -85,6 +86,7 @@ fn erofs_with(path: &Path, names: &[&str]) -> bool {
     let bytes = std::fs::read(path).unwrap();
     let magic = 0xE0F5_E1E2_u32.to_le_bytes();
     let contains = |name: &str| bytes.windows(name.len()).any(|w| w == name.as_bytes());
+
     bytes.get(1024..1028) == Some(&magic[..]) && names.iter().all(|name| contains(name))
 }
 

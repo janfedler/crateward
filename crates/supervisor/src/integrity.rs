@@ -41,6 +41,7 @@ impl Integrity {
     pub fn new(data_dir: &Path, interval: Duration) -> std::io::Result<Self> {
         let inotify =
             inotify::init(inotify::CreateFlags::NONBLOCK | inotify::CreateFlags::CLOEXEC)?;
+
         Ok(Self {
             manifest: data_dir.join(host::INTEGRITY_MANIFEST),
             interval,
@@ -149,6 +150,7 @@ impl Integrity {
         let wd = inotify::add_watch(&self.inotify, path, flags)?;
         self.watches.insert(wd, path.to_path_buf());
         tracing::info!(path = %path.display(), "decoy watched");
+
         Ok(())
     }
 
@@ -171,6 +173,7 @@ impl Integrity {
             })
             .collect();
         self.stray_before = stray;
+
         findings
     }
 }

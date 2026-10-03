@@ -96,6 +96,7 @@ fn read_tar(input: &mut impl Read) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
 
     let mut tar = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
     input.by_ref().take(len).read_to_end(&mut tar)?;
+
     Ok(Some(tar))
 }
 

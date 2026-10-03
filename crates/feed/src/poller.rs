@@ -168,6 +168,7 @@ impl Feed {
     /// Fails if the file cannot be fetched or has no `dl` string.
     pub async fn download_template(&self) -> Result<String, FeedError> {
         let url = format!("{}config.json", self.urls.index_root);
+
         match self.index.get(&url, None, MAX_CONFIG_BYTES).await? {
             Fetched::Body { body, .. } => {
                 let json: serde_json::Value = serde_json::from_slice(&body)
@@ -230,6 +231,7 @@ impl Feed {
 
         self.resolve_due(&mut report).await?;
         report.waiting = self.pending.len();
+
         Ok(report)
     }
 
@@ -378,6 +380,7 @@ impl Feed {
         }
 
         self.pending.remove(key);
+
         Ok(())
     }
 

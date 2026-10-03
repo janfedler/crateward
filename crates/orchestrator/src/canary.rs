@@ -155,6 +155,7 @@ impl Canary {
              dependencies = [\n \"{name}\",\n]\n",
             name = self.name
         );
+
         Ok(PayloadSpec {
             name: CrateName::parse(self.name)?,
             version: semver::Version::new(0, 1, 0),
@@ -195,6 +196,7 @@ fn check_known_bad(report: &RunReport) -> Vec<String> {
     expect(&mut p, report.trace.complete, "the trace did not end");
     bad_trace(&report.trace, &mut p);
     bad_disk(report, &mut p);
+
     p
 }
 
@@ -329,6 +331,7 @@ fn check_known_good(report: &RunReport) -> Vec<String> {
         }),
         "the scratch disk was flagged",
     );
+
     p
 }
 
@@ -361,6 +364,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("cw-canary-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let blobs = BlobStore::open(&root).unwrap();
+
         (root, blobs)
     }
 
@@ -497,6 +501,7 @@ mod tests {
             outside_build: vec![entry("/work/home/.config/autostart/canary.desktop")],
             ..ScratchReport::default()
         });
+
         report
     }
 
@@ -505,6 +510,7 @@ mod tests {
         let mut report = run(BuildOutcome::Succeeded);
         report.trace.complete = true;
         report.scratch = Some(ScratchReport::default());
+
         report
     }
 

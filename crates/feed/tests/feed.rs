@@ -98,6 +98,7 @@ async fn start_mock(state: Shared) -> String {
             });
         }
     });
+
     format!("http://{addr}")
 }
 
@@ -115,6 +116,7 @@ fn rss(items: &[(&str, &str)]) -> String {
             format!("<item><crates:name>{n}</crates:name>{version}</item>")
         })
         .collect();
+
     format!(
         r#"<?xml version="1.0"?><rss xmlns:crates="https://crates.io/"><channel>{items}</channel></rss>"#
     )
@@ -288,6 +290,7 @@ impl World {
         let world = Self { state, feed, db };
         world.serve("/rss/crates.xml", rss(&[]));
         world.serve("/rss/updates.xml", rss(&[]));
+
         Some(world)
     }
 
@@ -297,6 +300,7 @@ impl World {
 
     fn hits(&self, path: &str) -> usize {
         let state = self.state.lock().unwrap();
+
         state.hits.get(path).copied().unwrap_or(0)
     }
 
@@ -314,6 +318,7 @@ impl World {
         }
 
         jobs.sort();
+
         jobs
     }
 

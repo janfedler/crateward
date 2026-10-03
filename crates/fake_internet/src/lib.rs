@@ -92,6 +92,7 @@ fn tls_config(pem: &str) -> Result<Option<Arc<rustls::ServerConfig>>, Box<dyn Er
 
     let (cert, key) = tls::split_pem(pem).ok_or("the authority is not a certificate and a key")?;
     let authority = tls::Authority::from_pem(&cert, &key)?;
+
     Ok(Some(tls::server_config(Arc::new(authority))?))
 }
 
@@ -100,6 +101,7 @@ fn become_user(id: u32) -> rustix::io::Result<()> {
     let gid = Gid::from_raw(id);
     rustix::thread::set_thread_res_gid(gid, gid, gid)?;
     let uid = Uid::from_raw(id);
+
     rustix::thread::set_thread_res_uid(uid, uid, uid)
 }
 
@@ -137,5 +139,6 @@ fn serve_slot(args: &[String]) -> Result<(), Box<dyn Error>> {
     sandbox::restrict_fs(&FsAccess::default())?;
     let out = Box::new(io::stdout());
     server::serve(server::SlotConfig::default(), out, tls, Some(capture))?;
+
     Ok(())
 }

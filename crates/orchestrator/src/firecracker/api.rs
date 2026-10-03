@@ -292,6 +292,7 @@ impl Api {
         };
 
         driver.abort();
+
         result
     }
 }

@@ -198,6 +198,7 @@ impl Policies {
         };
 
         let policy = self.backoff.get(stage.name())?;
+
         Some(policy.delay(attempt, &mut rand::rng()))
     }
 }
@@ -271,6 +272,7 @@ impl Store {
                 tracing::error!(%error, "postgres connection ended");
             }
         });
+
         Ok(Self { client })
     }
 
@@ -354,6 +356,7 @@ impl Store {
                 ],
             )
             .await?;
+
         Ok(row.map(|r| r.get::<_, i64>(0)).map(JobId))
     }
 
@@ -408,6 +411,7 @@ impl Store {
                 &[&states, &worker, &lease_interval(lease), &stage.name()],
             )
             .await?;
+
         row.as_ref().map(stored).transpose()
     }
 
@@ -430,6 +434,7 @@ impl Store {
                 &[&id.0, &worker, &lease_interval(lease)],
             )
             .await?;
+
         Ok(updated == 1)
     }
 
@@ -503,6 +508,7 @@ impl Store {
         }
 
         tx.commit().await?;
+
         Ok(transition)
     }
 
@@ -554,6 +560,7 @@ impl Store {
                 &[&id.0],
             )
             .await?;
+
         row.as_ref().map(stored).transpose()
     }
 
@@ -610,6 +617,7 @@ impl Store {
                 ],
             )
             .await?;
+
         Ok(())
     }
 
@@ -665,6 +673,7 @@ impl Store {
                 &[&job.0, &lockfile, &resolution_error, packages],
             )
             .await?;
+
         Ok(())
     }
 
@@ -800,6 +809,7 @@ impl Store {
                 &[&sha256.as_bytes().as_slice(), &analyzer_version, &build_time_code, &max_severity, report],
             )
             .await?;
+
         Ok(())
     }
 
@@ -883,6 +893,7 @@ impl Store {
                 &[&canonical, &min_reverse, &min_downloads],
             )
             .await?;
+
         Ok(rows.iter().map(|r| r.get(0)).collect())
     }
 
@@ -993,6 +1004,7 @@ impl Store {
                 &[&job.0, triage, reasons, &diff],
             )
             .await?;
+
         Ok(())
     }
 
@@ -1034,6 +1046,7 @@ impl Store {
                 &[&job.0, &kinds, &values],
             )
             .await?;
+
         Ok(())
     }
 
@@ -1057,6 +1070,7 @@ impl Store {
                 &[&job.0, &run_kind, &outcome, report],
             )
             .await?;
+
         Ok(())
     }
 

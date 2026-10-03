@@ -188,6 +188,7 @@ fn unit_name(relative: &str) -> Option<&str> {
         .strip_prefix("/target/debug/deps/")
         .or_else(|| relative.strip_prefix("/.warm/upper/debug/deps/"))?;
     let unit = !name.contains('/') && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e));
+
     unit.then_some(name)
 }
 
@@ -435,6 +436,7 @@ pub fn scan_in_sandbox(
         .stdin(input)
         .stdout(Stdio::piped());
     let report = Child::spawn(SCAN_NAME, command)?.output(MAX_REPORT)?;
+
     serde_json::from_slice(&report).map_err(|e| ChildError::answer(SCAN_NAME, e))
 }
 
@@ -488,6 +490,7 @@ pub enum ExportError {
 /// The path of the tar entry for `path`: without the leading slash.
 fn tar_name(path: &ExtPath) -> Result<String, ExportError> {
     let bytes = path.as_ref().get(1..).unwrap_or_default().to_vec();
+
     String::from_utf8(bytes).map_err(|_| ExportError::Path)
 }
 
@@ -501,6 +504,7 @@ fn tar_header(kind: tar::EntryType, meta: &Metadata, size: u64) -> tar::Header {
     header.set_uid(u64::from(meta.uid()));
     header.set_gid(u64::from(meta.gid()));
     header.set_mtime(0);
+
     header
 }
 
@@ -576,6 +580,7 @@ pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, 
     }
 
     builder.into_inner()?.flush()?;
+
     Ok((entries, bytes))
 }
 
@@ -602,6 +607,7 @@ pub fn export_to_erofs(
     let mut exporter = Child::spawn(EXPORT_NAME, command)?;
     let mut builder = spawn_mkfs(exe, out, exporter.stdout()?)?;
     exporter.finish(None)?;
+
     builder.finish(None)
 }
 
@@ -689,6 +695,7 @@ fn load(image: File) -> Result<Ext4, ImageError> {
     let mut superblock = [0_u8; 1024];
     image.read_exact_at(&mut superblock, 1024)?;
     check_geometry(&superblock, image.metadata()?.len())?;
+
     Ok(Ext4::load(Box::new(image))?)
 }
 
@@ -701,6 +708,7 @@ fn enter_sandbox() -> Result<File, Box<dyn Error>> {
         .map(File::from)
         .map_err(|e| format!("stdin: {e}"))?;
     sandbox::enter(LIMITS, &FsAccess::default())?;
+
     Ok(image)
 }
 
@@ -715,6 +723,7 @@ pub fn dispatch_export(args: &[String]) -> Option<ExitCode> {
 fn serve_export(excluded: &[String]) -> Result<(), Box<dyn Error>> {
     let fs = load(enter_sandbox()?).map_err(|e| format!("not a readable ext4 image: {e}"))?;
     export(&fs, io::BufWriter::new(io::stdout().lock()), excluded)?;
+
     Ok(())
 }
 
@@ -741,6 +750,7 @@ fn serve_scan(spec: Option<&String>) -> Result<(), Box<dyn Error>> {
     let mut stdout = io::stdout().lock();
     serde_json::to_writer(&mut stdout, &report)?;
     stdout.flush()?;
+
     Ok(())
 }
 
@@ -755,6 +765,7 @@ mod tests {
     /// orchestrator formats scratch disks with the same tool.
     fn image(files: &[(&str, &[u8], u32)]) -> Option<Vec<u8>> {
         use std::os::unix::fs::PermissionsExt;
+
         build_image(|root| {
             for (path, data, mode) in files {
                 let full = root.join(path.trim_start_matches('/'));
@@ -791,6 +802,7 @@ mod tests {
             .ok()?;
         let data = status.success().then(|| std::fs::read(&out).ok()).flatten();
         let _ = std::fs::remove_dir_all(&dir);
+
         data
     }
 
@@ -879,6 +891,7 @@ mod tests {
     fn paths(entries: &[Entry]) -> Vec<&str> {
         let mut paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
         paths.sort_unstable();
+
         paths
     }
 

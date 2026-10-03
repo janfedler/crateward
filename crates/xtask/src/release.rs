@@ -49,6 +49,7 @@ fn only(dir: &Path, prefix: &str, suffix: &str) -> Result<PathBuf, TaskError> {
                 .is_some_and(|n| n.starts_with(prefix) && n.ends_with(suffix))
         })
         .collect();
+
     match (found.pop(), found.is_empty()) {
         (Some(path), true) => Ok(path),
         (None, _) => Err(TaskError::Check(format!(
@@ -99,6 +100,7 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
         sums_path.display(),
         out.display()
     );
+
     Ok(())
 }
 
@@ -125,6 +127,7 @@ fn build_binaries() -> Result<(), TaskError> {
         &["build", "--release", "--locked", "--workspace"],
         &[],
     )?;
+
     run(
         "cargo",
         &[
@@ -315,6 +318,7 @@ pub fn pack(dir: &Path) -> Result<PathBuf, TaskError> {
         ],
         &[],
     )?;
+
     Ok(archive)
 }
 
@@ -340,6 +344,7 @@ fn sums(dir: &Path) -> Result<String, TaskError> {
 
     let mut files = BTreeMap::new();
     walk(dir, dir, &mut files)?;
+
     Ok(files
         .iter()
         .flat_map(|(path, digest)| [digest.as_str(), "  ", path.as_str(), "\n"])
@@ -444,6 +449,7 @@ fn package_components(root: &Path) -> Result<Vec<Value>, TaskError> {
         .map(|p| package_component(p, checksums.get(&(p.name.clone(), p.version.clone()))))
         .collect();
     components.sort_by_key(|c| c["purl"].as_str().map(str::to_owned));
+
     Ok(components)
 }
 
@@ -471,6 +477,7 @@ fn package_component(package: &Package, checksum: Option<&String>) -> Value {
 
 fn firecracker_component(root: &Path) -> Result<Value, TaskError> {
     let pin: Pin = read_toml(root, repo::FIRECRACKER_PIN)?;
+
     Ok(json!({
         "type": "application",
         "name": "firecracker",
@@ -483,6 +490,7 @@ fn firecracker_component(root: &Path) -> Result<Value, TaskError> {
 fn linux_component(root: &Path) -> Result<Value, TaskError> {
     let kernel: toml::Table = read_toml(root, repo::KERNEL_PIN)?;
     let source = kernel.get("source").and_then(toml::Value::as_table);
+
     Ok(json!({
         "type": "operating-system",
         "name": "linux",
@@ -498,6 +506,7 @@ fn debian_component(root: &Path) -> Result<Value, TaskError> {
     let rootfs: toml::Table = read_toml(root, repo::ROOTFS_PIN)?;
     let debian = rootfs.get("debian").and_then(toml::Value::as_table);
     let snapshot = text(debian, "snapshot");
+
     Ok(json!({
         "type": "operating-system",
         "name": "debian",
@@ -513,6 +522,7 @@ fn rust_components(root: &Path) -> Result<Vec<Value>, TaskError> {
     let rust: toml::Table = read_toml(root, repo::RUST_PIN)?;
     let version = text(Some(&rust), "version");
     let parts = rust.get("component").and_then(toml::Value::as_array);
+
     Ok(parts
         .into_iter()
         .flatten()

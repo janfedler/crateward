@@ -54,6 +54,7 @@ fn sha(name: &str, version: &str) -> Sha256Digest {
     let mut hasher = DefaultHasher::new();
     (name, version).hash(&mut hasher);
     let word = hasher.finish().to_be_bytes();
+
     Sha256Digest::from_bytes(std::array::from_fn(|i| word[i % 8]))
 }
 
@@ -94,6 +95,7 @@ fn report_of(tar: &[u8]) -> StaticReport {
 
 fn max_severity(report: &StaticReport) -> Option<String> {
     let severity = serde_json::to_value(report.max_severity()?).unwrap();
+
     severity.as_str().map(str::to_owned)
 }
 
@@ -155,6 +157,7 @@ impl Lab {
         };
 
         let id = self.store.enqueue(&new).await.unwrap().unwrap();
+
         self.store.get(id).await.unwrap().unwrap()
     }
 
@@ -163,6 +166,7 @@ impl Lab {
         let job = self.job(name, version).await;
         let blob = self.blobs.put(tar).unwrap();
         self.crate_file(&job, Some(blob.blake3), tar.len()).await;
+
         job
     }
 
@@ -192,6 +196,7 @@ impl Lab {
             &serde_json::to_value(&report).unwrap(),
         )
         .await;
+
         job
     }
 
@@ -266,6 +271,7 @@ impl Lab {
             .query_one(&query, &[&job.cksum.as_bytes().as_slice()])
             .await
             .unwrap();
+
         (row.get(0), row.get(1))
     }
 

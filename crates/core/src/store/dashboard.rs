@@ -108,6 +108,7 @@ impl Store {
         self.client
             .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
             .await?;
+
         Ok(())
     }
 
@@ -151,6 +152,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         Ok(Overview {
             states,
             levels,

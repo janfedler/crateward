@@ -40,6 +40,7 @@ const SOURCE_EXTENSIONS: &[&str] = &[
 /// Whether a path names a source file, by extension or well known name.
 fn is_source(file: &str) -> bool {
     let name = file.rsplit('/').next().unwrap_or(file);
+
     match name.rsplit_once('.') {
         Some((_, ext)) => SOURCE_EXTENSIONS
             .iter()
@@ -116,6 +117,7 @@ fn first_line(data: &[u8], rule: &yara_x::Rule<'_, '_>) -> Option<u32> {
         .map(|m| m.range().start)
         .min()?;
     let breaks = data.get(..offset)?.iter().filter(|&&b| b == b'\n').count();
+
     u32::try_from(breaks + 1).ok()
 }
 

@@ -144,6 +144,7 @@ pub async fn resolve(
     let _ = tokio::fs::remove_dir_all(work).await;
     let result = resolve_in(exe, cargo, work, index, name, version).await;
     let _ = tokio::fs::remove_dir_all(work).await;
+
     result
 }
 

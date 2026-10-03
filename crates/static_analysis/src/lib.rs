@@ -53,6 +53,7 @@ async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
     let heartbeats = Store::connect(url).await?;
     let blobs = BlobStore::open(&config.instance.data_dir.join(host::BLOBS))?;
     let policies = Policies::from_config(&config.stages)?;
+
     Ok(Analyzer::new(
         store,
         heartbeats,
@@ -75,6 +76,7 @@ async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
 /// Returns a [`ComponentError`] if startup or the job store fails.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(async {
         let mut analyzer = start(config).await.map_err(fatal)?;
         let stop = Stop::install().map_err(fatal)?;

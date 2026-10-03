@@ -97,6 +97,7 @@ pub enum PayloadError {
 
 fn io(context: impl Into<String>) -> impl FnOnce(std::io::Error) -> PayloadError {
     let context = context.into();
+
     move |source| PayloadError::Io { context, source }
 }
 
@@ -164,6 +165,7 @@ fn header(size: u64, mode: u32) -> tar::Header {
     header.set_mtime(0);
     header.set_entry_type(tar::EntryType::Regular);
     header.set_cksum();
+
     header
 }
 
@@ -219,6 +221,7 @@ pub fn stub_manifest(original: &[u8]) -> Result<String, ManifestError> {
 
     lib.insert("path".into(), toml::Value::String("src/lib.rs".into()));
     manifest.insert("lib".into(), toml::Value::Table(lib));
+
     Ok(toml::to_string(&manifest)?)
 }
 
@@ -235,6 +238,7 @@ impl<W: Write> TarWriter<W> {
             .map_err(io(format!("writing {path}")))?;
         self.stats.files += 1;
         self.stats.bytes += data.len() as u64;
+
         Ok(())
     }
 
@@ -277,6 +281,7 @@ impl<W: Write> TarWriter<W> {
         // lockfile. File hashes are left out: the payload is read only.
         let checksum = format!("{{\"files\":{{}},\"package\":\"{}\"}}", package.checksum);
         let path = format!("vendor/{dir}/.cargo-checksum.json");
+
         self.append(&path, 0o644, checksum.as_bytes())
     }
 
@@ -314,6 +319,7 @@ impl<W: Write> TarWriter<W> {
         }
 
         let mode = if executable { 0o755 } else { 0o644 };
+
         self.append(&format!("vendor/{path}"), mode, &data)
     }
 
@@ -325,6 +331,7 @@ impl<W: Write> TarWriter<W> {
         })?;
 
         self.append(&format!("vendor/{path}"), 0o644, stub.as_bytes())?;
+
         self.append(&format!("vendor/{dir}/src/lib.rs"), 0o644, b"")
     }
 
@@ -333,6 +340,7 @@ impl<W: Write> TarWriter<W> {
             .into_inner()
             .and_then(|mut w| w.flush())
             .map_err(io("finishing the tar"))?;
+
         Ok(self.stats)
     }
 }
@@ -389,6 +397,7 @@ pub fn spawn_mkfs(exe: &Path, out: &Path, stdin: impl Into<Stdio>) -> Result<Chi
         .arg(out)
         .stdin(stdin)
         .stdout(Stdio::null());
+
     Child::spawn(NAME, command)
 }
 
@@ -410,6 +419,7 @@ pub fn build_image(
     // A child that dies breaks the pipe. Its own failure says why, so it
     // wins over the write error.
     child.finish(None)?;
+
     written
 }
 
@@ -438,6 +448,7 @@ fn serve(out: Option<&String>) -> Result<(), Box<dyn Error>> {
         .args(["--tar=f", "-T0", "--quiet"])
         .arg(out)
         .exec();
+
     Err(format!("exec {MKFS_EROFS}: {error}").into())
 }
 

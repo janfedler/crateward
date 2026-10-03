@@ -47,6 +47,7 @@ pub fn allowed(method: &Method, headers: &HeaderMap, port: u16) -> Result<(), &'
 
     let same_site = header("sec-fetch-site") == Some("same-origin");
     let same_origin = header("origin").is_some_and(|o| o == format!("http://{host}"));
+
     if same_site || same_origin {
         Ok(())
     } else {
@@ -80,6 +81,7 @@ pub async fn guard(port: u16, request: Request<Body>, next: Next) -> Response {
     headers
         .entry(header::CACHE_CONTROL)
         .or_insert(HeaderValue::from_static("no-store"));
+
     response
 }
 

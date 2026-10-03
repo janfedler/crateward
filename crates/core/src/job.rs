@@ -633,6 +633,7 @@ impl Job {
         };
 
         let stage_limits = limits.for_stage(stage);
+
         match class {
             FailureClass::Transient => {
                 self.attempts = self.attempts.saturating_add(1);
@@ -721,6 +722,7 @@ pub fn representative_events() -> Vec<JobEvent> {
             .into_iter()
             .map(|class| JobEvent::StageFailed { class }),
     );
+
     events
 }
 

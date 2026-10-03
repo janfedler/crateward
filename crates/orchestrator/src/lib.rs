@@ -73,6 +73,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
     // runtime exists and dropped after it, when no task runs any more.
     let _instance = lock_instance(&config.sandbox.slots_dir)?;
     let runtime = app::runtime().map_err(fatal)?;
+
     runtime.block_on(serve(config))
 }
 
@@ -119,6 +120,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
     }
 
     tracing::info!("stopping");
+
     Ok(())
 }
 
@@ -163,6 +165,7 @@ async fn boot(config: &Config) -> Result<Booted, ComponentError> {
         .map_err(fatal)?;
     tracing::info!(ms = started.elapsed().as_millis(), "base snapshot ready");
     let backend = FirecrackerBackend::new(fc.clone(), cgroups.clone(), snapshot);
+
     Ok(Booted {
         backend: Arc::new(backend),
         work,
@@ -367,6 +370,7 @@ async fn warm_builder(
         memory_mib = memory,
         "warm build snapshot ready"
     );
+
     Ok(Sandbox {
         backend: Arc::new(FirecrackerBackend::new(fc, booted.cgroups.clone(), base)),
         ..slot0.clone()
@@ -466,6 +470,7 @@ fn lock_instance(slots_dir: &Path) -> Result<std::fs::File, ComponentError> {
         .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
         .open(&path)
         .map_err(|e| fatal(format!("{}: {e}", path.display())))?;
+
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(std::fs::TryLockError::WouldBlock) => Err(fatal(format!(

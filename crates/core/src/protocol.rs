@@ -144,6 +144,7 @@ impl WallClock {
         let since = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
+
         Self {
             secs: since.as_secs(),
             nanos: since.subsec_nanos(),
@@ -409,12 +410,14 @@ pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, ProtocolError> {
     let mut frame = Vec::with_capacity(payload.len() + 4);
     frame.extend_from_slice(&len.to_be_bytes());
     frame.extend_from_slice(&payload);
+
     Ok(frame)
 }
 
 fn decode_payload<T: DeserializeOwned>(payload: &[u8]) -> Result<T, ProtocolError> {
     let (value, rest) =
         postcard::take_from_bytes(payload).map_err(|e| ProtocolError::Malformed(e.to_string()))?;
+
     if rest.is_empty() {
         Ok(value)
     } else {
@@ -506,6 +509,7 @@ impl<T: DeserializeOwned> Decoder<T> {
 
         let message = decode_payload(payload)?;
         self.buffer.drain(..4 + len);
+
         Ok(Some(message))
     }
 
@@ -527,6 +531,7 @@ pub fn write_message<W: Write, T: Serialize>(
 ) -> Result<(), ProtocolError> {
     writer.write_all(&encode(message)?)?;
     writer.flush()?;
+
     Ok(())
 }
 
@@ -567,6 +572,7 @@ pub fn read_message<R: Read, T: DeserializeOwned>(
             ProtocolError::Io(e)
         }
     })?;
+
     decode_payload(&payload).map(Some)
 }
 

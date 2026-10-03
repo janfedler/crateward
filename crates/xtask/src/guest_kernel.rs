@@ -170,6 +170,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         &build_dir,
     )?;
     compile(&manifest.build, &src, &build_dir)?;
+
     publish(&build_dir, &out_dir, &manifest.source.version)
 }
 
@@ -196,6 +197,7 @@ fn configure(
         &[],
     )?;
     run_in(src, "make", &[&make_dir(build), "olddefconfig"], &[])?;
+
     check_fragment(
         &files.fragment,
         &read(&fragment)?,
@@ -246,6 +248,7 @@ fn publish(build: &Path, out_dir: &Path, version: &str) -> Result<(), TaskError>
     )?;
     let digest = crate::images::blake3_file(&image)?;
     eprintln!("xtask: wrote {} (blake3 {digest})", image.display());
+
     Ok(())
 }
 

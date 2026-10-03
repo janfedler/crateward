@@ -21,6 +21,7 @@ pub enum Command {
 /// binaries are the ones next to this tool.
 pub fn run(config: &Config, command: &Command) -> Result<(), CliError> {
     let manifest = config.instance.data_dir.join(host::INTEGRITY_MANIFEST);
+
     match command {
         Command::Record => record_manifest(config, &manifest),
         Command::Check => check_manifest(&manifest),
@@ -36,6 +37,7 @@ fn record_manifest(config: &Config, manifest: &Path) -> Result<(), CliError> {
     std::fs::write(&temporary, text).map_err(io(&temporary))?;
     std::fs::rename(&temporary, manifest).map_err(io(manifest))?;
     out!("recorded {} files in {}", files.len(), manifest.display());
+
     Ok(())
 }
 
@@ -52,5 +54,6 @@ fn check_manifest(manifest: &Path) -> Result<(), CliError> {
     }
 
     out!("{} files match", recorded.len());
+
     Ok(())
 }

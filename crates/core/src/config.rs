@@ -525,6 +525,7 @@ impl Config {
         }
 
         let text = std::fs::read_to_string(path).map_err(read_error)?;
+
         Self::from_toml(&text)
     }
 
@@ -536,6 +537,7 @@ impl Config {
     pub fn from_toml(text: &str) -> Result<Self, ConfigError> {
         let config: Self = toml::from_str(text)?;
         config.validate().map_err(ConfigError::Invalid)?;
+
         Ok(config)
     }
 
@@ -870,6 +872,7 @@ mod tests {
         let mut config = Config::from_toml(EXAMPLE).unwrap();
         edit(&mut config);
         let issues = config.validate().err().unwrap_or_default();
+
         issues.into_iter().map(|i| (i.key, i.message)).collect()
     }
 
@@ -1439,6 +1442,7 @@ mod tests {
     /// The keys in the order the rules run, as words.
     fn order(parts: &[&str]) -> Vec<String> {
         let words = parts.iter().flat_map(|part| part.split_whitespace());
+
         words.map(str::to_owned).collect()
     }
 

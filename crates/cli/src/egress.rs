@@ -39,6 +39,7 @@ fn host(url: &str) -> Option<String> {
     let authority = rest.split(['/', '?', '#']).next()?;
     let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
     let host = host.split(':').next()?;
+
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
 }
 
@@ -72,6 +73,7 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
         .map(|(host, _)| host.to_ascii_lowercase())
         .into_iter()
         .collect();
+
     vec![
         Allowance {
             role: "feed",
@@ -114,6 +116,7 @@ pub fn resolve(allowances: &[Allowance]) -> (Vec<(&'static str, BTreeSet<IpAddr>
             (a.role, addresses)
         })
         .collect();
+
     (sets, errors)
 }
 

@@ -320,6 +320,7 @@ impl FirecrackerBackend {
         }
         .await;
         vm.destroy().await?;
+
         snapshot
     }
 
@@ -340,6 +341,7 @@ impl FirecrackerBackend {
                 events,
                 authority: config.authority.clone(),
             });
+
         Launch {
             firecracker: config.firecracker.clone(),
             dir: config.slots_dir.join(format!("{SLOT_PREFIX}{slot}")),
@@ -393,6 +395,7 @@ impl FirecrackerBackend {
         drop(agent);
         let (decoy, cleanup) = stop_slot(cgroup, vm).await;
         let end = settle(slot, end, decoy, cleanup)?;
+
         Ok(JobRun { end, restore, run })
     }
 }
@@ -401,6 +404,7 @@ impl FirecrackerBackend {
 async fn ready_agent(vm: &Vm, workspace: Workspace) -> Result<AgentConnection, VmError> {
     let mut agent = vm.agent(Instant::now() + AGENT_READY_TIMEOUT).await?;
     agent.prepare(workspace).await.map_err(VmError::from)?;
+
     Ok(agent)
 }
 
@@ -440,6 +444,7 @@ async fn broken_agent(
     // The console's last lines usually say why. The guest wrote them, so
     // they are escaped.
     let tail = console_tail(&launch.dir.join("firecracker.log"));
+
     Ok(classify_exit(status, &format!("{error}; console: {tail}")))
 }
 
@@ -633,6 +638,7 @@ impl VmBackend for FakeBackend {
             .ok()
             .and_then(|mut script| script.pop_front())
             .unwrap_or_else(|| JobEnd::UnexpectedExit("script exhausted".into()));
+
         Ok(JobRun {
             end,
             restore: Duration::ZERO,

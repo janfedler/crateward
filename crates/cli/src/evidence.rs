@@ -64,6 +64,7 @@ async fn write_pack(
     names.extend(copy_original(data_dir, &stored, dir));
     write_checksums(dir, &names)?;
     names.push(CHECKSUMS.to_owned());
+
     Ok(names)
 }
 
@@ -81,6 +82,7 @@ async fn documents(
         .collect();
     let verdict = store.verdict(job).await?;
     let runs = store.job_runs(job).await?;
+
     Ok(vec![
         (
             "job.json",
@@ -136,6 +138,7 @@ fn attack_document(verdict: &Verdict, review: Review) -> Value {
             })
         })
         .collect();
+
     json!({
         "version": attack::VERSION,
         "crate": (review == Review::Confirmed).then(|| technique(attack::SUPPLY_CHAIN)),
@@ -148,6 +151,7 @@ fn event_json(event: StoredEvent) -> Value {
         .at
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
+
     json!({
         "at_unix": at,
         "from": event.from,
@@ -160,6 +164,7 @@ fn event_json(event: StoredEvent) -> Value {
 async fn static_document(store: &Store, stored: &StoredJob) -> Result<Value, StoreError> {
     let job_static = store.job_static(stored.id).await?;
     let report = store.static_report(&stored.cksum).await?;
+
     Ok(json!({
         "triage": job_static.as_ref().map(|s| &s.0),
         "reasons": job_static.as_ref().map(|s| &s.1),
@@ -175,6 +180,7 @@ fn copy_original(data_dir: &Path, stored: &StoredJob, dir: &Path) -> Option<Stri
         .join(host::ORIGINALS)
         .join(format!("{}.crate", stored.cksum));
     let name = format!("{}-{}.crate", stored.name, stored.version);
+
     match std::fs::copy(&original, dir.join(&name)) {
         Ok(_) => Some(name),
         Err(error) => {
@@ -195,6 +201,7 @@ fn write_checksums(dir: &Path, names: &[String]) -> Result<(), CliError> {
     }
 
     let path = dir.join(CHECKSUMS);
+
     std::fs::write(&path, lines.join("\n") + "\n").map_err(io(&path))
 }
 

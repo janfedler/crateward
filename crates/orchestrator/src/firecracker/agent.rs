@@ -134,6 +134,7 @@ impl AgentConnection {
                 version: PROTOCOL_VERSION,
             })
             .await?;
+
         match connection.recv().await? {
             GuestMessage::Hello {
                 version,
@@ -182,6 +183,7 @@ impl AgentConnection {
 
     async fn send(&mut self, message: &HostMessage) -> Result<(), AgentError> {
         self.stream.write_all(&encode(message)?).await?;
+
         Ok(())
     }
 

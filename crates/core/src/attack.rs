@@ -150,6 +150,7 @@ fn exfiltration(via: &str) -> Vec<Technique> {
 
 fn execution(signal: &str, exe: &str) -> Vec<Technique> {
     let name = program(exe);
+
     match signal {
         "exec_downloader" => vec![INGRESS],
         "exec_shell" => vec![UNIX_SHELL],

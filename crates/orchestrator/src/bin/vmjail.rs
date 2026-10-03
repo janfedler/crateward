@@ -6,5 +6,6 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let error = crateward_orchestrator::jail::launcher::run();
     eprintln!("crateward-vmjail: {error}");
+
     ExitCode::FAILURE
 }

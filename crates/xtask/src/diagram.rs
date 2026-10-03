@@ -33,6 +33,7 @@ fn replace_block(text: &str) -> Option<String> {
     out.push_str(text.get(..start)?);
     out.push_str(&block());
     out.push_str(text.get(end..)?);
+
     Some(out)
 }
 

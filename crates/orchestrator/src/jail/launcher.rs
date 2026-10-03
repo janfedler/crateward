@@ -55,6 +55,7 @@ fn run_nft(rules: &str) -> Result<(), LaunchError> {
     }
 
     let status = child.wait().map_err(step("running nft"))?;
+
     if status.success() {
         Ok(())
     } else {
@@ -96,6 +97,7 @@ fn read_line<R: BufRead>(input: &mut R, limit: usize) -> Result<String, LaunchEr
     }
 
     line.pop();
+
     Ok(line)
 }
 
@@ -137,6 +139,7 @@ fn run_ip(args: &[&str]) -> Result<(), LaunchError> {
         .env_clear()
         .status()
         .map_err(step("running ip"))?;
+
     if status.success() {
         Ok(())
     } else {
@@ -169,6 +172,7 @@ fn read_authority(path: &Path) -> Result<Vec<u8>, LaunchError> {
     File::open(path)
         .and_then(|f| f.take(64 * 1024).read_to_end(&mut pem))
         .map_err(step("reading the TLS authority"))?;
+
     Ok(pem)
 }
 
@@ -186,6 +190,7 @@ fn open_host_files(spec: &JailSpec) -> Result<HostFiles, LaunchError> {
         .as_ref()
         .map(|sinks| open_append(&sinks.events, "opening the network event log"))
         .transpose()?;
+
     Ok(HostFiles {
         log,
         null,
@@ -204,6 +209,7 @@ fn isolate(spec: &JailSpec) -> Result<(), LaunchError> {
         MountPropagationFlags::PRIVATE | MountPropagationFlags::REC,
     )
     .map_err(step("making mounts private"))?;
+
     rustix::system::sethostname(spec.id.as_bytes()).map_err(step("setting the hostname"))
 }
 
@@ -295,6 +301,7 @@ fn pivot(root: &Path) -> Result<(), LaunchError> {
     std::env::set_current_dir(root).map_err(step("entering the jail root"))?;
     rustix::process::pivot_root(".", ".").map_err(step("pivot_root"))?;
     rustix::mount::unmount(".", UnmountFlags::DETACH).map_err(step("detaching the old root"))?;
+
     std::env::set_current_dir("/").map_err(step("entering the new root"))
 }
 
@@ -376,6 +383,7 @@ fn drop_privileges() -> Result<(), LaunchError> {
     let uid = Uid::from_raw(id);
     rustix::thread::set_thread_res_uid(uid, uid, uid).map_err(step("switching user"))?;
     rustix::thread::set_no_new_privs(true).map_err(step("setting no_new_privs"))?;
+
     Ok(())
 }
 
