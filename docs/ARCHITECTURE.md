@@ -350,7 +350,7 @@ The only inbound path is SSH with keys only. See
 | `crateward_static_analysis` | trusted |
 | `crateward_orchestrator` | untrusted |
 | `crateward_guest_agent` | guest |
-| `crateward_guest_ebpf` (GPL-2.0-only, own workspace) | guest |
+| `crateward_guest_ebpf` | guest |
 | `crateward_fake_internet` | untrusted |
 | `crateward_analyzer` | control plane |
 | `crateward_api` | control plane |
