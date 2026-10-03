@@ -86,6 +86,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let manifest_text = std::fs::read_to_string(&manifest_path).map_err(io(&manifest_path))?;
     let manifest: Manifest = toml::from_str(&manifest_text)
         .map_err(|e| TaskError::Check(format!("guest/rootfs/rootfs.toml: {e}")))?;
+
     let hook = inputs.join("customize.sh");
     let hook_text = std::fs::read_to_string(&hook).map_err(io(&hook))?;
 
@@ -94,6 +95,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     for dir in [&work, &out_dir] {
         std::fs::create_dir_all(dir).map_err(io(dir))?;
     }
+
     let epoch = manifest.image.source_date_epoch.to_string();
 
     let base = base_layer(&manifest.debian, &manifest_text, &hook_text, &work, &epoch)?;
@@ -103,6 +105,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
 
     let tarball = work.join("rootfs.tar");
     std::fs::copy(&base, &tarball).map_err(io(&base))?;
+
     let layers = [
         // The toolchain keeps its own file modes.
         Layer::new(&toolchain, None, &["usr"]),
@@ -114,6 +117,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     for layer in &layers {
         append(root, &tarball, &epoch, layer)?;
     }
+
     let image = out_dir.join("rootfs.erofs");
     pack_image(root, &tarball, &image, &manifest.image.compression, &epoch)
 }
@@ -124,6 +128,7 @@ fn base_name(manifest_text: &str, hook_text: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(manifest_text.as_bytes());
     hasher.update(hook_text.as_bytes());
+
     let key = hasher.finalize().to_hex();
     format!("base-{}.tar", key.get(..16).unwrap_or_default())
 }
@@ -141,6 +146,7 @@ fn base_layer(
         eprintln!("xtask: reusing {}", base.display());
         return Ok(base);
     }
+
     build_base(debian, hook_text, &base, epoch)?;
     remove_old_bases(work, &base)?;
     Ok(base)
@@ -161,17 +167,20 @@ fn remove_old_bases(work: &Path, keep: &Path) -> Result<(), TaskError> {
 /// Layer 4: builds the guest agent and its eBPF programs and stages both
 /// under `<work>/agent-layer`. Returns the staging root.
 fn stage_agent(root: &Path, work: &Path) -> Result<PathBuf, TaskError> {
+    let staging = work.join("agent-layer");
+
     crate::guest_agent()?;
     let agent = root
         .join("target")
         .join(GUEST_TARGET)
         .join("release")
         .join("crateward_guest_agent");
-    let staging = work.join("agent-layer");
     stage_file(&agent, &staging.join(AGENT_PATH_IN_GUEST))?;
+
     crate::guest_ebpf::run(root)?;
     let ebpf = crate::guest_ebpf::object_path(root);
     stage_file(&ebpf, &staging.join(EBPF_PATH_IN_GUEST))?;
+
     Ok(staging)
 }
 
@@ -209,13 +218,16 @@ fn append_args(tarball: &str, epoch: &str, layer: &Layer<'_>) -> Vec<String> {
         "--group=0".to_owned(),
         "--numeric-owner".to_owned(),
     ];
+
     if let Some(mode) = layer.mode {
         args.push(format!("--mode={mode}"));
     }
+
     args.push(format!("--mtime=@{epoch}"));
     args.push("-C".to_owned());
     args.push(layer.dir.to_string_lossy().into_owned());
     args.extend(layer.paths.iter().map(|path| (*path).to_owned()));
+
     args
 }
 
@@ -237,6 +249,7 @@ fn pack_image(
     if image.exists() {
         std::fs::remove_file(image).map_err(io(image))?;
     }
+
     run_in(
         root,
         "mkfs.erofs",
@@ -250,6 +263,7 @@ fn pack_image(
         ],
         &[],
     )?;
+
     let digest = crate::images::blake3_file(image)?;
     eprintln!("xtask: wrote {} (blake3 {digest})", image.display());
     Ok(())
@@ -265,17 +279,21 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
             debian.snapshot
         )
     };
+
     let main = format!("deb {} {} main", snapshot("debian"), debian.suite);
     let security = format!(
         "deb {} {}-security main",
         snapshot("debian-security"),
         debian.suite
     );
+
     let variant = format!("--variant={}", debian.variant);
     let include = format!("--include={}", debian.packages.join(","));
     let customize = format!("--customize-hook={hook}");
+
     let partial = base.with_extension("partial.tar");
     let partial_path = partial.to_string_lossy().into_owned();
+
     let mut args = vec![
         "--mode=unshare",
         variant.as_str(),
@@ -285,6 +303,7 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
         "--aptopt=Acquire::Check-Valid-Until \"false\"",
         customize.as_str(),
     ];
+
     if !debian.packages.is_empty() {
         args.push(include.as_str());
     }
@@ -294,9 +313,11 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
         main.as_str(),
         security.as_str(),
     ]);
+
     let dir = base.parent().unwrap_or(base);
     run_in(dir, "mmdebstrap", &args, &[("SOURCE_DATE_EPOCH", epoch)])?;
     std::fs::rename(&partial, base).map_err(io(&partial))?;
+
     Ok(())
 }
 
@@ -306,16 +327,20 @@ fn stage_toolchain(root: &Path, pin_path: &Path, work: &Path) -> Result<PathBuf,
     let text = std::fs::read_to_string(pin_path).map_err(io(pin_path))?;
     let pin: Toolchain = toml::from_str(&text)
         .map_err(|e| TaskError::Check(format!("guest/rootfs/rust.toml: {e}")))?;
+
     let downloads = root.join("target").join("guest").join("downloads");
-    std::fs::create_dir_all(&downloads).map_err(io(&downloads))?;
     let staging = work.join("toolchain");
-    remove_dir(&staging)?;
     let prefix = staging.join("usr").join("local");
+
+    std::fs::create_dir_all(&downloads).map_err(io(&downloads))?;
+    remove_dir(&staging)?;
     std::fs::create_dir_all(&prefix).map_err(io(&prefix))?;
+
     for component in &pin.component {
         let archive = component.fetch(&downloads)?;
         component.unpack(root, &archive, &prefix)?;
     }
+
     eprintln!("xtask: staged Rust {} for the guest", pin.version);
     Ok(staging)
 }
@@ -343,11 +368,13 @@ impl Component {
     fn fetch(&self, downloads: &Path) -> Result<PathBuf, TaskError> {
         let name = self.archive_name()?;
         let archive = downloads.join(name);
+
         if !archive.exists() {
             let target = archive.to_string_lossy();
             let args = ["-sSfL", "--proto", "=https", "-o", &target, &self.url];
             run_in(downloads, "curl", &args, &[])?;
         }
+
         let digest = crate::images::sha256_file(&archive)?;
         if digest != self.sha256 {
             std::fs::remove_file(&archive).map_err(io(&archive))?;
@@ -356,6 +383,7 @@ impl Component {
                 self.sha256
             )));
         }
+
         Ok(archive)
     }
 
@@ -403,6 +431,7 @@ fn stage_trust(root: &Path, base: &Path, work: &Path) -> Result<PathBuf, TaskErr
         }
         std::fs::write(&path, text).map_err(io(&path))?;
     }
+
     Ok(staging)
 }
 
@@ -412,12 +441,15 @@ fn stage_trust(root: &Path, base: &Path, work: &Path) -> Result<PathBuf, TaskErr
 fn authority_certificate(root: &Path) -> Result<String, TaskError> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
+
     let ca_dir = root.join("target").join("guest").join("ca");
-    std::fs::create_dir_all(&ca_dir).map_err(io(&ca_dir))?;
     let authority = ca_dir.join("authority.pem");
+    std::fs::create_dir_all(&ca_dir).map_err(io(&ca_dir))?;
+
     if !authority.exists() {
         let (cert, key) = crateward_fake_internet::tls::generate_ca()
             .map_err(|e| TaskError::Check(format!("generating the TLS authority: {e}")))?;
+
         std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -427,6 +459,7 @@ fn authority_certificate(root: &Path) -> Result<String, TaskError> {
             .map_err(io(&authority))?;
         eprintln!("xtask: created the TLS authority {}", authority.display());
     }
+
     let pem = std::fs::read_to_string(&authority).map_err(io(&authority))?;
     let (cert, _) = crateward_fake_internet::tls::split_pem(&pem).ok_or_else(|| {
         TaskError::Check(format!(
@@ -434,12 +467,14 @@ fn authority_certificate(root: &Path) -> Result<String, TaskError> {
             authority.display()
         ))
     })?;
+
     Ok(cert)
 }
 
 /// The trust bundle inside the base tarball.
 fn base_bundle(base: &Path) -> Result<String, TaskError> {
     use std::io::Read;
+
     let file = std::fs::File::open(base).map_err(io(base))?;
     let mut archive = tar::Archive::new(file);
     for entry in archive.entries().map_err(io(base))? {
@@ -449,12 +484,14 @@ fn base_bundle(base: &Path) -> Result<String, TaskError> {
             .map_err(io(base))?
             .to_string_lossy()
             .into_owned();
+
         if path.trim_start_matches("./") == TRUST_BUNDLE {
             let mut text = String::new();
             entry.read_to_string(&mut text).map_err(io(base))?;
             return Ok(text);
         }
     }
+
     Err(TaskError::Check(format!(
         "the base has no {TRUST_BUNDLE}; is ca-certificates installed?"
     )))
@@ -470,15 +507,18 @@ fn base_bundle(base: &Path) -> Result<String, TaskError> {
 /// cannot be read.
 pub fn bump_snapshot(root: &Path) -> Result<(), TaskError> {
     let path = root.join("guest").join("rootfs").join("rootfs.toml");
-    let text = std::fs::read_to_string(&path).map_err(|e| TaskError::Io(path.clone(), e))?;
+    let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+
     let out = std::process::Command::new("date")
         .args(["--utc", "+%Y%m%dT000000Z"])
         .output()
         .map_err(|e| TaskError::Command(format!("date: {e}")))?;
     let today = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+
     let (updated, old) = with_snapshot(&text, &today)
         .ok_or_else(|| TaskError::Check(format!("{}: no snapshot line", path.display())))?;
-    std::fs::write(&path, updated).map_err(|e| TaskError::Io(path.clone(), e))?;
+    std::fs::write(&path, updated).map_err(io(&path))?;
+
     eprintln!("xtask: Debian snapshot {old} -> {today}");
     eprintln!("xtask: next: cargo xtask rootfs, cargo xtask canary, commit, cargo xtask release");
     Ok(())
@@ -498,6 +538,7 @@ fn with_snapshot(text: &str, snapshot: &str) -> Option<(String, String)> {
             _ => line.to_owned(),
         })
         .collect();
+
     Some((lines.join("\n") + "\n", old?))
 }
 
