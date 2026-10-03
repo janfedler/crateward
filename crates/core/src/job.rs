@@ -76,7 +76,7 @@ impl Stage {
         }
     }
 
-    /// Short name used in logs, metrics and configuration.
+    /// Short name used in logs, the command line tool and configuration.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {

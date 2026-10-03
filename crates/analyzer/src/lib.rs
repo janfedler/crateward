@@ -8,8 +8,8 @@
 //! * The risk score combines static findings, dynamic events and the diff
 //!   against the previous version, and every point of the score links to
 //!   its evidence.
-//! * Behavior is stored as a compact profile per version. When behavior is
-//!   unchanged, only the diff against the previous version is stored.
+//! * Behavior is stored as a compact profile per version. Behavior that is
+//!   new against the previous version's profile scores again.
 //! * The analyzer decides whether a `cargo check` run escalates to a full
 //!   build and test, at most once per job.
 

@@ -64,8 +64,8 @@ zstd = "0.13"
 
 [workspace.lints.rust]
 # Unsafe code is denied everywhere. Packages without any unsafe code
-# additionally `#![forbid]` it at the crate root. The few packages that will
-# need it (guest agent, orchestrator) confine it to documented modules.
+# additionally `#![forbid]` it at the crate root. The only exception is
+# `crateward_core::sandbox`, which documents its one unsafe block.
 unsafe_code = "deny"
 missing_docs = "deny"
 rust_2018_idioms = { level = "deny", priority = -1 }

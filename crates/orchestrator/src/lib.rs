@@ -9,16 +9,16 @@
 //!   rootless jail (ADR 0002): its own subordinate UID, private namespaces,
 //!   `pivot_root` into a root with only the needed files, no capabilities.
 //!   No process runs as root for the sandbox.
-//! * Jobs start by restoring a warm snapshot. Identity, honeytokens and the
-//!   clock are injected after restore, because resuming one snapshot many
-//!   times would otherwise repeat entropy and identifiers.
+//! * Jobs start by restoring a snapshot of a clean boot. Identity,
+//!   honeytokens and the clock are injected after restore, because resuming
+//!   one snapshot many times would otherwise repeat entropy and identifiers.
 //! * Each slot has its own network namespace whose only route leads to the
 //!   fake internet, which has no uplink.
 //! * Hard limits cover CPU, memory, disk, processes and wall clock time.
 //!   Every host resource is named after its slot, so startup reconciliation
 //!   can find and remove anything a crash left behind.
-//! * Tap capture and disk diffs provide host side ground truth that a
-//!   compromised guest cannot hide from.
+//! * The fake internet's log, tap capture and the scratch disk scan provide
+//!   host side ground truth that a compromised guest cannot hide from.
 //! * A `VmBackend` trait separates Firecracker from the scheduling logic,
 //!   so CI can use a fake backend and another VMM could be added later.
 

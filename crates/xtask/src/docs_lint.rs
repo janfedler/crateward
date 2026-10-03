@@ -1,7 +1,8 @@
 //! Enforces the project's writing style mechanically.
 //!
 //! The style asks for short, precise English sentences with no em dashes, no
-//! hyphenated compounds and no semicolons in prose. Reviewers miss these. A check does not.
+//! hyphenated compounds and no semicolons in prose. Reviewers miss these. A
+//! check does not.
 //! The rules apply to prose only: code blocks, inline code, URLs and HTML
 //! comments are skipped. Names that contain hyphens (crates, tools, flags,
 //! targets) belong in inline code, which is good style anyway.

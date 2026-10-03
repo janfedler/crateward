@@ -1,6 +1,6 @@
 //! Builds the guest root filesystem image.
 //!
-//! Two layers, so that a change to the guest agent does not mean downloading
+//! Layers, so that a change to the guest agent does not mean downloading
 //! Debian again:
 //!
 //! 1. A Debian base tarball from `mmdebstrap` in unshare mode, which needs no
@@ -13,8 +13,9 @@
 //! 3. The fake internet's TLS authority, added to the system trust bundle.
 //!    It is created once per installation under `target/guest/ca` (mode
 //!    0600) and reused, because the orchestrator needs its private key.
-//! 4. The guest agent and its eBPF programs, appended to a copy of the base
-//!    tarball with root ownership.
+//! 4. The guest agent and its eBPF programs.
+//!
+//! Layers 2 to 4 are appended to a copy of the base tarball.
 //!
 //! The result is packed with `mkfs.erofs` into a compressed, read only
 //! image with a fixed timestamp on every file.

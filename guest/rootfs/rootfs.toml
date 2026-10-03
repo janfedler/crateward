@@ -2,7 +2,8 @@
 #
 # `cargo xtask rootfs` builds a Debian base with mmdebstrap in unshare mode
 # (no root needed), from snapshot.debian.org at a fixed point in time, then
-# adds the guest agent and packs everything into a read only EROFS image.
+# adds the Rust toolchain, the fake internet's authority and the guest agent
+# and packs everything into a read only EROFS image.
 
 [debian]
 suite = "trixie"

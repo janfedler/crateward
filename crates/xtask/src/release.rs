@@ -4,10 +4,9 @@
 //! (`sandbox/`), the guest images with the fake internet's authority
 //! (`guest/`), the playbooks and units (`deploy/`), the example
 //! configuration (`config/`), `install.sh`, the license texts, a CycloneDX
-//! software bill of
-//! materials, the vendored sources of every dependency, and `SHA256SUMS`
-//! over all of it. The bundle directory is packed into a tarball next to
-//! it. Signing the sums file needs the maintainer's key, so this task stops
+//! software bill of materials, the vendored sources of every dependency,
+//! and `SHA256SUMS` over all of it. The bundle directory is packed into a
+//! tarball next to it. Signing the sums file needs the maintainer's key, so this task stops
 //! before that and prints the commands. `cargo xtask pack` packs the
 //! bundle again once the signature is in it.
 //!

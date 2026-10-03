@@ -1,12 +1,13 @@
 ---
 # Sets up the Crateward server from a fresh Debian 13 install, following
-# docs/OPERATIONS.md ("Host setup done by hand", "Services and users") and
+# docs/OPERATIONS.md ("Host setup", "Services and users") and
 # docs/ARCHITECTURE.md ("Egress"). Uses only ansible.builtin modules.
 #
 #   ansible-playbook -i inventory.yml site.yml -e @vars.yml
 #
 # vars.example.yml lists every variable. Secrets (the configuration file,
-# the site deploy key) stay outside the repository and are read from local paths the maintainer passes in.
+# the site deploy key) stay outside the repository and are read from local
+# paths the maintainer passes in.
 
 - name: Crateward server
   hosts: crateward

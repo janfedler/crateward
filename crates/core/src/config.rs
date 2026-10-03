@@ -5,8 +5,8 @@
 //! silently fall back to a default. Validation then checks the rules that
 //! types cannot express, collects every problem instead of stopping at the
 //! first, and encodes external policy where it applies: the crates.io data
-//! access policy limits API use to one request per second, so a larger value
-//! is a configuration error, not a tuning choice.
+//! access policy asks for a user agent with contact details, so one without
+//! is a configuration error, not a style choice.
 //!
 //! Secrets (database URL, ntfy topic) are [`SecretString`]s.
 //! Their `Debug` output is redacted, so logging a configuration never leaks

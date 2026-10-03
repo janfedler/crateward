@@ -1,21 +1,23 @@
-//! Downloads, verifies, safely extracts and vendors crates.
+//! Downloads, verifies and validates crates and resolves their dependencies.
 //!
-//! Zone: trusted. The fetcher is the only component with real internet
-//! access, and nftables restricts even that to the crates.io hosts.
+//! Zone: trusted. The fetcher and the feed are the only components with
+//! real internet access, and nftables restricts even that to the crates.io
+//! hosts.
 //!
 //! Why it looks the way it does:
 //!
 //! * Every `.crate` file is checked against the SHA-256 from the index
 //!   before any other code touches it.
-//! * Extraction runs in a sandboxed subprocess and rejects path traversal,
-//!   links, device files and special files, and caps size, file count,
-//!   depth and compression ratio. A rejected archive is a finding, not an
-//!   error.
-//! * Dependencies are vendored for all targets by generating a small
+//! * Archives are validated in a sandboxed subprocess without being
+//!   extracted. Path traversal, links, device files and special files are
+//!   findings, and size, file count, depth and compression ratio are
+//!   capped. A rejected archive is a finding, not an error.
+//! * Dependencies are resolved for all targets by generating a small
 //!   consumer package that depends on the exact version under analysis.
 //!   This mirrors how a victim would pull the crate in, and it means cargo
-//!   never reads configuration shipped inside the crate. The vendoring
+//!   never reads configuration shipped inside the crate. The resolving
 //!   subprocess reaches only a local registry proxy, never the internet.
+//!   The fetcher then fetches and validates every locked crate itself.
 //! * Blobs are stored content addressed and zstd compressed, so shared
 //!   dependencies are stored once.
 //!
