@@ -175,7 +175,7 @@ async fn drop_schema(schema: &str) {
 
 fn client() -> PoliteClient {
     PoliteClient::new(&ClientConfig {
-        user_agent: "crateward-test/0 (+https://crateward.com)".into(),
+        user_agent: "crateward-test/0 (+https://example.com)".into(),
         requests_per_second: 1000.0,
         timeout: Duration::from_secs(5),
         allow_plain_http: true,

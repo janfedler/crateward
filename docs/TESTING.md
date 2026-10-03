@@ -65,50 +65,28 @@ Results on the production server (2026-09-24):
 The only programs these tests start inside the VM are the guest agent and
 standard tools of the guest image.
 
-## Sandboxed children
+## Canary test
 
-Six child modes of three services handle hostile input: the fetcher's
-validation and resolution children, the static analyzer's child, and the
-orchestrator's scratch scanner, export and image builder. Each child enters
-its sandbox (user and network namespaces, rlimits, Landlock) before it reads
-input, through `crateward_core::sandbox::enter`. The parents start them
-through `crateward_core::child`, which gives them an empty environment,
-keeps the start of their stderr and enforces the deadline.
+`cargo xtask canary` runs both canaries on the server, through
+`crates/orchestrator/tests/canary.rs`. Their sources exist only as strings
+in `crates/orchestrator/src/canary.rs`, and they are compiled and run only
+inside a microVM.
 
-The tests run the real child binaries on inert fixtures. Nothing in a
-fixture is ever executed. They live in `crates/fetcher/tests/sandbox.rs`,
-`crates/static_analysis/tests/sandbox.rs` and
-`crates/orchestrator/tests/sandbox.rs`. The resolution child runs a fake
-`cargo`, a shell script that the test writes. A kernel or CI runner without
-unprivileged user namespaces skips these tests, and so does a host without
-`mkfs.erofs`, unless `CRATEWARD_REQUIRE_SANDBOX` is set, which the server's
-own runs do. `crateward_core::sandbox::unavailable` decides that for all of
-them.
+The known bad canary has a build script that reads the job's cargo token
+and posts it to a made up host, and has `curl` post the AWS credentials
+over HTTPS. It also copies the token into its `OUT_DIR` and drops an
+autostart file into the home directory. The test passes when:
 
-`cargo xtask canary` runs the end to end canary on the server: a fixture
-crate whose build script reads the job's cargo token and posts it to a
-made up host and has `curl` post the AWS credentials over HTTPS. Its
-source exists only as strings in `crates/orchestrator/tests/canary.rs`, and
-it is compiled and run only inside a microVM. The test passes when the fake
-internet recorded the lookup, the orchestrator found both tokens in what
-left the VM, and the eBPF trace shows the build script reading the cargo
-credentials and connecting out, and `curl`, started by the build script,
-reading the AWS file. The build script also copies the token into its
-`OUT_DIR` and drops an autostart file into the home directory. The host's
-scan of the scratch disk must find both.
+* The fake internet recorded the lookup.
+* The orchestrator found both tokens in what left the VM.
+* The eBPF trace shows the build script reading the cargo credentials and
+  connecting out, and `curl`, started by the build script, reading the AWS
+  file.
+* The host's scan of the scratch disk found the copied token and the
+  autostart file.
 
-The same test also runs the known good canary, which must come out with
-nothing flagged. The orchestrator runs both canaries on a schedule
-(ADR 0008). Their fixtures live in `crates/orchestrator/src/canary.rs`.
-
-The eBPF programs themselves only run in the guest kernel. On the host,
-tests cover the agent's record decoder (including every truncation of a
-record), its BTF reader (on built fixtures and on the host kernel's own
-BTF) and the orchestrator's bounded trace summary.
-
-Detectors are tested on fixtures too, including the false positives found
-on live crates (URLs in doc comments and error messages, bidi characters
-in images, `toast.txt` as an exfiltration host), so they stay fixed.
+The known good canary must come out with nothing flagged. The orchestrator
+also runs both canaries on a schedule (ADR 0008).
 
 ## Running the checks
 

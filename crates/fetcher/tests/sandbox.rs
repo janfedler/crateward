@@ -127,7 +127,7 @@ fn a_child_that_does_not_exist_is_an_error() {
 #[test]
 fn a_resolution_child_that_does_not_exist_is_an_error() {
     let client = PoliteClient::new(&ClientConfig {
-        user_agent: "crateward/0.1 (+https://crateward.com/about; security@janfedler.de)".into(),
+        user_agent: "crateward/0.1 (+https://example.com/about; security@example.com)".into(),
         requests_per_second: 1.0,
         timeout: Duration::from_secs(1),
         allow_plain_http: false,
