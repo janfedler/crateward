@@ -83,7 +83,8 @@ verify_bundle() {
     say "the bundle is signed by $principal"
 }
 
-# The dev pipeline and production would compete for the VM hardware.
+# Another orchestrator on this host, such as one from a source checkout,
+# would compete for KVM, the slot UIDs and the tmpfs.
 no_foreign_orchestrator() {
     local foreign
     foreign="$(ps -eo user:32=,comm= |

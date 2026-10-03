@@ -44,8 +44,8 @@ test. Nothing is marked Built before the code exists.
 | B2 | Firecracker to host kernel | system calls, filtered by Firecracker's seccomp filters, and the rootless jail's namespaces, `pivot_root`, cgroup and distinct UID |
 | B3 | Guest agent to orchestrator | one length limited vsock stream |
 | B4 | Guest network to fake internet | tap device and nftables redirect in the slot's network namespace |
-| B5 | Crate archive to extraction and static analysis | untrusted bytes into sandboxed subprocesses |
-| B6 | Warmer output to job VMs | read only images, sealed with a signed BLAKE3 manifest |
+| B5 | Crate archive to validation and static analysis | untrusted bytes into sandboxed subprocesses |
+| B6 | Warm build output to job VMs | read only images named by their BLAKE3 digest, built and used within one orchestrator process |
 | B7 | Server to internet | allowlisted egress per service user, and SSH inbound |
 | B8 | Server to public site | one way push of a sanitized static export |
 | B9 | Admin to control plane | SSH. The dashboard listens on loopback only and is reached through an SSH tunnel |
