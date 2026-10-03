@@ -9,9 +9,8 @@ links to them instead of repeating them.
 Crateward watches crates.io for new versions, analyzes each one statically,
 runs the build time code of the interesting ones inside Firecracker microVMs,
 scores the risk with reasons linked to evidence, and shows the results on a
-dashboard. It runs unattended on one bare metal server and interrupts the
-maintainer only for the closed list of reasons in
-`crateward_core::escalation`.
+dashboard. It runs unattended and interrupts the maintainer only for the
+closed list of reasons in `crateward_core::escalation`.
 
 ## Hardware and its consequences
 
