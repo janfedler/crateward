@@ -8,7 +8,7 @@ all-features = true
 # The same list is in .cargo/audit.toml for cargo-audit. Each entry names the
 # release that makes it obsolete. Remove it then.
 ignore = [
-    # wasmtime 45 (through yara-x 1.20.0, the newest release, which requires
+    # wasmtime 45 (through yara-x, whose newest release 1.21.0 still requires
     # ^45.0.3): stores can mix up type indices between engines. YARA-X creates
     # a single global Engine (src/wasm/mod.rs, ENGINE.get_or_init), so there is
     # no second engine. Remove when yara-x moves to wasmtime >= 46.0.3.
@@ -22,6 +22,11 @@ ignore = [
     # builds wasmtime without the `component-model` feature, so that code is
     # not compiled in. Remove with the entries above (fixed in 48.0.3).
     { id = "RUSTSEC-2026-0316", reason = "the wasmtime component model is not compiled in" },
+    # wasmtime 45: the result count of an async lifted component callback is
+    # not validated, which overflows a native stack buffer. Also component
+    # model code only, which is not compiled in. Remove with the entries above
+    # (fixed in 48.0.4 and 49.0.2).
+    { id = "RUSTSEC-2026-0327", reason = "the wasmtime component model is not compiled in" },
     # bincode 2 is unmaintained. YARA-X uses it only to (de)serialize compiled
     # rules, which Crateward never loads from outside. Rules are compiled from
     # source embedded in the binary.
