@@ -181,6 +181,8 @@ jobs:
         with:
           tool: cargo-deny@0.20.2,cargo-audit@0.22.2,cargo-vet@0.10.2
       - run: cargo deny --locked check
-      - run: cargo deny --manifest-path crates/guest_ebpf/Cargo.toml --locked check
+      # The root deny.toml ignores advisories of host dependencies that the
+      # eBPF lockfile does not contain.
+      - run: cargo deny --manifest-path crates/guest_ebpf/Cargo.toml --locked check --allow advisory-not-detected
       - run: cargo audit
       - run: cargo vet --locked

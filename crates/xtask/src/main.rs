@@ -301,7 +301,8 @@ fn ci() -> Result<(), TaskError> {
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;
 
-    // The eBPF package has its own lockfile. The root deny.toml applies.
+    // The eBPF package has its own lockfile. The root deny.toml applies, so
+    // its ignores of host advisories match nothing there.
     run(
         "cargo",
         &[
@@ -310,6 +311,8 @@ fn ci() -> Result<(), TaskError> {
             repo::GUEST_EBPF_MANIFEST,
             "--locked",
             "check",
+            "--allow",
+            "advisory-not-detected",
         ],
         &[],
     )?;
