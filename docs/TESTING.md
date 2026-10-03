@@ -15,8 +15,8 @@ server.
 | Unit tests | Pure logic: names, digests, config validation, state machine paths | `#[cfg(test)]` modules |
 | Property tests | Parsers and the state machine under arbitrary input | `proptest`, for example `crates/core/tests/state_machine.rs` |
 | Documentation checks | Writing style, generated diagram up to date | `cargo xtask docs-lint`, `cargo xtask state-diagram` |
-| Integration tests | Feed and fetcher against a mock crates.io; Postgres job store | M2 |
-| End to end tests | Canary crates through the whole pipeline with the fake VM backend | M5 |
+| Integration tests | The feed against a mock crates.io, the job store, the static analysis worker, the dashboard and the `crateward` tool on a real PostgreSQL; the sandboxed children of the fetcher, static analysis and the orchestrator | `crates/*/tests/`, for example `crates/feed/tests/feed.rs`; the database tests need `CRATEWARD_TEST_DATABASE_URL` |
+| Canary tests | A known bad crate must be caught and a known good one must come out clean, built in a real microVM | `crates/orchestrator/tests/canary.rs` through `cargo xtask canary`, on the server; the orchestrator also runs them every `sandbox.canary_interval_minutes` |
 | Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly); `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default; run on the server with `--ignored` |
 | Deployment checks | The playbooks parse, the units verify with `systemd-analyze`, the firewall loads in a throwaway network namespace; unit tests keep the playbook's pins and unit list in sync | `cargo xtask deploy-check`, in CI |
