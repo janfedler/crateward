@@ -22,8 +22,8 @@ use crateward_core::protocol::{ExitStatus, JobSpec, WallClock};
 use crateward_orchestrator::firecracker::vm::{BootSpec, Isolation, JailConfig, Launch, Vm};
 use tokio::time::Instant;
 
-/// Subordinate IDs used by the jail tests. Inside the `claude` user's
-/// range (`/etc/subuid`), away from its start where image builds map root.
+/// Subordinate IDs used by the jail tests. Inside the test user's range
+/// (`/etc/subuid`), away from its start where image builds map root.
 const TEST_SUBID_BASE: u32 = 160_000;
 
 fn root() -> PathBuf {

@@ -70,13 +70,6 @@ server needs. See [deploy/README.md](../deploy/README.md).
   flushes, SMT disabled", `kvm_intel.vmentry_l1d_flush=always`.
 * Swap disabled and removed from `/etc/fstab`. KSM off.
 * Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap musl-tools`.
-* Development user `claude`: groups `kvm` and `systemd-journal`, lingering
-  enabled, subordinate IDs `100000:65536`, and
-  `/etc/systemd/system/user@1000.service.d/delegate.conf` with
-  `Delegate=cpu cpuset io memory pids`.
-
-For production the orchestrator gets its own user (see below) instead of
-the development account.
 
 ## Opening the dashboard
 
