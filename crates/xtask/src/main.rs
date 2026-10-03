@@ -1,9 +1,4 @@
 //! Developer tasks for Crateward, run as `cargo xtask <task>`.
-//!
-//! Keeping these in Rust instead of shell scripts follows the project rule
-//! that everything except kernel configuration, root filesystem scripts and
-//! third party binaries is Rust. It also makes the tasks testable: the
-//! documentation checks below run as part of `cargo test`.
 
 #![forbid(unsafe_code)]
 
