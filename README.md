@@ -140,10 +140,8 @@ reporting, not in a public issue. Details are in
 ## Contributing
 
 Issues and pull requests are welcome. Before a pull request, run
-`cargo xtask ci`. It includes `rustfmt`, `clippy` with the workspace lints,
-the tests, the documentation style check and the supply chain checks.
-Larger design changes start with an
-[architecture decision record](docs/adr/README.md).
+`cargo xtask ci`. The code and writing rules are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 

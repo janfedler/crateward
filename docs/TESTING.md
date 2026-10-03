@@ -14,7 +14,7 @@ server.
 |-------|------|-------|
 | Unit tests | Pure logic: names, digests, config validation, state machine paths | `#[cfg(test)]` modules |
 | Property tests | Parsers and the state machine under arbitrary input | `proptest`, for example `crates/core/tests/state_machine.rs` |
-| Documentation checks | Writing style, generated diagram up to date | `cargo xtask docs-lint`, `cargo xtask state-diagram` |
+| Documentation checks | [Writing style](../CONTRIBUTING.md#writing), generated diagram up to date | `cargo xtask docs-lint`, `cargo xtask state-diagram` |
 | Integration tests | The feed against a mock crates.io, the job store, the static analysis worker, the dashboard and the `crateward` tool on a real PostgreSQL. The sandboxed children of the fetcher, static analysis and the orchestrator | `crates/*/tests/`, for example `crates/feed/tests/feed.rs`. The database tests need `CRATEWARD_TEST_DATABASE_URL` |
 | Canary tests | A known bad crate must be caught and a known good one must come out clean, built in a real microVM | `crates/orchestrator/tests/canary.rs` through `cargo xtask canary`, on the server. The orchestrator also runs them every `sandbox.canary_interval_minutes` |
 | Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly). `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
@@ -90,17 +90,3 @@ warnings denied, the static musl build of the guest agent, the eBPF
 programs (format, clippy and build with the pinned nightly and
 `bpf-linker`), the documentation checks, `cargo deny` for both lockfiles,
 `cargo audit` and `cargo vet`, in the same order as CI.
-
-## Writing style
-
-Documentation, code comments and configuration comments are English, in
-short and precise sentences, with no em dashes, no hyphenated compounds and
-no semicolons. `cargo xtask docs-lint` enforces the last three rules in the
-Markdown files, the Rust comments and `config/*.toml`:
-
-* Write "read only", "content addressed", "build time" instead of joining
-  words with hyphens.
-* Put names that contain hyphens (crates, tools, flags, targets) and code
-  in inline code, for example `cargo-deny`.
-* End a sentence with a full stop where a semicolon would join two.
-* Text inside double quotes is a quotation of a source and is not checked.
