@@ -67,15 +67,19 @@ pub fn decide(report: &StaticReport, dependencies: &[Dependency]) -> Decision {
             reasons,
         };
     }
+
     if let Some(script) = &facts.build_script {
         reasons.push(format!("build script {script}"));
     }
+
     if facts.proc_macro {
         reasons.push("proc macro".to_owned());
     }
+
     if let Some(links) = &facts.links {
         reasons.push(format!("links the native library {links}"));
     }
+
     let high = report
         .findings
         .iter()
@@ -84,6 +88,7 @@ pub fn decide(report: &StaticReport, dependencies: &[Dependency]) -> Decision {
     if high > 0 {
         reasons.push(format!("{high} high severity findings"));
     }
+
     let unfamiliar: Vec<String> = dependencies
         .iter()
         .filter(|d| d.build_time_code && !d.popular && !d.seen_before && !d.tracked)
@@ -95,6 +100,7 @@ pub fn decide(report: &StaticReport, dependencies: &[Dependency]) -> Decision {
             unfamiliar.join(", ")
         ));
     }
+
     if reasons.is_empty() {
         reasons
             .push("building it runs no code of its own or of unfamiliar dependencies".to_owned());
@@ -118,6 +124,7 @@ mod tests {
 
     fn report(files: &[(&str, &[u8])]) -> StaticReport {
         let mut builder = tar::Builder::new(Vec::new());
+
         for (path, data) in files {
             let mut header = tar::Header::new_gnu();
             header.set_size(data.len() as u64);
@@ -127,6 +134,7 @@ mod tests {
                 .append_data(&mut header, format!("f-0.1.0/{path}"), *data)
                 .unwrap();
         }
+
         let tar = builder.into_inner().unwrap();
         analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap()
     }
@@ -154,6 +162,7 @@ mod tests {
             tracked: true,
             ..dep(true, false, false)
         };
+
         let d = decide(
             &r,
             &[
@@ -163,6 +172,7 @@ mod tests {
                 tracked,
             ],
         );
+
         assert_eq!(
             d.triage,
             Triage::StaticOnly(StaticOnlyReason::NoBuildTimeCode)
@@ -172,9 +182,12 @@ mod tests {
     #[test]
     fn build_scripts_and_unfamiliar_dependencies_are_dynamic() {
         let r = report(&[MANIFEST, ("build.rs", b"fn main() {}"), ("src/lib.rs", b"")]);
+
         assert_eq!(decide(&r, &[]).triage, Triage::Dynamic);
+
         let plain = report(&[MANIFEST, ("src/lib.rs", b"")]);
         let d = decide(&plain, &[dep(true, false, false)]);
+
         assert_eq!(d.triage, Triage::Dynamic);
         assert!(d.reasons[0].contains("d 1.0.0"));
     }
@@ -182,6 +195,7 @@ mod tests {
     #[test]
     fn windows_only_libraries_are_not_applicable() {
         let r = report(&[MANIFEST, ("src/lib.rs", b"#![cfg(windows)]\npub fn f() {}")]);
+
         assert_eq!(decide(&r, &[]).triage, Triage::NotApplicableOnLinux);
     }
 }

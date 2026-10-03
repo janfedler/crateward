@@ -68,6 +68,7 @@ fn requirements(fragment: &str) -> Vec<Requirement> {
                 let name = rest.strip_suffix(" is not set")?;
                 return Some(Requirement::Unset(format!("CONFIG_{name}")));
             }
+
             let (name, value) = line.split_once('=')?;
             name.starts_with("CONFIG_")
                 .then(|| Requirement::Set(name.to_owned(), value.to_owned()))
@@ -83,6 +84,7 @@ fn unmet(requirements: &[Requirement], config: &str) -> Vec<String> {
             (key == name).then_some(value)
         })
     };
+
     requirements
         .iter()
         .filter_map(|requirement| match requirement {
@@ -104,6 +106,7 @@ fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
         std::fs::create_dir_all(src).map_err(|e| TaskError::Io(src.to_path_buf(), e))?;
         run_in(src, "git", &["init", "--quiet"], &[])?;
     }
+
     let head = output(src, "git", &["rev-parse", "HEAD"]).unwrap_or_default();
     if head != source.commit {
         eprintln!(
@@ -123,6 +126,7 @@ fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
             &[],
         )?;
     }
+
     let head = output(src, "git", &["rev-parse", "HEAD"])?;
     if head != source.commit {
         return Err(TaskError::Check(format!(
@@ -130,6 +134,7 @@ fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
             source.commit
         )));
     }
+
     let version = output(src, "make", &["-s", "kernelversion"])?;
     if version != source.version {
         return Err(TaskError::Check(format!(
@@ -137,6 +142,7 @@ fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
             source.version
         )));
     }
+
     Ok(())
 }
 
@@ -202,6 +208,7 @@ fn check_fragment(name: &str, fragment: &str, config: &str) -> Result<(), TaskEr
     if missing.is_empty() {
         return Ok(());
     }
+
     Err(TaskError::Check(format!(
         "the kernel configuration lost options of {name}:\n  {}",
         missing.join("\n  ")
@@ -214,6 +221,7 @@ fn compile(build: &Build, src: &Path, dir: &Path) -> Result<(), TaskError> {
         "-j{}",
         std::thread::available_parallelism().map_or(1, std::num::NonZero::get)
     );
+
     run_in(
         src,
         "make",
@@ -249,6 +257,7 @@ mod tests {
     #[test]
     fn parses_set_and_unset_requirements() {
         let fragment = "# comment\nCONFIG_A=y\n# CONFIG_B is not set\nCONFIG_C=\"x\"\n";
+
         assert_eq!(
             requirements(fragment),
             vec![
@@ -263,6 +272,7 @@ mod tests {
     fn reports_dropped_and_changed_options() {
         let reqs = requirements("CONFIG_A=y\nCONFIG_B=y\n# CONFIG_C is not set\nCONFIG_D=y\n");
         let config = "CONFIG_A=y\nCONFIG_B=m\nCONFIG_C=y\n";
+
         assert_eq!(
             unmet(&reqs, config),
             vec![
@@ -276,6 +286,7 @@ mod tests {
     #[test]
     fn a_fragment_that_survived_passes() {
         let config = "CONFIG_A=y\nCONFIG_B=m\n# CONFIG_C is not set\n";
+
         assert!(
             check_fragment(
                 "f.config",
@@ -294,6 +305,7 @@ mod tests {
             "CONFIG_A=y\nCONFIG_B=m\n",
         )
         .unwrap_err();
+
         assert!(matches!(error, TaskError::Check(_)));
         assert_eq!(
             error.to_string(),
@@ -310,6 +322,7 @@ mod tests {
         std::fs::write(build.join("arch/x86/boot/bzImage"), "image").unwrap();
         std::fs::write(build.join(".config"), "CONFIG_A=y\n").unwrap();
         publish(&build, &out, "6.18.51").unwrap();
+
         assert_eq!(
             std::fs::read_to_string(out.join("kernel-6.18.51.bzImage")).unwrap(),
             "image"
@@ -318,6 +331,7 @@ mod tests {
             std::fs::read_to_string(out.join("kernel-6.18.51.config")).unwrap(),
             "CONFIG_A=y\n"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -330,7 +344,9 @@ mod tests {
             .unwrap_err()
             .to_string();
         let image = dir.join("build/arch/x86/boot/bzImage");
+
         assert_eq!(error, format!("{} is missing", image.display()));
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -339,6 +355,7 @@ mod tests {
         let root = crate::workspace_root();
         let inputs = root.join(repo::KERNEL_INPUTS);
         let manifest: Manifest = read_toml(&root, repo::KERNEL_PIN).unwrap();
+
         assert_eq!(manifest.source.commit.len(), 40);
         assert!(inputs.join(&manifest.config.base).is_file());
         assert!(inputs.join(&manifest.config.fragment).is_file());
@@ -353,6 +370,7 @@ mod tests {
         )
         .unwrap();
         let reqs = requirements(&text);
+
         assert!(reqs.contains(&Requirement::Unset("CONFIG_MODULES".into())));
         assert!(reqs.contains(&Requirement::Set("CONFIG_BPF_LSM".into(), "y".into())));
     }

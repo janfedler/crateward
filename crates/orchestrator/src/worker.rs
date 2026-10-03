@@ -147,14 +147,17 @@ fn analyze_network(path: &Path, tokens: &[Token]) -> (NetworkSummary, Vec<Leak>)
         summary: NetworkSummary::default(),
         leaked: Vec::new(),
     };
+
     if let Ok(file) = std::fs::File::open(path) {
         for line in BufReader::new(file.take(MAX_NETWORK_LOG)).lines() {
             let Ok(line) = line else { break };
+
             if let Ok(event) = serde_json::from_str::<Event>(&line) {
                 log.record(event.kind);
             }
         }
     }
+
     (log.summary, log.leaked)
 }
 
@@ -170,10 +173,12 @@ impl NetworkLog<'_> {
         match kind {
             EventKind::Dns { name, .. } => {
                 self.leak(name.as_bytes(), &name);
+
                 if !self.summary.dns.contains(&name) && self.summary.dns.len() < MAX_LISTED {
                     self.summary.dns.push(name);
                 }
             }
+
             EventKind::Tcp {
                 dst,
                 sniffed,
@@ -184,9 +189,11 @@ impl NetworkLog<'_> {
             } => {
                 let via = route(&dst, &sniffed);
                 self.leak(&unhex(&data).unwrap_or_default(), &via);
+
                 if let Some(plain) = decrypted.as_deref().and_then(unhex) {
                     self.leak(&plain, &via.replacen("tls://", "https://", 1));
                 }
+
                 if self.summary.connections.len() < MAX_LISTED {
                     let connection = Connection {
                         dst,
@@ -194,6 +201,7 @@ impl NetworkLog<'_> {
                         bytes,
                         inner,
                     };
+
                     self.summary.connections.push(connection);
                 }
             }
@@ -203,6 +211,7 @@ impl NetworkLog<'_> {
             }
             EventKind::Packet { summary, data, .. } => {
                 self.leak(&unhex(&data).unwrap_or_default(), "packet");
+
                 if self.summary.packets.len() < MAX_LISTED {
                     self.summary.packets.push(summary);
                 }
@@ -340,6 +349,7 @@ impl SandboxWorker {
         if quarantined {
             return Ok(());
         }
+
         for canary in &crate::canary::ALL {
             let report = match self.run_canary(canary).await {
                 Ok(report) => report,
@@ -350,6 +360,7 @@ impl SandboxWorker {
                     continue;
                 }
             };
+
             let problems = canary.check(&report);
             let passed = problems.is_empty();
             let detail = serde_json::json!({
@@ -357,11 +368,13 @@ impl SandboxWorker {
                 "outcome": report.outcome,
                 "run_ms": report.run_ms,
             });
+
             tracing::info!(canary = canary.name, passed, %detail, "canary finished");
             self.store
                 .record_canary(canary.name, passed, &detail)
                 .await?;
         }
+
         Ok(())
     }
 
@@ -407,6 +420,7 @@ impl SandboxWorker {
             self.lease,
             self.lease / 4,
         );
+
         let started = std::time::Instant::now();
         let result = self.run(&job).await;
         beat.abort();
@@ -430,6 +444,7 @@ impl SandboxWorker {
                 }
             }
         };
+
         self.store
             .complete(job.id, &self.worker, event, &self.policies, false)
             .await?;
@@ -442,12 +457,15 @@ impl SandboxWorker {
         let Some(escalation) = &failure.escalation else {
             return Ok(());
         };
+
         self.store.raise_alert(escalation).await?;
+
         if *escalation == HumanEscalation::KvmError {
             let since = self.store.now_epoch().await?;
             let open = BreakerState::Open { since, reopened: 0 };
             self.store.set_breaker(Stage::Sandbox, open).await?;
         }
+
         Ok(())
     }
 
@@ -469,14 +487,17 @@ impl SandboxWorker {
             RunKind::Check => RunPlan::check(setup.check_timeout),
             RunKind::Full => RunPlan::full(setup.full_timeout),
         };
+
         let mut report = self
             .sandbox
             .execute(job.id.0, spec, &tokens, files, &plan)
             .await?;
         report.missing_packages = missing;
+
         if !report.leaked.is_empty() {
             tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, leaked = ?report.leaked, "honeytokens left the VM");
         }
+
         let value = serde_json::to_value(&report).map_err(Failure::infrastructure)?;
         self.store
             .record_run(
@@ -508,6 +529,7 @@ impl SandboxWorker {
             files: Vec::new(),
             stubs: Vec::new(),
         };
+
         Ok((spec, missing))
     }
 
@@ -525,11 +547,13 @@ impl SandboxWorker {
             .unwrap_or_default();
         let mut packages = Vec::new();
         let mut missing = Vec::new();
+
         for p in locked {
             let file = match p.checksum.parse::<Sha256Digest>() {
                 Ok(sha) => self.store.crate_file(&sha).await?,
                 Err(_) => None,
             };
+
             match file.and_then(|f| f.blake3) {
                 Some(blake3) => packages.push(Package {
                     name: p.name,
@@ -540,6 +564,7 @@ impl SandboxWorker {
                 None => missing.push(format!("{} {}", p.name, p.version)),
             }
         }
+
         Ok((packages, missing))
     }
 }
@@ -663,6 +688,7 @@ impl Sandbox {
         let tokens_on_disk = scratch.as_ref().map_or_else(Vec::new, |report| {
             leaks(tokens, report.tokens_found.iter().cloned())
         });
+
         let values: Vec<&str> = tokens.tokens.iter().map(|t| t.value.as_str()).collect();
         let in_trace = ended.trace.find(&values).into_iter().take(MAX_LISTED);
         let tokens_in_trace = leaks(tokens, in_trace);
@@ -811,6 +837,7 @@ impl<'a> TryFrom<&'a JobEnd> for Ended<'a> {
                 Err(Failure::infrastructure(format!("KVM error: {reason}"))
                     .escalate(HumanEscalation::KvmError))
             }
+
             // A VM that died without a report and without a known reason: ours.
             JobEnd::UnexpectedExit(reason) => Err(Failure::infrastructure(format!(
                 "the VM ended unexpectedly: {reason}"
@@ -857,6 +884,7 @@ pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
             options: None,
         },
     ];
+
     if !warm {
         return (
             mounts,
@@ -867,6 +895,7 @@ pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
             }],
         );
     }
+
     mounts.push(MountSpec {
         device: guest::WARM_DEVICE.into(),
         target: guest::WARM_IMAGE.into(),
@@ -906,6 +935,7 @@ async fn scan_scratch(
         planted: tokens.files.iter().map(|f| f.path.path.clone()).collect(),
         created: directories.iter().map(|d| d.path.clone()).collect(),
     };
+
     let exe = setup.exe.clone();
     let image = files.scratch.clone();
     let result =
@@ -1009,6 +1039,7 @@ mod tests {
         ] {
             let end = finished(exit);
             let ended = Ended::try_from(&end).unwrap();
+
             assert_eq!(ended.outcome, outcome);
             assert_eq!(ended.exit, Some(exit));
             assert_eq!(ended.stdout, b"out");
@@ -1028,6 +1059,7 @@ mod tests {
             ),
         ] {
             let ended = Ended::try_from(&end).unwrap();
+
             assert_eq!(ended.outcome, outcome);
             assert_eq!(ended.exit, None);
             assert!(ended.stdout.is_empty() && ended.stderr.is_empty());
@@ -1048,6 +1080,7 @@ mod tests {
             ),
         ] {
             let failure = Ended::try_from(&end).unwrap_err();
+
             assert_eq!(failure.class, FailureClass::SuspectedCompromise);
             assert_eq!(failure.message, message);
             assert_eq!(failure.escalation, None);
@@ -1057,6 +1090,7 @@ mod tests {
     #[test]
     fn a_kvm_error_is_ours_and_raises_an_alert() {
         let failure = Ended::try_from(&JobEnd::KvmError("no /dev/kvm".into())).unwrap_err();
+
         assert_eq!(failure.class, FailureClass::Infrastructure);
         assert_eq!(failure.message, "KVM error: no /dev/kvm");
         assert_eq!(failure.escalation, Some(HumanEscalation::KvmError));
@@ -1065,6 +1099,7 @@ mod tests {
     #[test]
     fn a_vm_that_vanished_without_a_reason_is_ours() {
         let failure = Ended::try_from(&JobEnd::UnexpectedExit("exit 3".into())).unwrap_err();
+
         assert_eq!(failure.class, FailureClass::Infrastructure);
         assert_eq!(failure.message, "the VM ended unexpectedly: exit 3");
         assert_eq!(failure.escalation, None);
@@ -1076,15 +1111,19 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let setup = setup(dir.clone());
         let files = JobFiles::named(&setup, "job-7");
+
         assert_eq!(files.payload, dir.join("job-7.payload"));
         assert_eq!(files.scratch, dir.join("job-7.scratch"));
         assert_eq!(files.network, dir.join("job-7.network"));
         assert_eq!(files.warm, setup.warm);
         assert_eq!(files.warm_placeholder, setup.warm_placeholder);
+
         std::fs::write(&files.payload, b"x").unwrap();
         std::fs::write(&files.network, b"x").unwrap();
         files.remove();
+
         assert!(!files.payload.exists() && !files.scratch.exists() && !files.network.exists());
+
         // Nothing is left to remove the second time, which is fine.
         files.remove();
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1097,11 +1136,13 @@ mod tests {
         let mut files = JobFiles::named(&setup(PathBuf::from("/work")), "job-1");
         files.warm = None;
         let input = job_input(7, &tokens, &files, &plan, 512);
+
         assert_eq!(input.spec.job_id, 7);
         assert_eq!(input.spec.argv, plan.argv);
         assert_eq!(input.spec.cwd, guest::PROBE);
         assert_eq!(input.spec.timeout_secs, 90);
         assert_eq!(input.spec.output_limit, OUTPUT_LIMIT);
+
         let (base, planted) = input.spec.env.split_at(BASE_ENV.len());
         assert_eq!(
             base.first(),
@@ -1114,6 +1155,7 @@ mod tests {
             [job_mounts(false).1, tokens.directories.clone()].concat()
         );
         assert_eq!(input.workspace.files, tokens.files);
+
         let drives = input.drives.unwrap();
         assert_eq!(drives.payload, files.payload);
         assert_eq!(drives.scratch, files.scratch);
@@ -1128,6 +1170,7 @@ mod tests {
         let plan = RunPlan::full(Duration::from_secs(3600));
         let files = JobFiles::named(&setup(PathBuf::from("/work")), "job-1");
         let input = job_input(1, &tokens, &files, &plan, 512);
+
         assert_eq!(input.spec.argv[1], "build");
         assert_eq!(input.spec.timeout_secs, 3600);
         assert_eq!(input.workspace.mounts, job_mounts(true).0);
@@ -1199,9 +1242,11 @@ mod tests {
             name: name.into(),
             qtype,
         };
+
         let tls = |sni: Option<&str>| Sniffed::Tls {
             sni: sni.map(Into::into),
         };
+
         let lines: Vec<String> = [
             dns("a.example", 1),
             dns("a.example", 28),
@@ -1247,6 +1292,7 @@ mod tests {
         let path = network_log("summary", lines.join("\n").as_bytes());
         let (summary, leaked) = analyze_network(&path, &tokens());
         std::fs::remove_file(&path).unwrap();
+
         assert_eq!(summary.dns, ["a.example", "cioSECRET.evil.example"]);
         assert_eq!(
             summary.connections,
@@ -1263,6 +1309,7 @@ mod tests {
         assert_eq!(summary.refused, 2);
         assert_eq!(summary.packets, ["icmp echo"]);
         assert!(summary.packets_truncated && summary.truncated);
+
         // A token is named once per route, however often it is seen.
         assert_eq!(
             leaked,
@@ -1301,6 +1348,7 @@ mod tests {
         let path = network_log("bounded", lines.join("\n").as_bytes());
         let (summary, leaked) = analyze_network(&path, &tokens());
         std::fs::remove_file(&path).unwrap();
+
         assert_eq!(summary.dns.len(), MAX_LISTED);
         assert_eq!(summary.connections.len(), MAX_LISTED);
         assert_eq!(summary.packets.len(), MAX_LISTED);
@@ -1319,25 +1367,32 @@ mod tests {
             std::fs::remove_file(&path).unwrap();
             summary
         };
+
         let dns = |name: &str| {
             line(EventKind::Dns {
                 name: name.into(),
                 qtype: 1,
             })
         };
+
         // A line that is no event is skipped.
         let skipped = read(
             "skipped",
             format!("{}\nnot json\n{}\n", dns("a"), dns("b")).as_bytes(),
         );
+
         assert_eq!(skipped.dns, ["a", "b"]);
+
         // A line that is no text ends the reading.
         let mut bytes = format!("{}\n", dns("a")).into_bytes();
         bytes.extend_from_slice(b"\xff\xfe\n");
         bytes.extend_from_slice(dns("b").as_bytes());
+
         assert_eq!(read("binary", &bytes).dns, ["a"]);
+
         // A missing log is an empty summary.
         let missing = std::env::temp_dir().join("cw-netlog-missing");
+
         assert_eq!(
             analyze_network(&missing, &tokens()).0,
             NetworkSummary::default()
@@ -1354,6 +1409,7 @@ mod tests {
                 (usize::MAX, "nowhere".to_owned()),
             ],
         );
+
         assert_eq!(
             found,
             [Leak {

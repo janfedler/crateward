@@ -138,6 +138,7 @@ impl Store {
         if !self.confirmed(job).await? {
             return Ok(Err(DisclosureRefusal::NotConfirmed));
         }
+
         self.client
             .execute(
                 "INSERT INTO disclosures (job_id, kind, reported_to, reference, note)
@@ -167,6 +168,7 @@ impl Store {
         if !self.confirmed(job).await? {
             return Ok(Err(DisclosureRefusal::NotConfirmed));
         }
+
         self.client
             .execute(
                 "INSERT INTO disclosures (job_id, kind, reported_to, reported_at, resolved_at, note)
@@ -231,6 +233,7 @@ impl Store {
         if !valid_slug(slug) {
             return Ok(Err(DisclosureRefusal::BadSlug));
         }
+
         let Some(row) = self
             .client
             .query_opt(
@@ -241,9 +244,11 @@ impl Store {
         else {
             return Ok(Err(DisclosureRefusal::NotReported));
         };
+
         if !row.try_get::<_, bool>(0)? {
             return Ok(Err(DisclosureRefusal::NotResolved));
         }
+
         let taken = self
             .client
             .query_opt(
@@ -255,6 +260,7 @@ impl Store {
         if taken {
             return Ok(Err(DisclosureRefusal::SlugTaken));
         }
+
         self.client
             .execute(
                 "UPDATE disclosures SET slug = $2, published_at = COALESCE(published_at, now())

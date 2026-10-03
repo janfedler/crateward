@@ -39,9 +39,11 @@ impl RetryPolicy {
         if base.is_zero() {
             return Err(RetryPolicyError::ZeroBase);
         }
+
         if cap < base {
             return Err(RetryPolicyError::CapBelowBase);
         }
+
         Ok(Self { base, cap })
     }
 
@@ -90,6 +92,7 @@ mod tests {
     #[test]
     fn ceiling_doubles_then_caps() {
         let p = policy();
+
         assert_eq!(p.ceiling(1), Duration::from_secs(2));
         assert_eq!(p.ceiling(2), Duration::from_secs(4));
         assert_eq!(p.ceiling(3), Duration::from_secs(8));

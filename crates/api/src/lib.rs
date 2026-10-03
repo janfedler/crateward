@@ -172,6 +172,7 @@ async fn overview_data(store: &Store) -> Result<OverviewData, StoreError> {
     } else {
         "0%".into()
     };
+
     Ok(OverviewData {
         pending_reviews: o.pending_reviews,
         done_24h: o.done_24h,
@@ -212,9 +213,11 @@ async fn events(
 ) -> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let stream = futures_util::stream::unfold(state, |state| async move {
         state.stop.sleep(Duration::from_secs(5)).await;
+
         if state.stop.is_requested() {
             return None;
         }
+
         let html = match overview_data(&state.reader).await {
             Ok(o) => OverviewBody { o }.render().unwrap_or_default(),
             Err(error) => {
@@ -222,8 +225,10 @@ async fn events(
                 String::new()
             }
         };
+
         Some((Ok(Event::default().event("overview").data(html)), state))
     });
+
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
@@ -279,6 +284,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             .map(str::to_owned),
         unreported: review == Some("unreported"),
     };
+
     let rows = state
         .reader
         .jobs(&filter, 200)
@@ -319,6 +325,7 @@ fn code_url(name: &str, version: &str, file: &str, line: Option<u64>) -> String 
             })
             .collect::<String>()
     };
+
     let anchor = line.map(|l| format!("#L{l}")).unwrap_or_default();
     format!(
         "https://crates.io/crates/{}/{}/code/{}{anchor}",
@@ -366,6 +373,7 @@ fn findings(report: &serde_json::Value, name: &str, version: &str) -> Vec<Findin
                 Some(rule) => format!("{} {rule}", text(f, "kind")),
                 None => text(f, "kind"),
             };
+
             FindingView {
                 severity: text(f, "severity"),
                 kind,
@@ -389,6 +397,7 @@ fn attach_links(
     version: &str,
 ) {
     let findings = report_findings(report);
+
     for e in evidence
         .iter_mut()
         .filter(|e| e.source == "static" || e.signal == "new_high_finding")
@@ -396,6 +405,7 @@ fn attach_links(
         let same_kind = |f: &&serde_json::Value| {
             e.signal == "new_high_finding" || finding_signal(f) == e.signal
         };
+
         let found = findings
             .iter()
             .filter(same_kind)
@@ -479,21 +489,25 @@ async fn job(
     let Some(job) = store.get(JobId(id)).await? else {
         return Ok((StatusCode::NOT_FOUND, "no such job").into_response());
     };
+
     let verdict = store.verdict(job.id).await?.map(verdict_view);
     let mut verdict = verdict.unwrap_or_default();
     let static_report = store.static_report(&job.cksum).await?.map(|(_, r)| r);
     if let Some(report) = &static_report {
         attach_links(&mut verdict.evidence, report, &job.name, &job.version);
     }
+
     let mut techniques: Vec<attack::Technique> = Vec::new();
     if verdict.review == Review::Confirmed.name() {
         techniques.push(attack::SUPPLY_CHAIN);
     }
+
     for t in verdict.evidence.iter().flat_map(|e| &e.techniques) {
         if !techniques.contains(t) {
             techniques.push(*t);
         }
     }
+
     let findings = static_report
         .as_ref()
         .map(|r| findings(r, &job.name, &job.version))
@@ -525,6 +539,7 @@ async fn job(
         runs: run_view::run_views(id, &runs),
         disclosure: disclosure.map(disclosure_rows).unwrap_or_default(),
     };
+
     Ok(Html(page.render()?).into_response())
 }
 
@@ -542,6 +557,7 @@ async fn run_report(
         return Ok((StatusCode::NOT_FOUND, "no such run").into_response());
     };
     let body = serde_json::to_vec_pretty(&report).unwrap_or_default();
+
     // The kind is one of the orchestrator's own names, but keep the header
     // safe whatever the database holds.
     let kind: String = kind.chars().filter(char::is_ascii_alphanumeric).collect();
@@ -572,9 +588,11 @@ async fn review(
         "false_positive" => Review::FalsePositive,
         _ => return Ok((StatusCode::BAD_REQUEST, "unknown decision").into_response()),
     };
+
     if !state.writer.set_review(JobId(id), decision, None).await? {
         return Ok((StatusCode::NOT_FOUND, "no verdict").into_response());
     }
+
     tracing::info!(job = id, decision = decision.name(), "review recorded");
     Ok(Redirect::to(&format!("/jobs/{id}")).into_response())
 }
@@ -622,9 +640,11 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let reader = Store::connect(url).await.map_err(fatal)?;
         reader.make_read_only().await.map_err(fatal)?;
         let mut writer = Store::connect(url).await.map_err(fatal)?;
+
         // Like every service, the dashboard brings the schema up to date, so
         // it never queries a table that a later migration adds.
         writer.migrate().await.map_err(fatal)?;
+
         // The public export runs next to the dashboard, on its own
         // read only connection.
         let exporter = Store::connect(url).await.map_err(fatal)?;
@@ -640,6 +660,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             writer,
             stop: stop.clone(),
         });
+
         let listen = config.web.listen;
         let listener = tokio::net::TcpListener::bind(listen).await.map_err(fatal)?;
         tracing::info!(%listen, "dashboard listening");
@@ -663,6 +684,7 @@ mod tests {
             if pin.is_empty() {
                 continue;
             }
+
             let digest = Sha256Digest::from_bytes(sha2::Sha256::digest(bytes).into());
             assert_eq!(digest.to_string(), pin, "{name}");
         }
@@ -675,7 +697,9 @@ mod tests {
             .skip(1)
             .filter_map(|rest| rest.split_once(')').map(|(url, _)| url))
             .collect();
+
         assert_eq!(urls.len(), FONTS.len());
+
         for url in urls {
             assert!(STATIC.iter().any(|(name, ..)| *name == url), "{url}");
         }
@@ -690,6 +714,7 @@ mod tests {
         .render()
         .unwrap();
         let version = stylesheet_version();
+
         assert_eq!(version.len(), 12);
         assert!(page.contains(&format!("/static/crateward.css?v={version}\"")));
     }
@@ -724,6 +749,7 @@ mod tests {
             age: "now".into(),
             reported: false,
         };
+
         let page = InboxPage {
             rows: vec![row.clone()],
             unreported: vec![Row {
@@ -731,6 +757,7 @@ mod tests {
                 ..row
             }],
         };
+
         let html = page.render().unwrap();
         assert!(!html.contains("<script>alert"));
         assert!(!html.contains("<img"));

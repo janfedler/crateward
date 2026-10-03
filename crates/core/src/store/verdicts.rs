@@ -208,15 +208,18 @@ impl Store {
             )
             .await?;
         let mut best: Option<(semver::Version, Value)> = None;
+
         for row in rows {
             let text: String = row.try_get(0)?;
             let Ok(other) = semver::Version::parse(&text) else {
                 continue;
             };
+
             if other < *version && best.as_ref().is_none_or(|(b, _)| other > *b) {
                 best = Some((other, row.try_get(1)?));
             }
         }
+
         Ok(best.and_then(|(_, profile)| serde_json::from_value(profile).ok()))
     }
 }

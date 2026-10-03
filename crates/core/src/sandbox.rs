@@ -63,6 +63,7 @@ impl Namespaces {
 pub fn unshare(namespaces: Namespaces) -> std::io::Result<()> {
     let flags = namespaces.flags();
     debug_assert!(!flags.contains(UnshareFlags::FILES));
+
     // SAFETY: `flags` never contains `UnshareFlags::FILES` (see `flags`),
     // which is the only reason `unshare_unsafe` is unsafe: unsharing the
     // file descriptor table could invalidate descriptors other threads use.
@@ -147,6 +148,7 @@ pub fn limit(limits: Limits) -> Result<(), SandboxError> {
             source: e.into(),
         })?;
     }
+
     Ok(())
 }
 
@@ -182,6 +184,7 @@ pub fn restrict_fs(access: &FsAccess) -> Result<(), SandboxError> {
     if status.ruleset == RulesetStatus::NotEnforced {
         return Err(SandboxError::Landlock("not enforced by this kernel".into()));
     }
+
     Ok(())
 }
 
@@ -209,6 +212,7 @@ pub fn unavailable(error: &impl std::fmt::Display) -> bool {
     if refused && !required {
         eprintln!("skipping: {message}");
     }
+
     refused && !required
 }
 

@@ -47,9 +47,11 @@ impl Ran {
 fn run(tool: impl AsRef<Path>, config: Option<&Path>, args: &[&str]) -> Ran {
     let mut command = Command::new(tool.as_ref());
     command.args(args).env_remove("CRATEWARD_CONFIG");
+
     if let Some(config) = config {
         command.env("CRATEWARD_CONFIG", config);
     }
+
     let output = command.output().unwrap();
     Ran {
         code: output.status.code().unwrap(),
@@ -90,14 +92,18 @@ impl Site {
         let name = format!("cli-{}-{n}", std::process::id());
         let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
         let _ = std::fs::remove_dir_all(&dir);
+
         for sub in ["bin", "files", "data", "run"] {
             std::fs::create_dir_all(dir.join(sub)).unwrap();
         }
+
         // A link, not a copy: a file open for writing cannot be run.
         std::fs::hard_link(TOOL, dir.join("bin/crateward")).unwrap();
+
         for name in Self::FILES {
             std::fs::write(dir.join("files").join(name), name).unwrap();
         }
+
         let config = dir.join("crateward.toml");
         std::fs::write(&config, Self::config_text(&dir, database_url)).unwrap();
         Self { dir, config }
@@ -135,16 +141,21 @@ impl Site {
                 files.join("cargo"),
             ),
         ];
+
         for (old, new) in replacements {
             let old = format!("\"{old}\"");
+
             assert!(text.contains(&old), "the example configuration lost {old}");
+
             text = text.replace(&old, &format!("\"{}\"", new.display()));
         }
+
         let old = "\"postgresql://crateward@localhost/crateward?host=/run/postgresql\"";
         assert!(
             text.contains(old),
             "the example configuration lost its database"
         );
+
         text.replace(old, &format!("\"{database_url}\""))
     }
 
@@ -188,8 +199,10 @@ fn a_bad_configuration_exits_78_and_says_why() {
     )
     .unwrap();
     let ran = site.run(&["config", "check"]);
+
     assert_eq!((ran.code, ran.out.as_str()), (78, ""));
     assert!(ran.err.contains("nickname"), "{}", ran.err);
+
     let missing = run(TOOL, None, &["config", "check", "--config", MISSING]);
     missing.expect(
         78,
@@ -213,11 +226,14 @@ fn every_command_that_reads_the_configuration_exits_78_without_it() {
         &["disclosure", "--config", MISSING, "show", "1"],
         &["breaker", "--config", MISSING, "close", "sandbox"],
     ];
+
     for args in commands {
         let ran = run(TOOL, None, args);
+
         assert_eq!((ran.code, ran.out.as_str()), (78, ""), "{args:?}");
         assert!(ran.err.contains(MISSING), "{args:?}: {}", ran.err);
     }
+
     assert!(!Path::new(out).exists());
 }
 
@@ -228,6 +244,7 @@ fn an_unknown_stage_is_refused_before_the_configuration_is_read() {
         None,
         &["breaker", "--config", MISSING, "close", "bogus"],
     );
+
     ran.expect(1, "", "unknown stage bogus\n");
 }
 
@@ -235,6 +252,7 @@ fn an_unknown_stage_is_refused_before_the_configuration_is_read() {
 fn state_machine_diagram_prints_the_mermaid_source() {
     let ran = run(TOOL, None, &["state-machine", "diagram"]);
     ran.expect(0, &mermaid_diagram(), "");
+
     assert!(ran.out.ends_with("\n") && !ran.out.ends_with("\n\n"));
 }
 
@@ -251,6 +269,7 @@ fn state_machine_states_lists_the_stage_that_owns_each_state() {
         })
         .collect();
     ran.expect(0, &expected, "");
+
     assert!(ran.out.starts_with("Discovered           fetch\n"));
     assert!(ran.out.ends_with("Failed               none (terminal)\n"));
 }
@@ -266,6 +285,7 @@ fn a_closed_pipe_ends_the_tool_quietly() {
         .stderr(Stdio::piped())
         .output()
         .unwrap();
+
     assert_eq!(String::from_utf8(output.stderr).unwrap(), "");
     assert_eq!(output.status.code(), Some(0));
 }
@@ -274,6 +294,7 @@ fn a_closed_pipe_ends_the_tool_quietly() {
 fn an_unreachable_database_exits_1() {
     let site = Site::new("postgresql://nobody@127.0.0.1:1/none");
     let ran = site.run(&["status"]);
+
     assert_eq!((ran.code, ran.out.as_str()), (1, ""));
     assert!(ran.err.ends_with('\n') && ran.err.len() > 1, "{}", ran.err);
 }
@@ -299,8 +320,10 @@ fn the_manifest_is_recorded_and_checked() {
         .lines()
         .map(|l| l.split_once("  ").unwrap().1)
         .collect();
+
     assert_eq!(recorded, expected);
     assert!(!site.path("data/integrity.tmp").exists());
+
     site.run(&["integrity", "check"])
         .expect(0, "7 files match\n", "");
 
@@ -314,7 +337,9 @@ fn the_manifest_is_recorded_and_checked() {
     let rootfs = site.path("files/rootfs");
     std::fs::remove_file(&rootfs).unwrap();
     let ran = site.run(&["integrity", "check"]);
+
     assert_eq!((ran.code, ran.err.as_str()), (1, "2 files differ\n"));
+
     let lines: Vec<&str> = ran.out.lines().collect();
     assert_eq!(
         lines[0],
@@ -352,6 +377,7 @@ fn recording_into_a_missing_directory_fails() {
         "{}: No such file or directory (os error 2)\n",
         temporary.display()
     );
+
     ran.expect(1, "", &error);
 }
 
@@ -369,6 +395,7 @@ impl Db {
     async fn new() -> Option<Self> {
         let db = TestDb::new("cli").await?;
         let store = db.migrated().await;
+
         // The configuration wants a URL: each `key=value` becomes a
         // parameter, and the session option selects the schema.
         let pairs: String = db
@@ -380,6 +407,7 @@ impl Db {
             "postgresql:///?{pairs}options=-c%20search_path%3D{}",
             db.schema()
         );
+
         Some(Self { db, url, store })
     }
 
@@ -392,12 +420,14 @@ impl Db {
             priority: 0,
             index_entry,
         };
+
         self.store.enqueue(&new).await.unwrap().unwrap()
     }
 
     async fn confirmed(&self, job: JobId) {
         self.store.record_verdict(job, &verdict()).await.unwrap();
         let review = self.store.set_review(job, Review::Confirmed, None);
+
         assert!(review.await.unwrap());
     }
 
@@ -431,10 +461,12 @@ async fn status_lists_pauses_breakers_canaries_and_alerts() {
                 } else {
                     "closed"
                 };
+
                 format!("breaker {:<16} {state}\n", stage.name())
             })
             .collect()
     };
+
     let idle = site.run(&["status"]);
     idle.expect(
         0,
@@ -457,6 +489,7 @@ async fn status_lists_pauses_breakers_canaries_and_alerts() {
         since: now,
         reopened: 1,
     };
+
     store.set_breaker(Stage::Sandbox, open).await.unwrap();
     store.record_canary("bad", false, &json!({})).await.unwrap();
     store.record_canary("good", true, &json!({})).await.unwrap();
@@ -473,8 +506,10 @@ async fn status_lists_pauses_breakers_canaries_and_alerts() {
 
     let busy = site.run(&["status"]);
     assert_eq!((busy.code, busy.err.as_str()), (0, ""));
+
     let lines: Vec<&str> = busy.out.lines().collect();
     let job_id = job.0;
+
     assert!(with_seconds(
         lines[0],
         "paused: quarantine for ",
@@ -497,6 +532,7 @@ async fn status_lists_pauses_breakers_canaries_and_alerts() {
         " s ago"
     ));
     assert_eq!(&lines[9..], ["alerts waiting: 2"]);
+
     db.drop().await;
 }
 
@@ -524,7 +560,9 @@ async fn quarantine_lift_ends_only_the_quarantine() {
         .into_iter()
         .map(|p| p.reason)
         .collect();
+
     assert_eq!(left, [PauseReason::Canary]);
+
     db.drop().await;
 }
 
@@ -538,13 +576,17 @@ async fn breaker_close_closes_the_named_stage() {
             since: now,
             reopened: 2,
         };
+
         db.store.set_breaker(stage, open).await.unwrap();
     }
+
     site.run(&["breaker", "close", "sandbox"])
         .expect(0, "breaker of sandbox closed\n", "");
     let breakers = db.store.breakers().await.unwrap();
+
     assert_eq!(breakers[&Stage::Sandbox], BreakerState::Closed);
     assert_ne!(breakers[&Stage::Fetch], BreakerState::Closed);
+
     db.drop().await;
 }
 
@@ -571,6 +613,7 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
             note,
         ])
     };
+
     site.run(&["disclosure", "show", id]).expect(
         0,
         &format!("job {id} has no disclosure record\n"),
@@ -587,10 +630,13 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
 
     let shown = site.run(&["disclosure", "show", id]);
     assert_eq!((shown.code, shown.err.as_str()), (0, ""));
+
     let lines: Vec<&str> = shown.out.lines().collect();
     assert_eq!(lines[0], "kind       malicious");
+
     let day = lines[1].strip_prefix("reported   ").unwrap();
     let (day, to) = day.split_once(" to ").unwrap();
+
     assert_eq!(to, "help@crates.io");
     assert!(day.len() == 10 && day.bytes().filter(u8::is_ascii_digit).count() == 8);
     assert_eq!(
@@ -628,6 +674,7 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
     );
     let shown = site.run(&["disclosure", "show", id]);
     let lines: Vec<&str> = shown.out.lines().collect();
+
     assert_eq!(lines[2], "reference  T-2");
     assert!(lines[3].starts_with("resolved   2") && lines[4].starts_with("published  2"));
     assert_eq!(lines[5], "page       evil-0-1-0");
@@ -660,15 +707,18 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
     );
     site.run(&["disclosure", "publish", &other, "--slug", "evil-0-1-0"])
         .expect(1, "", "another finding uses this page name\n");
+
     db.drop().await;
 }
 
 fn json_file(pack: &Path, name: &str) -> Value {
     let text = std::fs::read_to_string(pack.join(name)).unwrap();
+
     assert!(
         text.ends_with("}\n") || text.ends_with("]\n") || text == "null\n",
         "{name}"
     );
+
     serde_json::from_str(&text).unwrap()
 }
 
@@ -677,6 +727,7 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
     let Some(mut db) = Db::new().await else {
         return;
     };
+
     let site = Site::new(&db.url);
     let entry = json!({"name": "evil", "vers": "0.1.0", "note": TOKEN});
     let job = db.job("evil", "0.1.0", entry).await;
@@ -705,6 +756,7 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
         stored_bytes: None,
         report: json!({}),
     };
+
     store.record_crate_file(&file).await.unwrap();
     let report = json!({"findings": []});
     let cksum = CKSUM.parse().unwrap();
@@ -717,6 +769,7 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
         json!(["build script"]),
         json!({"added": 1}),
     );
+
     store
         .record_job_static(job, &triage, &reasons, Some(&diff))
         .await
@@ -750,6 +803,7 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
         "evil-0.1.0.crate",
         "SHA256SUMS",
     ];
+
     let listing: String = names.iter().map(|n| format!("  {n}\n")).collect();
     ran.expect(
         0,
@@ -759,7 +813,9 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
 
     let mut record = json_file(&pack, "job.json");
     let at = record["events"][0]["at_unix"].take();
+
     assert!(at.as_u64().unwrap() > 1_700_000_000, "{at}");
+
     let expected = json!({
         "id": job.0,
         "name": "evil",
@@ -776,25 +832,34 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
             "event": {"kind": "fetched"}, "effect": {"kind": "none"},
         }],
     });
+
     assert_eq!(record, expected);
+
     let raw = std::fs::read_to_string(pack.join("job.json")).unwrap();
     assert!(raw.starts_with("{\n  \""), "{raw}");
     assert!(raw.contains("\n  \"events\": [\n    {\n"), "{raw}");
+
     let attack = json!({"version": "v19", "crate": null, "evidence": []});
     let expected = json!({"verdict": verdict(), "review": "none", "attack": attack});
+
     assert_eq!(json_file(&pack, "verdict.json"), expected);
+
     let expected = json!({
         "triage": triage,
         "reasons": reasons,
         "diff": diff,
         "report": {"analyzer_version": 7, "report": report},
     });
+
     assert_eq!(json_file(&pack, "static.json"), expected);
+
     let expected = json!([
         {"kind": "check", "report": {"tokens": ["[honeytoken]"]}},
         {"kind": "full", "report": {"network": "[honeytoken]"}},
     ]);
+
     assert_eq!(json_file(&pack, "runs.json"), expected);
+
     let expected = json!({"packages": packages, "lockfile": "# [honeytoken]\n"});
     assert_eq!(json_file(&pack, "resolution.json"), expected);
     assert_eq!(
@@ -807,16 +872,21 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
     for name in &names[..6] {
         use sha2::Digest as _;
         let digest = sha2::Sha256::digest(std::fs::read(pack.join(name)).unwrap());
+
         assert_eq!(lines.next().unwrap(), format!("{digest:x}  {name}"));
     }
+
     assert_eq!(lines.next(), None);
+
     for name in names {
         let text = std::fs::read(pack.join(name)).unwrap();
+
         assert!(
             !text.windows(TOKEN.len()).any(|w| w == TOKEN.as_bytes()),
             "{name}"
         );
     }
+
     db.drop().await;
 }
 
@@ -829,6 +899,7 @@ async fn evidence_of_a_bare_job_and_the_ways_it_fails() {
     let pack = site.path("pack");
     let pack_arg = pack.to_str().unwrap();
     let ran = site.run(&["evidence", &id, "--out", pack_arg]);
+
     assert_eq!(
         (ran.code, ran.err.as_str().lines().count()),
         (0, 1),
@@ -845,6 +916,7 @@ async fn evidence_of_a_bare_job_and_the_ways_it_fails() {
         "{}",
         ran.err
     );
+
     let listing = [
         "job.json",
         "verdict.json",
@@ -853,15 +925,18 @@ async fn evidence_of_a_bare_job_and_the_ways_it_fails() {
         "resolution.json",
         "SHA256SUMS",
     ];
+
     let listing: String = listing.iter().map(|n| format!("  {n}\n")).collect();
     assert_eq!(
         ran.out,
         format!("wrote 6 files to {}\n{listing}", pack.display())
     );
     assert_eq!(json_file(&pack, "verdict.json"), Value::Null);
+
     let expected = json!({"triage": null, "reasons": null, "diff": null, "report": null});
     assert_eq!(json_file(&pack, "static.json"), expected);
     assert_eq!(json_file(&pack, "runs.json"), json!([]));
+
     let expected = json!({"packages": null, "lockfile": null});
     assert_eq!(json_file(&pack, "resolution.json"), expected);
 
@@ -872,9 +947,12 @@ async fn evidence_of_a_bare_job_and_the_ways_it_fails() {
         "{}",
         again.err
     );
+
     let other = site.path("other");
     let unknown = site.run(&["evidence", "999999", "--out", other.to_str().unwrap()]);
     unknown.expect(1, "", "no job 999999\n");
+
     assert!(!other.exists());
+
     db.drop().await;
 }

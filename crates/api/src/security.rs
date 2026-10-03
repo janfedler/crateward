@@ -36,12 +36,15 @@ pub fn allowed(method: &Method, headers: &HeaderMap, port: u16) -> Result<(), &'
         format!("127.0.0.1:{port}"),
         format!("[::1]:{port}"),
     ];
+
     let Some(host) = header("host").filter(|h| names.iter().any(|n| n == h)) else {
         return Err("unexpected Host");
     };
+
     if matches!(*method, Method::GET | Method::HEAD) {
         return Ok(());
     }
+
     let same_site = header("sec-fetch-site") == Some("same-origin");
     let same_origin = header("origin").is_some_and(|o| o == format!("http://{host}"));
     if same_site || same_origin {
@@ -57,8 +60,10 @@ pub async fn guard(port: u16, request: Request<Body>, next: Next) -> Response {
         tracing::warn!(reason, method = %request.method(), "request refused");
         return (StatusCode::FORBIDDEN, reason).into_response();
     }
+
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
+
     for (name, value) in [
         (header::CONTENT_SECURITY_POLICY, CSP),
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
@@ -67,6 +72,7 @@ pub async fn guard(port: u16, request: Request<Body>, next: Next) -> Response {
     ] {
         headers.insert(name, HeaderValue::from_static(value));
     }
+
     headers.insert(
         "cross-origin-opener-policy",
         HeaderValue::from_static("same-origin"),
@@ -86,6 +92,7 @@ mod tests {
         for (k, v) in pairs {
             h.insert(*k, HeaderValue::from_static(v));
         }
+
         h
     }
 
@@ -100,18 +107,21 @@ mod tests {
                 "{host}"
             );
         }
+
         for host in ["evil.example", "localhost:9999", "10.77.0.1:8080"] {
             assert!(
                 allowed(&Method::GET, &headers(&[("host", host)]), PORT).is_err(),
                 "{host}"
             );
         }
+
         assert!(allowed(&Method::GET, &headers(&[]), PORT).is_err());
     }
 
     #[test]
     fn writes_need_the_same_origin() {
         let post = Method::POST;
+
         assert!(allowed(&post, &headers(&[("host", HOST)]), PORT).is_err());
         assert!(
             allowed(

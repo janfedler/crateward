@@ -192,6 +192,7 @@ pub fn parse_pubtime(text: &str) -> Option<SystemTime> {
     {
         return None;
     }
+
     let num = |from: usize, to: usize| text.get(from..to)?.parse::<u32>().ok();
     let (year, month, day) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
     let (hour, minute, second) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
@@ -217,6 +218,7 @@ fn unix_time(
     {
         return None;
     }
+
     let y = i64::from(year) - i64::from(month <= 2);
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
@@ -239,10 +241,12 @@ fn validate(raw: RawEntry) -> Result<IndexEntry, String> {
             features.entry(feature).or_default().extend(enables);
         }
     }
+
     let published = match raw.pubtime.as_deref() {
         Some(text) => Some(parse_pubtime(text).ok_or_else(|| format!("pubtime {text:?}"))?),
         None => None,
     };
+
     Ok(IndexEntry {
         name,
         version,
@@ -271,6 +275,7 @@ pub fn parse_index_file(text: &str) -> Result<Vec<IndexEntry>, ParseError> {
             max: MAX_INDEX_FILE_BYTES,
         });
     }
+
     text.lines()
         .enumerate()
         .filter(|(_, line)| !line.trim().is_empty())
@@ -279,6 +284,7 @@ pub fn parse_index_file(text: &str) -> Result<Vec<IndexEntry>, ParseError> {
                 line: index + 1,
                 reason,
             };
+
             let raw: RawEntry = serde_json::from_str(line).map_err(|e| fail(e.to_string()))?;
             validate(raw).map_err(fail)
         })
@@ -299,6 +305,7 @@ pub fn find_version(
     let Some(position) = entries.iter().position(|e| &e.version == version) else {
         return Ok(None);
     };
+
     let line = text
         .lines()
         .filter(|l| !l.trim().is_empty())
@@ -308,6 +315,7 @@ pub fn find_version(
         line: position + 1,
         reason: e.to_string(),
     })?;
+
     Ok(entries.into_iter().nth(position).map(|entry| (entry, raw)))
 }
 
@@ -323,6 +331,7 @@ pub fn download_url(dl: &str, name: &CrateName, version: &semver::Version) -> St
         } else {
             name.as_str()
         };
+
         match source.len() {
             1 => "1".to_owned(),
             2 => "2".to_owned(),
@@ -334,6 +343,7 @@ pub fn download_url(dl: &str, name: &CrateName, version: &semver::Version) -> St
             ),
         }
     };
+
     let markers = [
         "{crate}",
         "{version}",
@@ -341,6 +351,7 @@ pub fn download_url(dl: &str, name: &CrateName, version: &semver::Version) -> St
         "{lowerprefix}",
         "{sha256-checksum}",
     ];
+
     if markers.iter().any(|m| dl.contains(m)) {
         dl.replace("{crate}", name.as_str())
             .replace("{version}", &version.to_string())
@@ -387,11 +398,13 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
             max: MAX_FEED_BYTES,
         });
     }
+
     let mut reader = quick_xml::Reader::from_str(xml);
     let mut feed = Feed::default();
     let mut in_item = false;
     let mut field: Option<&'static str> = None;
     let (mut name, mut version) = (None::<String>, None::<String>);
+
     loop {
         match reader
             .read_event()
@@ -421,8 +434,10 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
             }
             Event::End(tag) => {
                 field = None;
+
                 if tag.name().as_ref() == "item" {
                     in_item = false;
+
                     match feed_item(name.take(), version.take()) {
                         Some(item) => feed.items.push(item),
                         None => feed.rejected += 1,
@@ -433,6 +448,7 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
             _ => {}
         }
     }
+
     Ok(feed)
 }
 
@@ -476,17 +492,20 @@ mod tests {
     fn parses_a_real_index_line() {
         let entries = parse_index_file(SERDE_LINE).unwrap();
         let e = &entries[0];
+
         assert_eq!(e.name.as_str(), "serde");
         assert_eq!(e.version.to_string(), "1.0.229");
         assert_eq!(e.deps.len(), 2);
         assert!(!e.has_build_dependencies());
         assert_eq!(e.schema, 1);
+
         let secs = e
             .published
             .unwrap()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
+
         // 2026-07-18T23:05:13Z
         assert_eq!(secs, 1_784_415_913);
     }
@@ -495,6 +514,7 @@ mod tests {
     fn applies_documented_defaults_and_merges_features2() {
         let line = r#"{"name":"a","vers":"0.1.0","deps":[{"name":"cc","req":"^1","kind":"build"}],"cksum":"00000000000000000000000000000000000000000000000000000000000000ff","features":{},"features2":{"x":["dep:cc"]},"v":2}"#;
         let e = &parse_index_file(line).unwrap()[0];
+
         assert!(e.deps[0].default_features);
         assert!(!e.deps[0].optional);
         assert!(e.has_build_dependencies());
@@ -521,6 +541,7 @@ mod tests {
         let file = format!("{other}\n{SERDE_LINE}\n");
         let wanted = semver::Version::parse("1.0.229").unwrap();
         let (entry, raw) = find_version(&file, &wanted).unwrap().unwrap();
+
         assert_eq!(entry.version, wanted);
         assert_eq!(raw["vers"], "1.0.229");
         assert!(
@@ -534,6 +555,7 @@ mod tests {
     fn download_urls_keep_the_published_casing() {
         let name = CrateName::parse("Inflector").unwrap();
         let v = semver::Version::parse("0.11.4").unwrap();
+
         assert_eq!(
             download_url("https://static.crates.io/crates", &name, &v),
             "https://static.crates.io/crates/Inflector/0.11.4/download"
@@ -556,6 +578,7 @@ mod tests {
 <item><crates:name>badvers</crates:name><crates:version>one</crates:version></item>
 </channel></rss>"#;
         let feed = parse_feed(xml).unwrap();
+
         assert_eq!(feed.items.len(), 2);
         assert_eq!(feed.items[0].name.as_str(), "onevcs");
         assert_eq!(feed.items[1].version, None);
@@ -581,6 +604,7 @@ mod tests {
         let feed = feed_of(
             "<item><crates:version> 1.2.3\n</crates:version><crates:name>\n  serde </crates:name></item>",
         );
+
         assert_eq!(pairs(&feed), [("serde", Some("1.2.3".to_owned()))]);
         assert_eq!(feed.rejected, 0);
     }
@@ -591,6 +615,7 @@ mod tests {
             "<crates:name>stray</crates:name><crates:version>9.9.9</crates:version>\
              <item><crates:name>real</crates:name></item>",
         );
+
         assert_eq!(pairs(&feed), [("real", None)]);
         assert_eq!(feed.rejected, 0);
     }
@@ -604,6 +629,7 @@ mod tests {
              <item></item>\
              <item><crates:name>c</crates:name><crates:version>x</crates:version></item>",
         );
+
         assert_eq!(pairs(&feed), [("a", Some("1.0.0".to_owned())), ("b", None)]);
         assert_eq!(feed.rejected, 3);
     }
@@ -611,6 +637,7 @@ mod tests {
     #[test]
     fn feed_that_is_too_large_or_broken_is_an_error() {
         let big = " ".repeat(MAX_FEED_BYTES + 1);
+
         assert!(matches!(parse_feed(&big), Err(ParseError::TooLarge { .. })));
         assert!(matches!(
             parse_feed("<rss><item></rss>"),
@@ -641,6 +668,7 @@ mod tests {
             // Format a time and parse it back.
             let days = secs / 86_400;
             let rem = secs % 86_400;
+
             // civil_from_days (Howard Hinnant).
             let z = i64::try_from(days).unwrap() + 719_468;
             let era = z.div_euclid(146_097);

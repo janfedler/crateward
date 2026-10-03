@@ -70,6 +70,7 @@ where
             return ExitCode::from(EXIT_CONFIG);
         }
     };
+
     if matches!(args.command, Some(Command::CheckConfig)) {
         println!(
             "{component}: configuration {} is valid",
@@ -77,16 +78,19 @@ where
         );
         return ExitCode::SUCCESS;
     }
+
     if let Err(error) = init_tracing(&config) {
         eprintln!("{component}: cannot set up logging: {error}");
         return ExitCode::from(EXIT_CONFIG);
     }
+
     tracing::info!(
         component = component.name(),
         zone = ?component.zone(),
         version = env!("CARGO_PKG_VERSION"),
         "starting"
     );
+
     match run(&config) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -128,6 +132,7 @@ impl Stop {
                 _ = terminate.recv() => {}
                 _ = tokio::signal::ctrl_c() => {}
             }
+
             sender.send_replace(true);
         });
         Ok(Self(receiver))
@@ -163,9 +168,11 @@ const REAP_EVERY: Duration = Duration::from_secs(60);
 pub async fn reap_loop(mut store: Store, policies: Policies, stop: Stop) {
     loop {
         stop.sleep(REAP_EVERY).await;
+
         if stop.is_requested() {
             return;
         }
+
         match store.reap_expired(&policies).await {
             Ok(0) => {}
             Ok(reaped) => tracing::warn!(reaped, "reaped expired leases"),
@@ -179,6 +186,7 @@ fn init_tracing(config: &Config) -> Result<(), Box<dyn std::error::Error + Send 
         Ok(directive) => EnvFilter::try_new(directive)?,
         Err(_) => EnvFilter::try_new(&config.telemetry.log_filter)?,
     };
+
     let builder = tracing_subscriber::fmt().with_env_filter(filter);
     match config.telemetry.log_format {
         LogFormat::Json => builder.json().try_init(),
@@ -206,6 +214,7 @@ mod tests {
         });
         let start = Instant::now();
         stop.sleep(Duration::from_secs(3600)).await;
+
         assert!(start.elapsed() < Duration::from_secs(60));
         assert!(stop.is_requested());
     }
@@ -215,6 +224,7 @@ mod tests {
         let (_sender, stop) = stop();
         let start = Instant::now();
         stop.sleep(Duration::from_secs(5)).await;
+
         assert!(start.elapsed() >= Duration::from_secs(5));
         assert!(!stop.is_requested());
     }
@@ -226,6 +236,7 @@ mod tests {
         sender.send_replace(true);
         stop.wait().await;
         clone.wait().await;
+
         assert!(clone.is_requested());
     }
 }

@@ -116,6 +116,7 @@ fn include_target(from: &str, target: &str) -> Option<String> {
         Some((dir, _)) if !target.starts_with('/') => dir.split('/').collect(),
         _ => Vec::new(),
     };
+
     for part in target.split('/') {
         match part {
             "" | "." => {}
@@ -125,6 +126,7 @@ fn include_target(from: &str, target: &str) -> Option<String> {
             other => parts.push(other),
         }
     }
+
     Some(parts.join("/"))
 }
 
@@ -155,15 +157,18 @@ type Files = BTreeMap<String, Vec<u8>>;
 fn read_files(tar: &[u8], limits: &AnalyzeLimits) -> Result<(Files, Vec<Skipped>), AnalyzeError> {
     let mut contents = BTreeMap::new();
     let mut skipped = Vec::new();
+
     for entry in tar::Archive::new(tar).entries()? {
         let mut entry = entry?;
         if !entry.header().entry_type().is_file() {
             continue;
         }
+
         let path = entry.path()?.to_string_lossy().into_owned();
         let Some(rel) = relative(&path) else {
             continue;
         };
+
         let rel = rel.to_owned();
         let size = entry.header().size()?;
         if size > limits.max_yara_file_bytes {
@@ -173,10 +178,12 @@ fn read_files(tar: &[u8], limits: &AnalyzeLimits) -> Result<(Files, Vec<Skipped>
             });
             continue;
         }
+
         let mut data = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
         entry.read_to_end(&mut data)?;
         contents.insert(rel, data);
     }
+
     Ok((contents, skipped))
 }
 
@@ -191,15 +198,18 @@ fn scan_files(
 ) -> Vec<(String, CodeContext, Include)> {
     let mut rust_bytes = 0_u64;
     let mut includes = Vec::new();
+
     for (file, data) in contents {
         let context = report.manifest.context_of(file);
         report.findings.extend(rules.scan(file, data, context));
+
         if !std::path::Path::new(file)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("rs"))
         {
             continue;
         }
+
         let size = data.len() as u64;
         if size > limits.max_rust_file_bytes || rust_bytes + size > limits.max_rust_bytes {
             report.skipped.push(Skipped {
@@ -208,21 +218,25 @@ fn scan_files(
             });
             continue;
         }
+
         rust_bytes += size;
         report.rust_files += 1;
         let scan = rust::scan_file(file, &String::from_utf8_lossy(data), context);
         report.findings.extend(scan.findings);
+
         if file == "src/lib.rs"
             && let Some(cfg) = scan.file_cfg
         {
             report.library_platform = Platform::from_cfg(&cfg);
         }
+
         includes.extend(
             scan.includes
                 .into_iter()
                 .map(|i| (file.clone(), context, i)),
         );
     }
+
     includes
 }
 
@@ -232,16 +246,20 @@ fn included_binaries(
     includes: Vec<(String, CodeContext, Include)>,
 ) -> Vec<Finding> {
     let mut found = Vec::new();
+
     for (file, context, include) in includes {
         let Some(target) = include_target(&file, &include.target) else {
             continue;
         };
+
         let Some(data) = contents.get(&target) else {
             continue;
         };
+
         if !looks_binary(data) {
             continue;
         }
+
         let base = Severity::Medium;
         found.push(Finding {
             kind: FindingKind::IncludedBinary,
@@ -261,6 +279,7 @@ fn included_binaries(
             evidence: evidence(&format!("{target} ({} bytes)", data.len())),
         });
     }
+
     found
 }
 
@@ -268,18 +287,21 @@ fn included_binaries(
 /// or writes shell commands has the shape of a downloader.
 fn downloader_pattern(findings: &[Finding]) -> Option<Finding> {
     let at_build_time = || findings.iter().filter(|f| f.context.runs_at_build_time());
+
     // A URL counts only as a bare literal: URLs inside prose (error
     // messages pointing at documentation) are not downloads.
     let network = at_build_time().find(|f| {
         f.kind == FindingKind::NetworkAccess
             || (f.kind == FindingKind::UrlLiteral && !f.evidence.contains([' ', '\\']))
     })?;
+
     let execution = at_build_time().find(|f| {
         matches!(
             f.kind,
             FindingKind::ProcessSpawn | FindingKind::ShellCommand | FindingKind::IncludedBinary
         )
     })?;
+
     Some(Finding {
         kind: FindingKind::DownloaderPattern,
         severity: Severity::High,
@@ -312,6 +334,7 @@ fn manifest_findings(facts: &ManifestFacts) -> Vec<Finding> {
             script,
         ));
     }
+
     if facts.proc_macro {
         found.push(crate_finding(
             FindingKind::ProcMacro,
@@ -320,6 +343,7 @@ fn manifest_findings(facts: &ManifestFacts) -> Vec<Finding> {
             "proc-macro = true",
         ));
     }
+
     if let Some(links) = &facts.links {
         found.push(crate_finding(
             FindingKind::NativeLink,
@@ -328,6 +352,7 @@ fn manifest_findings(facts: &ManifestFacts) -> Vec<Finding> {
             &format!("links = \"{links}\""),
         ));
     }
+
     found
 }
 
@@ -337,6 +362,7 @@ fn platform_counts(findings: &[Finding]) -> BTreeMap<String, u32> {
     for f in findings.iter().filter(|f| f.platform != Platform::Any) {
         *platforms.entry(f.platform.name().to_owned()).or_insert(0) += 1;
     }
+
     platforms
 }
 
@@ -366,6 +392,7 @@ pub fn analyze(
         library_platform: Platform::Any,
         platforms: BTreeMap::new(),
     };
+
     // The order of the findings decides which ones the downloader pattern
     // is built from and how equal ones sort.
     let includes = scan_files(&contents, rules, limits, &mut report);
@@ -394,6 +421,7 @@ mod tests {
     /// Builds an inert fixture crate tar. None of it is ever executed.
     pub(crate) fn fixture(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
+
         for (path, data) in files {
             let mut header = tar::Header::new_gnu();
             header.set_size(data.len() as u64);
@@ -403,6 +431,7 @@ mod tests {
                 .append_data(&mut header, format!("fixture-0.1.0/{path}"), *data)
                 .unwrap();
         }
+
         builder.into_inner().unwrap()
     }
 
@@ -432,6 +461,7 @@ mod tests {
         ]);
         let report = analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap();
         let kinds = kinds(&report);
+
         assert_eq!(
             kinds.first().map(String::as_str),
             Some("downloader_pattern")
@@ -456,8 +486,10 @@ mod tests {
             ),
             ("blob/x.bin", &elf),
         ]);
+
         let report = analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap();
         let kinds = kinds(&report);
+
         assert!(kinds.contains(&"included_binary".to_owned()), "{kinds:?}");
         assert!(kinds.contains(&"yara_match".to_owned()));
         assert_eq!(report.library_platform, Platform::Windows);
@@ -478,12 +510,14 @@ mod tests {
             ),
         ]);
         let report = analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap();
+
         assert!(!kinds(&report).contains(&"downloader_pattern".to_owned()));
     }
 
     #[test]
     fn a_tar_without_manifest_is_an_error() {
         let tar = fixture(&[("src/lib.rs", b"")]);
+
         assert!(matches!(
             analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()),
             Err(AnalyzeError::NoManifest)
@@ -517,19 +551,23 @@ mod tests {
             ("src/big.rs", big.as_bytes()),
             ("data/huge.bin", &[b'x'; 400]),
         ]);
+
         let limits = AnalyzeLimits {
             max_rust_file_bytes: 150,
             max_rust_bytes: 1_000,
             max_yara_file_bytes: 300,
             max_findings: 1,
         };
+
         let report = analyze(&tar, &Rules::builtin().unwrap(), &limits).unwrap();
         assert_eq!((report.files, report.rust_files), (5, 3));
+
         let skipped: Vec<_> = report
             .skipped
             .iter()
             .map(|s| (s.file.as_str(), s.reason.as_str()))
             .collect();
+
         assert_eq!(
             skipped,
             [
@@ -540,6 +578,7 @@ mod tests {
                 ),
             ]
         );
+
         // The strongest finding stays. The platform counts include the rest.
         assert_eq!(kinds(&report), ["process_spawn"]);
         assert_eq!(report.findings_dropped, 2);

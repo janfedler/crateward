@@ -103,6 +103,7 @@ mod tests {
             std::process::id(),
             rand::random::<u32>()
         ));
+
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -110,14 +111,22 @@ mod tests {
     #[test]
     fn a_read_is_seen_and_an_untouched_decoy_is_not() {
         let dir = tempdir();
+
         assert!(atime_works(&dir).unwrap());
+
         plant(&dir).unwrap();
+
         assert_eq!(inspect(&dir), Decoy::Untouched);
+
         // Metadata alone (what `ls -l` does) is not a read.
         let _ = std::fs::metadata(dir.join(NAME)).unwrap();
+
         assert_eq!(inspect(&dir), Decoy::Untouched);
+
         std::fs::read(dir.join(NAME)).unwrap();
+
         assert_eq!(inspect(&dir), Decoy::Touched);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -126,8 +135,11 @@ mod tests {
         let dir = tempdir();
         plant(&dir).unwrap();
         std::fs::remove_file(dir.join(NAME)).unwrap();
+
         assert_eq!(inspect(&dir), Decoy::Touched);
+
         std::fs::remove_dir_all(&dir).unwrap();
+
         assert_eq!(inspect(&dir), Decoy::JailGone);
     }
 }

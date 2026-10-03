@@ -39,6 +39,7 @@ impl Dashboard {
             writer: db.store().await,
             stop: Stop::install().unwrap(),
         };
+
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(axum::serve(listener, router(Arc::new(state), port)).into_future());
@@ -68,7 +69,9 @@ impl Dashboard {
     /// The page of a job.
     async fn page(&self, job: JobId) -> String {
         let (status, html) = self.get(&format!("/jobs/{}", job.0)).await;
+
         assert_eq!(status, 200);
+
         html
     }
 
@@ -81,6 +84,7 @@ impl Dashboard {
             priority: 0,
             index_entry: json!({}),
         };
+
         self.store.enqueue(&new).await.unwrap().unwrap()
     }
 
@@ -88,7 +92,9 @@ impl Dashboard {
     async fn step(&mut self, job: JobId, stage: Stage, worker: &str, event: JobEvent) {
         let lease = Duration::from_secs(30);
         let claimed = self.store.claim(stage, worker, lease).await.unwrap();
+
         assert_eq!(claimed.unwrap().id, job);
+
         let policies = policies();
         let done = self.store.complete(job, worker, event, &policies, false);
         done.await.unwrap();
@@ -101,6 +107,7 @@ impl Dashboard {
              VALUES ($1, {at}, 'Scored', 'Finalized', $2::text::jsonb, '{{}}'::jsonb, 'w-raw')",
             self.db.schema()
         );
+
         self.db
             .admin()
             .execute(&insert, &[&job.0, &event])
@@ -176,9 +183,11 @@ fn static_report() -> Value {
         json!({"severity": 3, "kind": "odd", "rule": 7, "context": null, "file": "src/odd.rs", "line": "9", "evidence": true}),
         json!({"kind": "sparse"}),
     ];
+
     for i in 4..305 {
         findings.push(json!({"severity": "info", "kind": "filler", "file": "src/f.rs", "evidence": format!("e{i}")}));
     }
+
     json!({"findings": findings})
 }
 
@@ -246,8 +255,10 @@ fn cells(row: &str) -> Row {
                 _ => {}
             }
         }
+
         Some(unescape(&plain))
     };
+
     row.split("</t").filter_map(cell).collect()
 }
 
@@ -281,6 +292,7 @@ fn text(html: &str, open: &str, close: &str) -> String {
             _ => {}
         }
     }
+
     unescape(&plain.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
@@ -304,12 +316,14 @@ async fn seed_full_job(db: &mut Dashboard) -> JobId {
     db.step(job, Stage::Analysis, "w-analysis", scored).await;
     let store = &db.store;
     store.record_verdict(job, &verdict()).await.unwrap();
+
     assert!(
         store
             .set_review(job, Review::Confirmed, None)
             .await
             .unwrap()
     );
+
     store.record_crate_file(&crate_file()).await.unwrap();
     let cksum = CKSUM.parse().unwrap();
     let report = static_report();
@@ -343,23 +357,26 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     let Some(mut db) = Dashboard::start().await else {
         return;
     };
+
     let job = seed_full_job(&mut db).await;
     let day = db.store.disclosure(job).await.unwrap().unwrap();
 
     let html = db.page(job).await;
-
     assert_eq!(
         text(&html, "<h1>", "</h1>"),
         format!("evil 0.1.0 job {}", job.0)
     );
+
     let status = "State Scored, coverage static only. Score 85 (critical), review confirmed.";
     assert_eq!(text(&html, "<p>State", "</p>"), status);
     assert!(html.contains("class=\"level-critical\""));
+
     let form = format!("action=\"/jobs/{}/review\"", job.0);
     assert_eq!(html.matches(&form).count(), 2);
 
     let reported_on = format!("{} to crates.io", day.reported_on.as_deref().unwrap());
     let disclosure = table(&html, "<h2>Disclosure</h2>");
+
     assert_eq!(
         disclosure,
         [
@@ -403,6 +420,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
         list(&html, "<h2>New since the previous version</h2>"),
         ["exec:curl"]
     );
+
     let profile = list(&html, "<h2>Behavior profile</h2>");
     assert_eq!(profile, ["exec:curl", "net:203.0.113.9:443"]);
 
@@ -432,6 +450,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     let timeline = table(&html, "<h2>Timeline</h2>");
     assert_eq!(timeline[0], row(&["When", "From", "To", "Event", "Worker"]));
     assert!(timeline[1..].iter().all(|r| r[0].ends_with(" ago")));
+
     let steps: Vec<&[String]> = timeline[1..].iter().map(|r| &r[1..]).collect();
     assert_eq!(
         steps,
@@ -451,19 +470,25 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
         !html.contains("<h2>Run: check</h2>"),
         "the full run replaces it"
     );
+
     // Confirmed: the summary names the supply chain compromise first.
     let attack = text(&html, "<div class=\"attack\">", "</div>");
+
     assert!(attack.contains("ATT&amp;CK v19"));
+
     let compromise =
         "T1195.001 Supply Chain Compromise: Compromise Software Dependencies and Development Tools";
     let first = attack.find(compromise).unwrap();
+
     assert!(first < attack.find("T1041 Exfiltration Over C2 Channel").unwrap());
+
     let full = run_section(&html, "full");
     assert_eq!(
         text(full, "<ul class=\"alerts\">", "</ul>"),
         "Honeytoken github_token left the VM through dns:evil.example"
     );
     assert!(full.contains("<span class=\"badge ok\">succeeded</span>"));
+
     for (label, value) in [
         ("Ended", "agent reported the end"),
         ("Guest", "exit code 0"),
@@ -476,6 +501,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
             "{label}"
         );
     }
+
     let tree = table(full, "<h3>Processes");
     assert_eq!(tree.len(), 5);
     assert_eq!(
@@ -499,9 +525,11 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
 
     let (status, head, body) = db.fetch("/jobs/1/runs/full.json").await;
     assert_eq!(status, 200);
+
     let file = "filename=\"crateward-job-1-full.json\"";
     assert!(head.contains(&format!("content-disposition: attachment; {file}")));
     assert_eq!(serde_json::from_str::<Value>(&body).unwrap(), run_report());
+
     let (_, _, body) = db.fetch("/jobs/1/runs/check.json").await;
     assert_eq!(
         serde_json::from_str::<Value>(&body).unwrap(),
@@ -509,6 +537,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     );
     assert_eq!(db.fetch("/jobs/1/runs/other.json").await.0, 404);
     assert_eq!(db.fetch("/jobs/1/runs/check").await.0, 404);
+
     db.drop().await;
 }
 
@@ -517,10 +546,10 @@ async fn a_new_job_shows_empty_sections() {
     let Some(db) = Dashboard::start().await else {
         return;
     };
+
     let job = db.job().await;
 
     let html = db.page(job).await;
-
     assert_eq!(
         text(&html, "<h1>", "</h1>"),
         format!("evil 0.1.0 job {}", job.0)
@@ -533,8 +562,10 @@ async fn a_new_job_shows_empty_sections() {
     assert!(html.contains("<h2>Evidence</h2>\n<p class=\"muted\">No evidence.</p>"));
     assert!(html.contains("<h2>Behavior profile</h2>\n<p class=\"muted\">Empty.</p>"));
     assert!(html.contains("<h2>Static findings</h2>\n<p class=\"muted\">None.</p>"));
+
     let timeline = table(&html, "<h2>Timeline</h2>");
     assert_eq!(timeline, [row(&["When", "From", "To", "Event", "Worker"])]);
+
     db.drop().await;
 }
 
@@ -543,12 +574,15 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
     let Some(db) = Dashboard::start().await else {
         return;
     };
+
     let job = db.job().await;
     db.store.record_verdict(job, &verdict()).await.unwrap();
 
     let html = db.page(job).await;
     let status = "State Discovered. Score 85 (critical), review none.";
+
     assert_eq!(text(&html, "<p>State", "</p>"), status);
+
     let form = format!("action=\"/jobs/{}/review\"", job.0);
     assert_eq!(html.matches(&form).count(), 2);
     assert!(!html.contains("<h2>Disclosure</h2>"));
@@ -559,16 +593,20 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
             .await
             .unwrap()
     );
+
     let html = db.page(job).await;
     assert!(html.contains("<h2>Disclosure</h2>\n\n<p class=\"muted\">Not reported yet."));
+
     // Until the report is recorded, the inbox and a filter find it.
     let link = format!("<a href=\"/jobs/{}\">", job.0);
     let (_, inbox) = db.get("/inbox").await;
     let (waiting, unreported) = inbox
         .split_once("<h2>Confirmed, not reported</h2>")
         .unwrap();
+
     assert!(!waiting.contains(&link) && unreported.contains(&link));
     assert!(unreported.contains("<span class=\"badge warn\">not reported</span>"));
+
     let (_, found) = db.get("/jobs?review=unreported").await;
     assert!(found.contains(&link));
     assert!(found.contains("<option value=\"unreported\" selected>"));
@@ -591,10 +629,13 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
         .unwrap()
         .reported_on
         .unwrap();
+
     assert!(!db.get("/jobs?review=unreported").await.1.contains(&link));
     assert!(db.get("/jobs?review=confirmed").await.1.contains(&link));
+
     let (_, inbox) = db.get("/inbox").await;
     assert!(inbox.contains("Every confirmed verdict was reported."));
+
     let html = db.page(job).await;
     assert_eq!(
         table(&html, "<h2>Disclosure</h2>"),
@@ -608,6 +649,7 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
             row(&["Note", "-"]),
         ]
     );
+
     db.drop().await;
 }
 
@@ -616,6 +658,7 @@ async fn events_without_a_kind_or_from_the_future_still_render() {
     let Some(db) = Dashboard::start().await else {
         return;
     };
+
     let job = db.job().await;
     db.raw_event(job, "now() + interval '1 hour'", "{}").await;
     db.raw_event(job, "now() - interval '3 days'", "{\"kind\": \"old\"}")
@@ -631,6 +674,7 @@ async fn events_without_a_kind_or_from_the_future_still_render() {
             row(&["3 d ago", "Scored", "Finalized", "old", "w-raw"]),
         ]
     );
+
     db.drop().await;
 }
 
@@ -639,7 +683,9 @@ async fn an_unknown_job_is_not_found() {
     let Some(db) = Dashboard::start().await else {
         return;
     };
+
     assert_eq!(db.get("/jobs/999").await, (404, "no such job".to_owned()));
+
     db.drop().await;
 }
 
@@ -648,6 +694,7 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
     let Some(db) = Dashboard::start().await else {
         return;
     };
+
     let job = db.job().await;
     let spawn = evidence(
         "static:process_spawn",
@@ -657,6 +704,7 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
         Some("evil"),
         Some("build.rs:3"),
     );
+
     // A verdict from before YARA matches had a line names only the file.
     let yara = evidence(
         "static:yara:reverse_shell",
@@ -666,6 +714,7 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
         Some("evil"),
         Some("build.rs"),
     );
+
     let mut v = verdict();
     v.evidence = vec![spawn, yara];
     db.store.record_verdict(job, &v).await.unwrap();
@@ -677,6 +726,7 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
          "line": 9, "evidence": "reverse shell"},
         {"severity": "low", "kind": "process_spawn", "file": "src/lib.rs", "line": 3, "evidence": "other"}
     ]});
+
     let cksum = CKSUM.parse().unwrap();
     let recorded = db
         .store
@@ -687,12 +737,16 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
     let evidence = &html
         [html.find("<h2>Evidence</h2>").unwrap()..html.find("<h2>Static findings</h2>").unwrap()];
     let viewer = "https://crates.io/crates/evil/0.1.0/code/build.rs";
+
     assert!(evidence.contains(&format!("<a href=\"{viewer}#L3\"")));
+
     // The old verdict names only the file. The finding knows the line.
     assert!(evidence.contains(&format!("<a href=\"{viewer}#L9\"")));
+
     let findings = &html[html.find("<h2>Static findings</h2>").unwrap()..];
     assert!(
         findings.contains("<a href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs#L3\"")
     );
+
     db.drop().await;
 }

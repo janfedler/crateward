@@ -114,6 +114,7 @@ pub fn render(
     } else {
         "A canary gave an unexpected result. Analysis that depends on it is paused until it passes again.".to_owned()
     };
+
     let page = SitePage {
         versions: stats.versions,
         finished: stats.finished,
@@ -141,6 +142,7 @@ pub fn render(
             .collect(),
         generated: generated.to_owned(),
     };
+
     let json = serde_json::json!({
         "generated": generated,
         "versions": stats.versions,
@@ -158,12 +160,14 @@ pub fn render(
             "page": format!("findings/{}/", f.slug),
         })).collect::<Vec<_>>(),
     });
+
     let mut files: Vec<(String, Vec<u8>)> = vec![
         ("index.html".into(), page.render()?.into_bytes()),
         ("about/index.html".into(), AboutPage.render()?.into_bytes()),
         ("stats.json".into(), serde_json::to_vec_pretty(&json)?),
         ("site.css".into(), SITE_CSS.as_bytes().to_vec()),
     ];
+
     files.extend(
         crate::FONTS
             .iter()
@@ -188,13 +192,16 @@ pub fn render(
 /// Fails if a file cannot be written.
 pub fn write(dir: &Path, files: &[(String, Vec<u8>)]) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
+
     for (name, data) in files {
         let path = dir.join(name);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+
         std::fs::write(path, data)?;
     }
+
     Ok(())
 }
 
@@ -205,6 +212,7 @@ async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportErro
         "ssh -i {} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes",
         key.display()
     );
+
     let output = tokio::process::Command::new("git")
         .args(["-c", "user.name=Crateward"])
         .args(["-c", "user.email=security@janfedler.de"])
@@ -224,6 +232,7 @@ async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportErro
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         });
     }
+
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -252,6 +261,7 @@ pub async fn publish(
     .await?;
     write(&checkout, files)?;
     git(&checkout, key, &["add", "--all"]).await?;
+
     if git(&checkout, key, &["status", "--porcelain"])
         .await?
         .trim()
@@ -259,6 +269,7 @@ pub async fn publish(
     {
         return Ok(false);
     }
+
     git(
         &checkout,
         key,
@@ -287,6 +298,7 @@ pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, ExportError>
 pub fn format_utc(secs: i64) -> String {
     let days = secs.div_euclid(86_400);
     let rest = secs.rem_euclid(86_400);
+
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -308,6 +320,7 @@ pub fn format_utc(secs: i64) -> String {
 /// `dir`, and pushes it when `config` is set.
 pub async fn run(store: &Store, dir: PathBuf, config: Option<&ExportConfig>) {
     let interval = Duration::from_secs(config.map_or(24, |c| c.interval_hours) * 3600);
+
     loop {
         match build(store).await {
             Ok(files) => {
@@ -324,6 +337,7 @@ pub async fn run(store: &Store, dir: PathBuf, config: Option<&ExportConfig>) {
             }
             Err(error) => tracing::warn!(%error, "cannot build the public site"),
         }
+
         tokio::time::sleep(interval).await;
     }
 }
@@ -346,7 +360,9 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
+
         assert!(output.status.success(), "git {args:?}: {output:?}");
+
         String::from_utf8(output.stdout).unwrap()
     }
 
@@ -396,17 +412,22 @@ mod tests {
         let config = site_repository(&root);
         let work = root.join("work");
         let files = vec![("index.html".to_owned(), b"<p>hello</p>".to_vec())];
+
         assert!(publish(&config, &work, &files).await.unwrap());
         assert!(!publish(&config, &work, &files).await.unwrap());
+
         let bare = root.join("site.git");
         let last = git_in(&bare, &["log", "-1", "--format=%an <%ae>: %s", "main"]);
+
         assert_eq!(
             last.trim(),
             "Crateward <security@janfedler.de>: Update statistics"
         );
         assert_eq!(git_in(&bare, &["rev-list", "--count", "main"]).trim(), "2");
+
         let page = git_in(&bare, &["show", "main:index.html"]);
         assert_eq!(page, "<p>hello</p>");
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -419,12 +440,14 @@ mod tests {
             deploy_key: root.join("no-key"),
             interval_hours: 24,
         };
+
         let error = publish(&config, &root.join("work"), &[]).await.unwrap_err();
         assert!(
             matches!(&error, ExportError::GitFailed { step, stderr }
                 if step == "clone" && !stderr.is_empty()),
             "{error}"
         );
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -433,6 +456,7 @@ mod tests {
         let error = git(Path::new("/nonexistent/dir"), Path::new("key"), &["status"])
             .await
             .unwrap_err();
+
         assert!(
             matches!(&error, ExportError::GitStart { step, .. } if step == "status"),
             "{error}"
@@ -456,11 +480,14 @@ mod tests {
             levels: vec![("none".into(), 7), ("high".into(), 1)],
             daily: vec![("2026-09-25".into(), 8)],
         };
+
         let files = render(&stats, &[("canary-exfil".into(), true, 0)], &[], "now").unwrap();
         let index = String::from_utf8(files[0].1.clone()).unwrap();
+
         assert!(index.contains("Built and traced in a microVM on Linux"));
         assert!(index.contains("(25%)"));
         assert!(index.contains("expected results"));
+
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             names,
@@ -477,10 +504,13 @@ mod tests {
                 ".nojekyll"
             ]
         );
+
         // The pages load nothing but their own stylesheet.
         assert!(!index.contains("<script"));
+
         let about = String::from_utf8(files[1].1.clone()).unwrap();
         assert!(!about.contains("<script"));
+
         // The user agent points at this page, which names the contact.
         assert!(about.contains("security@janfedler.de"));
     }
@@ -495,6 +525,7 @@ mod tests {
             levels: Vec::new(),
             daily: Vec::new(),
         };
+
         let finding = PublishedFinding {
             name: "evil<b>".into(),
             version: "0.1.0".into(),
@@ -503,6 +534,7 @@ mod tests {
             published_on: "2026-10-04".into(),
             slug: "evil-0-1-0".into(),
         };
+
         // crates.io removed this one before it was reported.
         let removed = PublishedFinding {
             name: "gone".into(),
@@ -510,12 +542,16 @@ mod tests {
             slug: "gone-0-1-0".into(),
             ..finding.clone()
         };
+
         let files = render(&stats, &[], &[finding, removed], "now").unwrap();
         let index = String::from_utf8(files[0].1.clone()).unwrap();
+
         assert!(index.contains(r#"<a href="findings/evil-0-1-0/">details</a>"#));
+
         // Crate names are escaped like any other text.
         assert!(index.contains("evil&#60;b&#62;") || index.contains("evil&lt;b&gt;"));
         assert!(!index.contains("None yet."));
+
         let json: serde_json::Value = serde_json::from_slice(&files[2].1).unwrap();
         assert_eq!(json["findings"][0]["page"], "findings/evil-0-1-0/");
         assert!(index.contains("<td>removed by crates.io first</td>"));

@@ -182,6 +182,7 @@ fn cfg_of(attrs: &[syn::Attribute]) -> Option<String> {
         if !a.path().is_ident("cfg") {
             return None;
         }
+
         match &a.meta {
             syn::Meta::List(list) => Some(list.tokens.to_string()),
             _ => None,
@@ -215,6 +216,7 @@ impl Scanner<'_> {
         } else {
             base
         };
+
         let cfg = self.cfg.last().cloned();
         let platform = cfg.as_deref().map_or(Platform::Any, Platform::from_cfg);
         self.scan.findings.push(Finding {
@@ -234,6 +236,7 @@ impl Scanner<'_> {
             .inspect(|c| self.cfg.push(c.clone()))
             .is_some();
         f(self);
+
         if pushed {
             self.cfg.pop();
         }
@@ -245,6 +248,7 @@ impl Scanner<'_> {
         let Some(first) = segments.first() else {
             return String::new();
         };
+
         let head = if let Some(full) = self.imports.get(first) {
             full.clone()
         } else if segments.len() <= 2
@@ -272,6 +276,7 @@ impl Scanner<'_> {
                 format!("{a}::{b}")
             }
         };
+
         match tree {
             syn::UseTree::Path(p) => self.collect_use(&join(prefix, &p.ident.to_string()), &p.tree),
             syn::UseTree::Name(n) => {
@@ -305,6 +310,7 @@ impl Scanner<'_> {
                 return;
             }
         }
+
         let full = self.resolve(path);
         let last = path
             .segments
@@ -312,6 +318,7 @@ impl Scanner<'_> {
             .map(|s| s.ident.to_string())
             .unwrap_or_default();
         let span = path.span();
+
         // A pattern matches at the start or after a `::`, so a crate
         // renamed under another module (`crate::deps::reqwest::get`) still
         // counts.
@@ -319,6 +326,7 @@ impl Scanner<'_> {
             full.match_indices(p)
                 .any(|(i, _)| i == 0 || full.get(..i).is_some_and(|head| head.ends_with("::")))
         };
+
         if NETWORK.iter().any(|p| at_segment(p)) {
             self.add(FindingKind::NetworkAccess, Severity::Low, span, &full);
         } else if PROCESS.iter().any(|p| full.starts_with(p)) {
@@ -346,9 +354,11 @@ impl Scanner<'_> {
         } else if value.contains("://") {
             self.add(FindingKind::UrlLiteral, Severity::Info, span, value);
         }
+
         if CREDENTIAL_PATHS.iter().any(|c| value.contains(c)) {
             self.add(FindingKind::CredentialAccess, Severity::Medium, span, value);
         }
+
         if SECRET_ENV.iter().any(|e| value.starts_with(e)) {
             self.add(
                 FindingKind::SecretEnvironmentVariable,
@@ -357,9 +367,11 @@ impl Scanner<'_> {
                 value,
             );
         }
+
         if SHELL.iter().any(|s| value.contains(s)) {
             self.add(FindingKind::ShellCommand, Severity::Medium, span, value);
         }
+
         let encoded = value
             .bytes()
             .filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'=' | b'-' | b'_'))
@@ -389,6 +401,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             syn::Item::Use(i) => &i.attrs,
             _ => &[],
         };
+
         self.with_cfg(attrs, |s| {
             match item {
                 syn::Item::Use(u) => s.collect_use("", &u.tree),
@@ -399,6 +412,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
                         m.span(),
                         "extern block",
                     );
+
                     for foreign in &m.items {
                         if let syn::ForeignItem::Fn(f) = foreign {
                             let name = f.sig.ident.to_string();
@@ -417,6 +431,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
                 syn::Item::Impl(i) if i.unsafety.is_some() => s.count_unsafe(i.span()),
                 _ => {}
             }
+
             visit::visit_item(s, item);
         });
     }
@@ -429,6 +444,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             syn::ImplItem::Macro(i) => &i.attrs,
             _ => &[],
         };
+
         self.with_cfg(attrs, |s| visit::visit_impl_item(s, item));
     }
 
@@ -438,6 +454,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             syn::Stmt::Macro(m) => &m.attrs,
             _ => &[],
         };
+
         self.with_cfg(attrs, |s| visit::visit_stmt(s, stmt));
     }
 
@@ -455,6 +472,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             syn::Expr::Closure(e) => &e.attrs,
             _ => &[],
         };
+
         self.with_cfg(attrs, |s| visit::visit_expr(s, expr));
     }
 
@@ -512,6 +530,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
                 &format!("array of {numbers} integer literals"),
             );
         }
+
         visit::visit_expr_array(self, array);
     }
 
@@ -542,6 +561,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             }
             _ => {}
         }
+
         // Many strings and calls live inside macro invocations.
         if let Ok(exprs) =
             mac.parse_body_with(Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated)
@@ -550,6 +570,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
                 self.visit_expr(expr);
             }
         }
+
         visit::visit_macro(self, mac);
     }
 }
@@ -583,6 +604,7 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
             };
         }
     };
+
     let file_cfg = cfg_of(&parsed.attrs);
     let mut scanner = Scanner {
         file,
@@ -594,13 +616,16 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
         first_unsafe: None,
         scan: FileScan::default(),
     };
+
     // Imports first, so paths anywhere in the file resolve.
     for item in &parsed.items {
         if let syn::Item::Use(u) = item {
             scanner.collect_use("", &u.tree);
         }
     }
+
     scanner.visit_file(&parsed);
+
     if scanner.unsafe_count > 0 {
         let cfg = file_cfg.clone();
         scanner.scan.findings.push(Finding {
@@ -616,6 +641,7 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
             evidence: format!("{} unsafe blocks, functions or impls", scanner.unsafe_count),
         });
     }
+
     scanner.scan.file_cfg = file_cfg;
     scanner.scan
 }
@@ -658,6 +684,7 @@ fn main() {
 "#;
         let scan = scan_file("build.rs", source, CodeContext::BuildScript);
         let k = kinds(&scan);
+
         for expected in [
             "process_spawn",
             "shell_command",
@@ -672,11 +699,13 @@ fn main() {
                 "missing {expected} in {k:?}"
             );
         }
+
         let spawn = scan
             .findings
             .iter()
             .find(|f| matches!(f.kind, FindingKind::ProcessSpawn))
             .unwrap();
+
         assert_eq!(spawn.platform, Platform::Windows);
         assert_eq!(spawn.line, Some(11));
         assert_eq!(
@@ -684,11 +713,13 @@ fn main() {
             Severity::Medium,
             "build scripts raise severity"
         );
+
         let net = scan
             .findings
             .iter()
             .find(|f| matches!(f.kind, FindingKind::NetworkAccess))
             .unwrap();
+
         assert_eq!(net.platform, Platform::Apple);
     }
 
@@ -696,6 +727,7 @@ fn main() {
     fn clap_command_is_not_process_spawning() {
         let source = "use clap::Command;\nfn cli() -> Command { Command::new(\"app\") }\n";
         let scan = scan_file("src/main.rs", source, CodeContext::Binary);
+
         assert!(
             !kinds(&scan).iter().any(|k| k == "process_spawn"),
             "{:?}",
@@ -715,6 +747,7 @@ fn main() {
         );
         let scan = scan_file("src/lib.rs", &source, CodeContext::Library);
         let k = kinds(&scan);
+
         for expected in [
             "foreign_functions",
             "windows_api",
@@ -727,6 +760,7 @@ fn main() {
                 "missing {expected} in {k:?}"
             );
         }
+
         assert_eq!(scan.file_cfg.as_deref(), Some("windows"));
         assert_eq!(scan.includes[0].target, "payload.bin");
     }
@@ -734,6 +768,7 @@ fn main() {
     #[test]
     fn unparsable_source_is_a_finding_not_an_error() {
         let scan = scan_file("src/lib.rs", "fn broken( {", CodeContext::Library);
+
         assert_eq!(kinds(&scan), vec!["unparsable_source"]);
     }
 }

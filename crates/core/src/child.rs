@@ -223,9 +223,11 @@ impl Child {
                 .map_err(ChildError::io(self.name, "waiting"))?,
             Some(limit) => self.wait_for(limit)?,
         };
+
         if status.success() {
             return Ok(());
         }
+
         let stderr = self
             .stderr
             .take()
@@ -240,11 +242,13 @@ impl Child {
 
     fn wait_for(&mut self, limit: Duration) -> Result<ExitStatus, ChildError> {
         let deadline = Instant::now() + limit;
+
         loop {
             let polled = self.process.try_wait();
             if let Some(status) = polled.map_err(ChildError::io(self.name, "waiting"))? {
                 return Ok(status);
             }
+
             if Instant::now() >= deadline {
                 self.kill();
                 return Err(ChildError::TimedOut {
@@ -252,6 +256,7 @@ impl Child {
                     limit,
                 });
             }
+
             std::thread::sleep(POLL);
         }
     }
@@ -299,6 +304,7 @@ mod tests {
     fn a_failure_carries_its_status_and_stderr() {
         let mut child = Child::spawn("shell", shell("echo boom >&2; exit 3")).unwrap();
         let error = child.finish(None).unwrap_err();
+
         assert!(
             matches!(&error, ChildError::Failed { status, .. } if status.code() == Some(3)),
             "{error}"
@@ -309,6 +315,7 @@ mod tests {
     #[test]
     fn a_child_that_cannot_start_is_an_error() {
         let error = Child::spawn("ghost", command("/nonexistent/binary")).unwrap_err();
+
         assert!(
             error.to_string().starts_with("ghost: starting: "),
             "{error}"
@@ -320,6 +327,7 @@ mod tests {
         let mut child = Child::spawn("shell", shell("exec sleep 30")).unwrap();
         let started = Instant::now();
         let error = child.finish(Some(Duration::from_millis(100))).unwrap_err();
+
         assert!(matches!(error, ChildError::TimedOut { .. }), "{error}");
         assert!(started.elapsed() < Duration::from_secs(10));
     }
@@ -333,6 +341,7 @@ mod tests {
         else {
             panic!("the child should have failed");
         };
+
         assert!(
             (60_000..=64 * 1024).contains(&stderr.len()),
             "{}",
@@ -345,6 +354,7 @@ mod tests {
         let mut env = command("/usr/bin/env");
         env.stdin(Stdio::null()).stdout(Stdio::piped());
         let mut child = Child::spawn("env", env).unwrap();
+
         assert!(child.output(1024).unwrap().is_empty());
     }
 
@@ -355,9 +365,12 @@ mod tests {
             .unwrap()
             .output(1024)
             .unwrap_err();
+
         assert_eq!(error.to_string(), "shell failed (exit status: 2): err");
+
         let fine = shell_with_stdout("echo out");
         let mut child = Child::spawn("shell", fine).unwrap();
+
         assert_eq!(child.output(1024).unwrap(), b"out\n");
     }
 
@@ -370,9 +383,11 @@ mod tests {
             .unwrap()
             .finish(None)
             .unwrap();
+
         // Nobody holds the read end any more, so `yes` dies of SIGPIPE
         // instead of blocking on a full pipe until the deadline.
         let error = writer.finish(Some(Duration::from_secs(20))).unwrap_err();
+
         assert!(matches!(error, ChildError::Failed { .. }), "{error}");
     }
 
@@ -381,6 +396,7 @@ mod tests {
         let child = Child::spawn("shell", shell("exec sleep 30")).unwrap();
         let pid = child.process.id();
         drop(child);
+
         assert!(!Path::new(&format!("/proc/{pid}")).exists());
     }
 }

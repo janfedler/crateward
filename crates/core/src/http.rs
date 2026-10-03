@@ -102,6 +102,7 @@ impl Pacer {
         } else {
             1.0
         };
+
         Self {
             interval: Duration::from_secs_f64(1.0 / rate),
             next: Mutex::new(Instant::now()),
@@ -116,6 +117,7 @@ impl Pacer {
             *next = slot + self.interval;
             slot
         };
+
         tokio::time::sleep_until(slot).await;
     }
 
@@ -186,6 +188,7 @@ impl PoliteClient {
         max_bytes: usize,
     ) -> Result<Fetched, HttpError> {
         self.pacer.wait().await;
+
         let mut request = self.client.get(url);
         if let Some(v) = validators {
             if let Some(etag) = &v.etag {
@@ -194,6 +197,7 @@ impl PoliteClient {
                 request = request.header(reqwest::header::IF_MODIFIED_SINCE, modified);
             }
         }
+
         let mut response = request.send().await?;
         let status = response.status().as_u16();
         match status {
@@ -208,23 +212,28 @@ impl PoliteClient {
             500..=599 => return Err(HttpError::Server(status)),
             other => return Err(HttpError::Status(other)),
         }
+
         if response
             .content_length()
             .is_some_and(|len| len > u64::try_from(max_bytes).unwrap_or(u64::MAX))
         {
             return Err(HttpError::TooLarge(max_bytes));
         }
+
         let validators = Validators {
             etag: header(&response, reqwest::header::ETAG),
             last_modified: header(&response, reqwest::header::LAST_MODIFIED),
         };
+
         let mut body = BytesMut::new();
         while let Some(chunk) = response.chunk().await? {
             if body.len() + chunk.len() > max_bytes {
                 return Err(HttpError::TooLarge(max_bytes));
             }
+
             body.extend_from_slice(&chunk);
         }
+
         Ok(Fetched::Body {
             body: body.freeze(),
             validators,
@@ -239,6 +248,7 @@ impl PoliteClient {
     /// Fails like [`PoliteClient::get`] for any status other than 200.
     pub async fn stream(&self, url: &str) -> Result<Option<reqwest::Response>, HttpError> {
         self.pacer.wait().await;
+
         let response = self.client.get(url).send().await?;
         match response.status().as_u16() {
             200 => Ok(Some(response)),
@@ -262,9 +272,11 @@ mod tests {
     async fn pacer_spaces_requests_out() {
         let pacer = Pacer::new(4.0);
         let start = Instant::now();
+
         for _ in 0..5 {
             pacer.wait().await;
         }
+
         // Five requests at 4 per second: the fifth starts after one second.
         assert_eq!(start.elapsed(), Duration::from_secs(1));
     }
@@ -275,6 +287,7 @@ mod tests {
         pacer.back_off(Duration::from_secs(30)).await;
         let start = Instant::now();
         pacer.wait().await;
+
         assert_eq!(start.elapsed(), Duration::from_secs(30));
     }
 

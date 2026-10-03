@@ -82,10 +82,12 @@ impl BlobStore {
         if !valid {
             return Err(BlobError::BadName(digest.to_owned()));
         }
+
         let (a, b) = (
             digest.get(..2).unwrap_or_default(),
             digest.get(2..4).unwrap_or_default(),
         );
+
         Ok(self
             .root
             .join("blobs")
@@ -111,6 +113,7 @@ impl BlobStore {
                 stored_bytes: meta.len(),
             });
         }
+
         let dir = path.parent().unwrap_or(&self.root);
         std::fs::create_dir_all(dir).map_err(io(dir))?;
         let temp = dir.join(format!(".{digest}.{}.tmp", std::process::id()));
@@ -145,6 +148,7 @@ impl BlobStore {
         {
             return Err(BlobError::Corrupt(digest.to_owned()));
         }
+
         Ok(tar)
     }
 
@@ -173,6 +177,7 @@ mod tests {
         let data = b"tar bytes".repeat(1000);
         let first = s.put(&data).unwrap();
         let second = s.put(&data).unwrap();
+
         assert_eq!(first, second);
         assert!(first.stored_bytes < first.tar_bytes);
         assert_eq!(s.get(&first.blake3, 1 << 20).unwrap(), data);
@@ -185,6 +190,7 @@ mod tests {
         let path = s.path(&blob.blake3).unwrap();
         let tampered = zstd::bulk::compress(b"tampered content", 3).unwrap();
         std::fs::write(&path, tampered).unwrap();
+
         assert!(matches!(
             s.get(&blob.blake3, 1 << 20),
             Err(BlobError::Corrupt(_))

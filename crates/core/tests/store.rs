@@ -37,12 +37,14 @@ async fn migrations_are_idempotent() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     assert_eq!(
         store.migrate().await.unwrap(),
         vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     );
     assert!(store.migrate().await.unwrap().is_empty());
+
     db.drop().await;
 }
 
@@ -51,8 +53,10 @@ async fn enqueue_is_idempotent_per_canonical_name_and_version() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
+
     assert!(
         store
             .enqueue(&new_job("serde-json", "1.0.0", 0))
@@ -67,6 +71,7 @@ async fn enqueue_is_idempotent_per_canonical_name_and_version() {
             .unwrap()
             .is_none()
     );
+
     // crates.io treats these names as the same crate.
     assert!(
         store
@@ -88,6 +93,7 @@ async fn enqueue_is_idempotent_per_canonical_name_and_version() {
             .await
             .unwrap()
     );
+
     db.drop().await;
 }
 
@@ -96,6 +102,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let low = store
@@ -108,6 +115,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
         .await
         .unwrap()
         .unwrap();
+
     // Nothing is fetched yet, so the static analysis stage finds nothing.
     assert!(
         store
@@ -116,6 +124,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
             .unwrap()
             .is_none()
     );
+
     let other = db.store().await;
     let first = store
         .claim(Stage::Fetch, "w1", LEASE)
@@ -127,6 +136,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
         .await
         .unwrap()
         .unwrap();
+
     assert_eq!(first.id, high);
     assert_eq!(second.id, low);
     assert!(
@@ -136,6 +146,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
             .unwrap()
             .is_none()
     );
+
     db.drop().await;
 }
 
@@ -144,6 +155,7 @@ async fn complete_advances_releases_and_records() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let id = store
@@ -156,6 +168,7 @@ async fn complete_advances_releases_and_records() {
         .await
         .unwrap()
         .unwrap();
+
     // Another worker cannot complete a job it does not hold.
     assert!(matches!(
         store
@@ -163,19 +176,24 @@ async fn complete_advances_releases_and_records() {
             .await,
         Err(StoreError::LeaseLost(_))
     ));
+
     store
         .complete(id, "fetcher-1", JobEvent::Fetched, &policies(), false)
         .await
         .unwrap();
     let job = store.get(id).await.unwrap().unwrap();
+
     assert_eq!(job.job.state, JobState::Fetched);
+
     // Released: the next stage can claim it at once.
     let claimed = store
         .claim(Stage::StaticAnalysis, "sa", LEASE)
         .await
         .unwrap()
         .unwrap();
+
     assert_eq!(claimed.id, id);
+
     store
         .complete(
             id,
@@ -189,16 +207,19 @@ async fn complete_advances_releases_and_records() {
         .await
         .unwrap();
     let events = store.events(id).await.unwrap();
+
     assert_eq!(events.len(), 2);
     assert_eq!(events[0].from, "Discovered");
     assert_eq!(events[1].to, "ReadyForSandbox");
     assert_eq!(events[1].worker, "sa");
+
     // A rejected event changes nothing.
     store
         .claim(Stage::Sandbox, "sb", LEASE)
         .await
         .unwrap()
         .unwrap();
+
     assert!(matches!(
         store
             .complete(id, "sb", JobEvent::Finalized, &policies(), false)
@@ -209,6 +230,7 @@ async fn complete_advances_releases_and_records() {
         store.get(id).await.unwrap().unwrap().job.state,
         JobState::ReadyForSandbox
     );
+
     db.drop().await;
 }
 
@@ -217,6 +239,7 @@ async fn a_transient_failure_backs_off() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let id = store
@@ -232,18 +255,22 @@ async fn a_transient_failure_backs_off() {
     let failure = JobEvent::StageFailed {
         class: FailureClass::Transient,
     };
+
     store
         .complete(id, "w", failure, &policies(), false)
         .await
         .unwrap();
     let job = store.get(id).await.unwrap().unwrap();
+
     assert_eq!(job.job.state, JobState::Discovered);
     assert_eq!(job.job.attempts, 1);
+
     // The delay is drawn from [0, 60 s]. It is almost always still running.
     // Either way the job must stay in its stage.
     if let Some(again) = store.claim(Stage::Fetch, "w", LEASE).await.unwrap() {
         assert_eq!(again.id, id);
     }
+
     db.drop().await;
 }
 
@@ -252,6 +279,7 @@ async fn expired_leases_are_reaped_and_cost_an_attempt() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let id = store
@@ -265,9 +293,12 @@ async fn expired_leases_are_reaped_and_cost_an_attempt() {
         .unwrap()
         .unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
+
     assert_eq!(store.reap_expired(&policies()).await.unwrap(), 1);
+
     let job = store.get(id).await.unwrap().unwrap();
     assert_eq!(job.job.attempts, 1);
+
     // The dead worker's late heartbeat and completion are refused.
     assert!(!store.heartbeat(id, "dead-worker", LEASE).await.unwrap());
     assert!(matches!(
@@ -276,6 +307,7 @@ async fn expired_leases_are_reaped_and_cost_an_attempt() {
             .await,
         Err(StoreError::LeaseLost(_))
     ));
+
     db.drop().await;
 }
 
@@ -284,6 +316,7 @@ async fn sandbox_start_keeps_the_lease_for_the_run() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let id = store
@@ -304,6 +337,7 @@ async fn sandbox_start_keeps_the_lease_for_the_run() {
     let triage = JobEvent::StaticAnalysisCompleted {
         triage: Triage::Dynamic,
     };
+
     store.complete(id, "s", triage, &p, false).await.unwrap();
     store
         .claim(Stage::Sandbox, "o", LEASE)
@@ -314,12 +348,15 @@ async fn sandbox_start_keeps_the_lease_for_the_run() {
         .complete(id, "o", JobEvent::SandboxStarted, &p, true)
         .await
         .unwrap();
+
     assert!(
         store.heartbeat(id, "o", LEASE).await.unwrap(),
         "lease was dropped"
     );
+
     let counts = store.count_by_state().await.unwrap();
     assert_eq!(counts.get("Running"), Some(&1));
+
     db.drop().await;
 }
 
@@ -328,6 +365,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let old = store
@@ -349,17 +387,21 @@ async fn static_reports_fetches_and_popularity_round_trip() {
         .record_fetch(new, Some("lock"), None, &packages)
         .await
         .unwrap();
+
     assert_eq!(
         store.fetch_packages(new).await.unwrap(),
         Some(packages.clone())
     );
+
     let name = CrateName::parse("lib").unwrap();
     let others = store.other_fetches(&name, new).await.unwrap();
+
     assert_eq!(others.len(), 1);
     assert_eq!((others[0].0, others[0].1.as_str()), (old, "1.0.0"));
 
     let sha = "cd".repeat(32).parse().unwrap();
     assert_eq!(store.static_report(&sha).await.unwrap(), None);
+
     store
         .record_crate_file(&CrateFile {
             sha256: sha,
@@ -378,6 +420,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
         .record_static_report(&sha, 7, true, Some("high"), &report)
         .await
         .unwrap();
+
     assert_eq!(store.static_report(&sha).await.unwrap(), Some((7, report)));
 
     store
@@ -400,6 +443,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
         .await
         .unwrap();
     popular.sort();
+
     assert_eq!(
         popular,
         vec!["many_deps".to_owned(), "many_downloads".to_owned()]
@@ -410,6 +454,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
         .record_job_static(new, &triage, &serde_json::json!(["build script"]), None)
         .await
         .unwrap();
+
     db.drop().await;
 }
 
@@ -418,6 +463,7 @@ async fn a_suspected_compromise_quarantines_everything_until_lifted() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let a = store
@@ -435,14 +481,18 @@ async fn a_suspected_compromise_quarantines_everything_until_lifted() {
         .await
         .unwrap()
         .unwrap();
+
     assert_eq!(job.id, a);
+
     let event = JobEvent::StageFailed {
         class: FailureClass::SuspectedCompromise,
     };
+
     store
         .complete(a, "w", event, &policies(), false)
         .await
         .unwrap();
+
     // The other job waits: every stage is paused.
     assert!(
         store
@@ -451,10 +501,12 @@ async fn a_suspected_compromise_quarantines_everything_until_lifted() {
             .unwrap()
             .is_none()
     );
+
     let pauses = store.pauses().await.unwrap();
     assert_eq!(pauses.len(), 1);
     assert_eq!(pauses[0].reason, PauseReason::Quarantine);
     assert_eq!(pauses[0].job, Some(a));
+
     let alerts = store.pending_alerts(10).await.unwrap();
     assert_eq!(
         alerts[0].escalation,
@@ -469,6 +521,7 @@ async fn a_suspected_compromise_quarantines_everything_until_lifted() {
             .unwrap()
             .is_some()
     );
+
     db.drop().await;
 }
 
@@ -477,6 +530,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     store
@@ -489,7 +543,9 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
         since: now,
         reopened: 1,
     };
+
     store.set_breaker(Stage::Fetch, open).await.unwrap();
+
     assert_eq!(store.breakers().await.unwrap()[&Stage::Fetch], open);
     assert_eq!(
         store.breakers().await.unwrap()[&Stage::Sandbox],
@@ -502,6 +558,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
             .unwrap()
             .is_none()
     );
+
     store
         .set_breaker(
             Stage::Fetch,
@@ -512,9 +569,11 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
         )
         .await
         .unwrap();
+
     // A disk pause does not concern the fetch stage.
     assert!(store.pause(PauseReason::Disk, None, "full").await.unwrap());
     assert!(!store.pause(PauseReason::Disk, None, "again").await.unwrap());
+
     let job = store
         .claim(Stage::Fetch, "w", LEASE)
         .await
@@ -533,6 +592,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
         .await
         .unwrap();
     let counts = store.stage_counts(now - 60).await.unwrap();
+
     assert_eq!(
         counts[&Stage::Fetch],
         Counts {
@@ -540,6 +600,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
             completions: 0
         }
     );
+
     db.drop().await;
 }
 
@@ -548,13 +609,16 @@ async fn alerts_are_recorded_and_marked() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     store.raise_alert(&HumanEscalation::KvmError).await.unwrap();
     store.raise_alert(&HumanEscalation::KvmError).await.unwrap();
     let pending = store.pending_alerts(10).await.unwrap();
+
     assert_eq!(pending.len(), 2);
     assert_eq!(store.seconds_since_sent("kvm_error").await.unwrap(), None);
+
     store
         .mark_alert(pending[0].id, &AlertOutcome::Sent)
         .await
@@ -563,6 +627,7 @@ async fn alerts_are_recorded_and_marked() {
         .mark_alert(pending[1].id, &AlertOutcome::Suppressed)
         .await
         .unwrap();
+
     assert!(store.pending_alerts(10).await.unwrap().is_empty());
     assert!(
         store
@@ -571,6 +636,7 @@ async fn alerts_are_recorded_and_marked() {
             .unwrap()
             .is_some()
     );
+
     store
         .record_canary("known_bad", false, &serde_json::json!({"why": "missed"}))
         .await
@@ -580,8 +646,10 @@ async fn alerts_are_recorded_and_marked() {
         .await
         .unwrap();
     let latest = store.latest_canaries().await.unwrap();
+
     assert_eq!(latest.len(), 1);
     assert!(latest[0].1);
+
     db.drop().await;
 }
 
@@ -590,6 +658,7 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let old = store
@@ -611,6 +680,7 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
         new_behavior: Vec::new(),
         analyzer_version: 1,
     };
+
     store
         .record_verdict(old, &verdict(10, &["exec:shell"]))
         .await
@@ -620,6 +690,7 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
         .await
         .unwrap();
     let (stored, review) = store.verdict(new).await.unwrap().unwrap();
+
     assert_eq!((stored.score, review), (70, Review::None));
     assert!(
         store
@@ -631,11 +702,13 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
         store.verdict(new).await.unwrap().unwrap().1,
         Review::Pending
     );
+
     // Semantic version order: 1.2.0 comes before 1.10.0.
     let previous = store
         .previous_profile("demo", &"1.10.0".parse().unwrap())
         .await
         .unwrap();
+
     assert_eq!(previous, Some(vec!["exec:shell".to_owned()]));
     assert_eq!(
         store
@@ -644,8 +717,10 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
             .unwrap(),
         None
     );
+
     // Neither job is finished, so nothing is outdated yet.
     assert!(store.outdated_verdicts(2, 10).await.unwrap().is_empty());
+
     db.drop().await;
 }
 
@@ -654,6 +729,7 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let report = serde_json::json!({
@@ -662,7 +738,9 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
                   "sockets": [{"to": "example.com"}]},
         "network": {"lookups": 1}
     });
+
     let mut jobs = Vec::new();
+
     for (version, score, review) in [
         ("1.0.0", 5, Review::None),
         ("2.0.0", 70, Review::Pending),
@@ -695,6 +773,7 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
         store.set_review(job, review, None).await.unwrap();
         jobs.push(job);
     }
+
     let raw = db.admin();
     raw.batch_execute(&format!(
         "SET search_path TO {}; UPDATE jobs SET state = 'Done';
@@ -709,6 +788,7 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
 
     assert_eq!(store.trim_raw_runs(7, 100).await.unwrap(), 1);
     assert_eq!(store.trim_raw_runs(7, 100).await.unwrap(), 0);
+
     let trimmed = &store.job_runs(jobs[0]).await.unwrap()[0].1;
     assert_eq!(trimmed["stderr_tail"], "");
     assert_eq!(trimmed["trimmed"], true);
@@ -716,9 +796,11 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
     assert_eq!(trimmed["trace"]["processes_omitted"], 5);
     assert_eq!(trimmed["trace"]["sockets"], report["trace"]["sockets"]);
     assert_eq!(trimmed["network"], report["network"]);
+
     for job in &jobs[1..] {
         assert_eq!(store.job_runs(*job).await.unwrap()[0].1, report);
     }
+
     // A trimmed job keeps its verdict when the analyzer changes.
     let outdated: Vec<_> = store
         .outdated_verdicts(2, 10)
@@ -727,8 +809,10 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
         .into_iter()
         .map(|j| j.id)
         .collect();
+
     assert!(!outdated.contains(&jobs[0]));
     assert!(outdated.contains(&jobs[2]));
+
     db.drop().await;
 }
 
@@ -737,6 +821,7 @@ async fn findings_are_reported_resolved_and_only_then_published() {
     let Some(db) = TestDb::new("test").await else {
         return;
     };
+
     let mut store = db.store().await;
     store.migrate().await.unwrap();
     let job = store
@@ -758,6 +843,7 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         new_behavior: Vec::new(),
         analyzer_version: 1,
     };
+
     let report = |job| {
         let store = &store;
         async move {
@@ -767,11 +853,15 @@ async fn findings_are_reported_resolved_and_only_then_published() {
                 .unwrap()
         }
     };
+
     // No verdict, then an unconfirmed one: nothing is reported.
     assert_eq!(report(job).await, Err(DisclosureRefusal::NotConfirmed));
+
     store.record_verdict(job, &verdict).await.unwrap();
     store.set_review(job, Review::Pending, None).await.unwrap();
+
     assert_eq!(report(job).await, Err(DisclosureRefusal::NotConfirmed));
+
     // Publishing needs a report, then a resolution.
     assert_eq!(
         store.publish_finding(job, "evil").await.unwrap(),
@@ -781,10 +871,12 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         store.mark_resolved(job, None).await.unwrap(),
         Err(DisclosureRefusal::NotReported)
     );
+
     store
         .set_review(job, Review::Confirmed, None)
         .await
         .unwrap();
+
     assert_eq!(report(job).await, Ok(()));
     assert_eq!(
         store.publish_finding(job, "evil").await.unwrap(),
@@ -803,23 +895,29 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         store.publish_finding(job, "evil-0-1-0").await.unwrap(),
         Ok(())
     );
+
     let record = store.disclosure(job).await.unwrap().unwrap();
     assert_eq!(record.reference.as_deref(), Some("CRATES-1"));
     assert!(record.resolved_on.is_some() && record.published_on.is_some());
+
     let published = store.published_findings().await.unwrap();
     assert_eq!(published.len(), 1);
     assert_eq!(
         (published[0].name.as_str(), published[0].slug.as_str()),
         ("evil", "evil-0-1-0")
     );
+
     // A second finding cannot take the same page.
     store.record_verdict(other, &verdict).await.unwrap();
     store
         .set_review(other, Review::Confirmed, None)
         .await
         .unwrap();
+
     assert_eq!(report(other).await, Ok(()));
+
     store.mark_resolved(other, None).await.unwrap().unwrap();
+
     assert_eq!(
         store.publish_finding(other, "evil-0-1-0").await.unwrap(),
         Err(DisclosureRefusal::SlugTaken)
@@ -833,33 +931,41 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         .await
         .unwrap()
         .unwrap();
+
     assert_eq!(
         store.record_removal(gone, None).await.unwrap(),
         Err(DisclosureRefusal::NotConfirmed)
     );
+
     store.record_verdict(gone, &verdict).await.unwrap();
     store
         .set_review(gone, Review::Confirmed, None)
         .await
         .unwrap();
     let note = Some("removed on 2026-10-01");
+
     assert_eq!(store.record_removal(gone, note).await.unwrap(), Ok(()));
+
     let record = store.disclosure(gone).await.unwrap().unwrap();
     assert_eq!(record.kind, DisclosureKind::Malicious);
     assert!(record.reported_on.is_none() && record.reported_to.is_none());
     assert!(record.resolved_on.is_some());
     assert_eq!(record.reported(), crateward_core::store::REMOVED_FIRST);
     assert_eq!(store.publish_finding(gone, "gone").await.unwrap(), Ok(()));
+
     let published = store.published_findings().await.unwrap();
     assert!(
         published
             .iter()
             .any(|f| f.slug == "gone" && f.reported_on.is_none())
     );
+
     // A report recorded later fills the report in.
     assert_eq!(report(gone).await, Ok(()));
+
     let record = store.disclosure(gone).await.unwrap().unwrap();
     assert!(record.reported_on.is_some() && record.resolved_on.is_some());
+
     // The database refuses a vulnerability without a report.
     let raw = db.admin();
     let refused = raw
@@ -871,6 +977,8 @@ async fn findings_are_reported_resolved_and_only_then_published() {
             gone.0
         ))
         .await;
+
     assert!(refused.is_err());
+
     db.drop().await;
 }

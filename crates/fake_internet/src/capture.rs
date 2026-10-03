@@ -64,6 +64,7 @@ fn ports(proto: u8, payload: &[u8]) -> Option<(u16, u16)> {
     if !matches!(proto, PROTO_TCP | PROTO_UDP) {
         return None;
     }
+
     let src = u16::from_be_bytes(payload.get(0..2)?.try_into().ok()?);
     let dst = u16::from_be_bytes(payload.get(2..4)?.try_into().ok()?);
     Some((src, dst))
@@ -78,6 +79,7 @@ pub fn describe(frame: &[u8]) -> Option<String> {
     if src_mac == HOST_MAC {
         return None;
     }
+
     let ethertype = u16::from_be_bytes(frame.get(12..14)?.try_into().ok()?);
     let packet = frame.get(14..).unwrap_or_default();
     match ethertype {
@@ -87,6 +89,7 @@ pub fn describe(frame: &[u8]) -> Option<String> {
             if matches!(proto, PROTO_TCP | PROTO_UDP) {
                 return None;
             }
+
             let src: [u8; 4] = packet.get(12..16)?.try_into().ok()?;
             let dst: [u8; 4] = packet.get(16..20)?.try_into().ok()?;
             Some(format!(
@@ -121,15 +124,19 @@ pub fn describe(frame: &[u8]) -> Option<String> {
 pub fn run(socket: &OwnedFd, mut emit: impl FnMut(Option<(String, u64, &[u8])>)) {
     let mut buffer = vec![0_u8; 65_536];
     let mut logged = 0_u32;
+
     loop {
         let Ok((read, len)) = recv(socket, &mut buffer[..], RecvFlags::TRUNC) else {
             return;
         };
+
         let frame = buffer.get(..read).unwrap_or_default();
         let Some(summary) = describe(frame) else {
             continue;
         };
+
         logged = logged.saturating_add(1);
+
         if logged <= MAX_PACKETS {
             let kept = frame.get(..PACKET_CAPTURE).unwrap_or(frame);
             emit(Some((summary, len as u64, kept)));
@@ -174,6 +181,7 @@ mod tests {
             describe(&frame(GUEST, ETHERTYPE_IPV4, &ipv4(PROTO_ICMP))).unwrap(),
             "ipv4 icmp 10.0.2.2 -> 10.0.2.1"
         );
+
         let mut v6 = vec![0x60, 0, 0, 0, 0, 8, PROTO_TCP, 64];
         v6.extend_from_slice(&"fd00::2".parse::<std::net::Ipv6Addr>().unwrap().octets());
         v6.extend_from_slice(
@@ -183,6 +191,7 @@ mod tests {
                 .octets(),
         );
         v6.extend_from_slice(&[0x30, 0x39, 0x01, 0xbb]);
+
         assert_eq!(
             describe(&frame(GUEST, ETHERTYPE_IPV6, &v6)).unwrap(),
             "ipv6 tcp [fd00::2]:12345 -> [2001:db8::1]:443"

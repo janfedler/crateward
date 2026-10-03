@@ -63,13 +63,16 @@ impl FromStr for Sha256Digest {
         if s.len() != 64 {
             return Err(DigestError::WrongLength { len: s.len() });
         }
+
         let mut out = [0_u8; 32];
         let (pairs, _) = s.as_bytes().as_chunks::<2>();
+
         for (i, (slot, [hi, lo])) in out.iter_mut().zip(pairs).enumerate() {
             let hi = hex_value(*hi).ok_or(DigestError::InvalidHex { index: 2 * i })?;
             let lo = hex_value(*lo).ok_or(DigestError::InvalidHex { index: 2 * i + 1 })?;
             *slot = (hi << 4) | lo;
         }
+
         Ok(Self(out))
     }
 }
@@ -79,6 +82,7 @@ impl fmt::Display for Sha256Digest {
         for byte in self.0 {
             write!(f, "{byte:02x}")?;
         }
+
         Ok(())
     }
 }
@@ -113,12 +117,14 @@ mod tests {
     fn parses_the_index_documentation_example() {
         let hex = "d867001db0e2b6e0496f9fac96930e2d42233ecd3ca0413e0753d4c7695d289c";
         let digest: Sha256Digest = hex.parse().unwrap();
+
         assert_eq!(digest.to_string(), hex);
     }
 
     #[test]
     fn uppercase_input_is_normalized() {
         let digest: Sha256Digest = "AB".repeat(32).parse().unwrap();
+
         assert_eq!(digest.to_string(), "ab".repeat(32));
     }
 
@@ -128,12 +134,15 @@ mod tests {
             "abc".parse::<Sha256Digest>(),
             Err(DigestError::WrongLength { len: 3 })
         );
+
         let mut bad = "0".repeat(64);
         bad.replace_range(10..11, "g");
+
         assert_eq!(
             bad.parse::<Sha256Digest>(),
             Err(DigestError::InvalidHex { index: 10 })
         );
+
         // Multibyte characters change the byte length and are rejected.
         assert!(
             format!("{}\u{e9}", "0".repeat(62))

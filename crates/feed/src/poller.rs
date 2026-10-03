@@ -118,12 +118,15 @@ pub fn priority(entry: &IndexEntry, new_crate: bool, popular: bool) -> i16 {
     if new_crate {
         score += 40;
     }
+
     if popular {
         score += 30;
     }
+
     if entry.links.is_some() || entry.has_build_dependencies() {
         score += 20;
     }
+
     score
 }
 
@@ -211,16 +214,20 @@ impl Feed {
         let new_url = self.urls.rss_new_crates.clone();
         if let Some(feed) = self.read_feed(&new_url).await? {
             report.rejected += feed.rejected;
+
             for item in &feed.items {
                 new_crates.insert(item.name.canonical());
             }
+
             self.queue(feed.items, &new_crates, &mut report).await?;
         }
+
         let updates_url = self.urls.rss_updates.clone();
         if let Some(feed) = self.read_feed(&updates_url).await? {
             report.rejected += feed.rejected;
             self.queue(feed.items, &new_crates, &mut report).await?;
         }
+
         self.resolve_due(&mut report).await?;
         report.waiting = self.pending.len();
         Ok(report)
@@ -233,25 +240,31 @@ impl Feed {
         report: &mut PollReport,
     ) -> Result<(), FeedError> {
         let now = Instant::now();
+
         for item in items {
             // New crate items carry no version. Their first version arrives
             // through `updates.xml`.
             let Some(version) = item.version else {
                 continue;
             };
+
             report.feed_items += 1;
+
             let key = (item.name.canonical(), version.to_string());
             if self.pending.contains_key(&key) {
                 continue;
             }
+
             if self.store.contains(&item.name, &key.1).await? {
                 report.already_known += 1;
                 continue;
             }
+
             if self.pending.len() >= MAX_PENDING {
                 tracing::warn!("pending versions at the limit, the dump will reconcile the rest");
                 break;
             }
+
             let new_crate = new_crates.contains(&key.0);
             self.pending.insert(
                 key,
@@ -264,6 +277,7 @@ impl Feed {
                 },
             );
         }
+
         Ok(())
     }
 
@@ -281,8 +295,10 @@ impl Feed {
                 }
                 Fetched::NotModified => continue,
             };
+
             self.settle(&key, &pending, &text, now, report).await?;
         }
+
         Ok(())
     }
 
@@ -293,12 +309,14 @@ impl Feed {
     async fn fetch_due(&self, now: Instant) -> Result<Vec<Lookup>, FeedError> {
         let mut fetches = tokio::task::JoinSet::new();
         let mut results = Vec::new();
+
         for (key, pending) in self.pending.iter().filter(|(_, p)| p.next_try <= now) {
             if fetches.len() >= INDEX_CONCURRENCY
                 && let Some(done) = fetches.join_next().await
             {
                 results.push(done?);
             }
+
             let url = format!("{}{}", self.urls.index_root, pending.name.index_path());
             let client = self.index.clone();
             let (key, pending) = (key.clone(), pending.clone());
@@ -307,9 +325,11 @@ impl Feed {
                 (key, pending, fetched)
             });
         }
+
         while let Some(done) = fetches.join_next().await {
             results.push(done?);
         }
+
         Ok(results)
     }
 
@@ -326,6 +346,7 @@ impl Feed {
             self.wait_or_give_up(key, pending, now, report);
             return Ok(());
         };
+
         let versions = text.lines().filter(|l| !l.trim().is_empty()).count();
         let new_crate = pending.new_crate || versions == 1;
         let popular = self
@@ -341,6 +362,7 @@ impl Feed {
             published_at: entry.published,
             index_entry: raw,
         };
+
         match self.store.enqueue(&job).await? {
             Some(id) => {
                 report.enqueued += 1;
@@ -354,6 +376,7 @@ impl Feed {
             }
             None => report.already_known += 1,
         }
+
         self.pending.remove(key);
         Ok(())
     }
@@ -395,6 +418,7 @@ mod tests {
         let seen = Instant::now();
         let pending = pending_since(seen);
         let hours = |h: u64| seen + Duration::from_secs(h * 3600);
+
         assert!(!pending.expired(seen));
         assert!(!pending.expired(hours(1)));
         assert!(!pending.expired(hours(2) - Duration::from_millis(1)));

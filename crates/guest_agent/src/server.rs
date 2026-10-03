@@ -35,6 +35,7 @@ fn set_clock(spec: &JobSpec) {
         tv_sec: i64::try_from(spec.wall_clock.secs).unwrap_or(i64::MAX),
         tv_nsec: i64::from(spec.wall_clock.nanos),
     };
+
     if let Err(errno) = rustix::time::clock_settime(rustix::time::ClockId::Realtime, time) {
         eprintln!("crateward agent: cannot set the clock: {errno}");
     }
@@ -65,6 +66,7 @@ pub fn converse<S: Read + Write>(
         }
         None => return Ok(Next::Accept),
     }
+
     write_message(
         stream,
         &GuestMessage::Hello {
@@ -76,6 +78,7 @@ pub fn converse<S: Read + Write>(
             },
         },
     )?;
+
     loop {
         match read_message::<_, HostMessage>(stream, MAX_FRAME_LEN)? {
             None => return Ok(Next::Accept),
@@ -87,6 +90,7 @@ pub fn converse<S: Read + Write>(
                 } else {
                     crate::workspace::validate(&workspace)
                 };
+
                 match result {
                     Ok(()) => write_message(stream, &GuestMessage::Prepared)?,
                     Err(error) => write_message(stream, &GuestMessage::Error(error.to_string()))?,
@@ -96,6 +100,7 @@ pub fn converse<S: Read + Write>(
                 if options.identity.is_some() {
                     set_clock(&spec);
                 }
+
                 run_job(&spec, options, tracer.as_mut().ok(), stream)?;
             }
             Some(HostMessage::Shutdown) => return Ok(Next::ShutDown),
@@ -118,12 +123,14 @@ pub fn serve(port: u32) -> Result<(), AgentError> {
     let options = RunOptions {
         identity: Some((BUILDER_UID, BUILDER_GID)),
     };
+
     // Loaded before the first connection, so the base snapshot contains
     // the attached programs.
     let mut tracer = Tracer::start(BUILDER_UID);
     if let Err(reason) = &tracer {
         eprintln!("crateward agent: tracing unavailable: {reason}");
     }
+
     loop {
         let (mut stream, _) = listener
             .accept()
@@ -162,6 +169,7 @@ mod tests {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             self.output.write(buf)
         }
+
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
@@ -181,6 +189,7 @@ mod tests {
         while let Some(m) = read_message(&mut reader, MAX_FRAME_LEN).unwrap() {
             all.push(m);
         }
+
         all
     }
 
@@ -199,10 +208,12 @@ mod tests {
             },
             HostMessage::Ping,
         ]);
+
         assert_eq!(
             converse(&mut s, HOST, &mut untraced()).unwrap(),
             Next::Accept
         );
+
         let r = replies(&s.output);
         assert!(matches!(
             r.as_slice(),
@@ -213,6 +224,7 @@ mod tests {
     #[test]
     fn wrong_version_is_refused() {
         let mut s = script(&[HostMessage::Hello { version: 99 }]);
+
         assert!(converse(&mut s, HOST, &mut untraced()).is_err());
         assert!(matches!(
             replies(&s.output).as_slice(),
@@ -231,6 +243,7 @@ mod tests {
             timeout_secs: 5,
             output_limit: 1024,
         };
+
         let mut s = script(&[
             HostMessage::Hello {
                 version: PROTOCOL_VERSION,
@@ -238,10 +251,12 @@ mod tests {
             HostMessage::Run(job),
             HostMessage::Shutdown,
         ]);
+
         assert_eq!(
             converse(&mut s, HOST, &mut untraced()).unwrap(),
             Next::ShutDown
         );
+
         let r = replies(&s.output);
         assert!(r.contains(&GuestMessage::Exited(
             crateward_core::protocol::ExitStatus::Code(0)

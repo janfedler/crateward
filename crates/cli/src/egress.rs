@@ -53,6 +53,7 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
         cio.rss_new_crates_url.as_str(),
         cio.db_dump_url.as_str(),
     ]);
+
     // Nothing calls the crates.io API, so its host stays closed.
     // The fetcher downloads from the `dl` URL of the index's config.json,
     // which is the static host.
@@ -61,6 +62,7 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
     if let Some(ntfy) = &config.ntfy {
         supervisor.extend(host(ntfy.server_url.as_str()));
     }
+
     // `git@github.com:owner/name.git`
     let api = config
         .export
@@ -108,6 +110,7 @@ pub fn resolve(allowances: &[Allowance]) -> (Vec<(&'static str, BTreeSet<IpAddr>
                     Err(error) => errors.push(format!("{host}: {error}")),
                 }
             }
+
             (a.role, addresses)
         })
         .collect();
@@ -121,12 +124,14 @@ const ELEMENT_TIMEOUT: &str = "1h";
 #[must_use]
 pub fn render(sets: &[(&'static str, BTreeSet<IpAddr>)]) -> String {
     let mut out = String::new();
+
     for (role, addresses) in sets {
         for (family, v4) in [("v4", true), ("v6", false)] {
             let found: Vec<&IpAddr> = addresses.iter().filter(|a| a.is_ipv4() == v4).collect();
             if found.is_empty() {
                 continue;
             }
+
             // `add` leaves the timeout of an existing element alone, so each
             // element is destroyed (nothing happens when it is absent) and added again
             // (checked with nftables 1.1.3).
@@ -140,6 +145,7 @@ pub fn render(sets: &[(&'static str, BTreeSet<IpAddr>)]) -> String {
             let _ = writeln!(out, "add element {set} {{ {} }}", timed.join(", "));
         }
     }
+
     out
 }
 
@@ -147,9 +153,11 @@ pub fn render(sets: &[(&'static str, BTreeSet<IpAddr>)]) -> String {
 /// is reported on stderr and left out.
 pub fn run(config: &Config) {
     let (sets, errors) = resolve(&allowances(config));
+
     for error in &errors {
         eprintln!("not resolved: {error}");
     }
+
     // A host that stops resolving ages out of its set.
     out!("{}", render(&sets).trim_end());
 }
@@ -181,6 +189,7 @@ mod tests {
                 .map(|a| a.parse().unwrap())
                 .collect(),
         )];
+
         assert_eq!(
             render(&sets),
             "destroy element inet crateward fetcher_v4 { 192.0.2.1, 192.0.2.2 }\n\
@@ -197,6 +206,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../config/crateward.example.toml"
         );
+
         let config = Config::load(std::path::Path::new(path)).unwrap();
         let get = |role: &str| {
             allowances(&config)
@@ -207,6 +217,7 @@ mod tests {
                 .into_iter()
                 .collect::<Vec<_>>()
         };
+
         assert_eq!(get("fetcher"), ["index.crates.io", "static.crates.io"]);
         assert_eq!(get("feed"), ["index.crates.io", "static.crates.io"]);
         assert_eq!(get("supervisor"), ["ntfy.sh"]);

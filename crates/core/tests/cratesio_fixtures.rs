@@ -13,11 +13,14 @@ const UPDATES: &str = include_str!("fixtures/rss-updates.xml");
 #[test]
 fn every_serde_version_parses() {
     let entries = parse_index_file(SERDE).unwrap();
+
     assert_eq!(entries.len(), SERDE.lines().count());
     assert!(entries.iter().all(|e| e.name.as_str() == "serde"));
     assert!(entries.iter().all(|e| e.published.is_some()));
+
     let latest = "1.0.229".parse().unwrap();
     let (entry, raw) = find_version(SERDE, &latest).unwrap().unwrap();
+
     assert_eq!(
         entry.cksum.to_string(),
         "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
@@ -28,6 +31,7 @@ fn every_serde_version_parses() {
 #[test]
 fn the_live_feed_parses_without_rejections() {
     let feed = parse_feed(UPDATES).unwrap();
+
     assert_eq!(feed.items.len(), 40);
     assert_eq!(feed.rejected, 0);
 }

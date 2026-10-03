@@ -110,6 +110,7 @@ fn bundle_name(root: &Path, version: &str) -> Result<String, TaskError> {
     if dirty {
         eprintln!("xtask: the working tree has changes, so the bundle is marked dirty");
     }
+
     Ok(format!(
         "crateward-{version}-{commit}{}",
         if dirty { "-dirty" } else { "" }
@@ -145,9 +146,11 @@ fn create_bundle_dir(out: &Path) -> Result<(), TaskError> {
     if out.exists() {
         std::fs::remove_dir_all(out).map_err(io(out))?;
     }
+
     for dir in [bundle::BIN, bundle::SANDBOX, bundle::GUEST] {
         std::fs::create_dir_all(out.join(dir)).map_err(io(out))?;
     }
+
     Ok(())
 }
 
@@ -162,6 +165,7 @@ fn stage_binaries(root: &Path, out: &Path) -> Result<(), TaskError> {
             0o755,
         )?;
     }
+
     let sandbox = out.join(bundle::SANDBOX);
     copy(
         &release.join("crateward-vmjail"),
@@ -176,6 +180,7 @@ fn stage_binaries(root: &Path, out: &Path) -> Result<(), TaskError> {
             "no Firecracker: run `cargo xtask firecracker`".into(),
         ));
     }
+
     copy(&firecracker, &sandbox.join("firecracker"), 0o755)
 }
 
@@ -189,6 +194,7 @@ fn stage_fake_internet(root: &Path, out: &Path) -> Result<(), TaskError> {
             fake.display()
         )));
     }
+
     copy(
         &fake,
         &out.join(bundle::SANDBOX).join("crateward_fake_internet"),
@@ -210,6 +216,7 @@ fn stage_guest(root: &Path, out: &Path) -> Result<(), TaskError> {
             "no root filesystem: run `cargo xtask rootfs`".into(),
         ));
     }
+
     copy(&rootfs, &out.join(bundle::ROOTFS), 0o644)?;
 
     // The image trusts exactly this authority, so both come from one build.
@@ -232,10 +239,12 @@ fn stage_deploy(root: &Path, out: &Path) -> Result<(), TaskError> {
     ] {
         copy(&root.join(from), &out.join(to), 0o644)?;
     }
+
     for dir in ["ansible", "systemd", "nftables"] {
         let from = root.join(repo::DEPLOY).join(dir);
         copy_tree(&from, &out.join(bundle::DEPLOY).join(dir))?;
     }
+
     copy(
         &root.join(repo::INSTALL_SCRIPT),
         &out.join(bundle::INSTALL_SCRIPT),
@@ -246,17 +255,20 @@ fn stage_deploy(root: &Path, out: &Path) -> Result<(), TaskError> {
 /// Copies the files below `from` to `to`, readable by everyone.
 fn copy_tree(from: &Path, to: &Path) -> Result<(), TaskError> {
     std::fs::create_dir_all(to).map_err(io(to))?;
+
     for entry in std::fs::read_dir(from).map_err(io(from))? {
         let path = entry.map_err(io(from))?.path();
         let Some(name) = path.file_name() else {
             continue;
         };
+
         if path.is_dir() {
             copy_tree(&path, &to.join(name))?;
         } else {
             copy(&path, &to.join(name), 0o644)?;
         }
     }
+
     Ok(())
 }
 
@@ -275,9 +287,11 @@ pub fn pack(dir: &Path) -> Result<PathBuf, TaskError> {
             dir.display()
         )));
     }
+
     let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
         return Err(TaskError::Check(format!("{} has no name", dir.display())));
     };
+
     let name = name.to_string_lossy().into_owned();
     let archive = parent.join(format!("{name}.tar.gz"));
     let archive_arg = archive.to_string_lossy().into_owned();
@@ -320,8 +334,10 @@ fn sums(dir: &Path) -> Result<String, TaskError> {
                 out.insert(relative, crate::images::sha256_file(&path)?);
             }
         }
+
         Ok(())
     }
+
     let mut files = BTreeMap::new();
     walk(dir, dir, &mut files)?;
     Ok(files
@@ -380,6 +396,7 @@ fn sbom(root: &Path, version: &str) -> Result<String, TaskError> {
         },
         "components": components,
     });
+
     serde_json::to_string_pretty(&bom).map_err(|e| TaskError::Check(e.to_string()))
 }
 
@@ -407,6 +424,7 @@ fn package_components(root: &Path) -> Result<Vec<Value>, TaskError> {
             "x86_64-unknown-linux-gnu",
         ],
     )?;
+
     let metadata: Metadata = serde_json::from_str(&metadata)
         .map_err(|e| TaskError::Check(format!("cargo metadata: {e}")))?;
     let lock: Lock = read_toml(root, "Cargo.lock")?;
@@ -436,15 +454,18 @@ fn package_component(package: &Package, checksum: Option<&String>) -> Value {
     fields.insert("name".into(), json!(name));
     fields.insert("version".into(), json!(version));
     fields.insert("purl".into(), json!(format!("pkg:cargo/{name}@{version}")));
+
     if let Some(license) = &package.license {
         fields.insert("licenses".into(), json!([{ "expression": license }]));
     }
+
     if let Some(sum) = checksum {
         fields.insert(
             "hashes".into(),
             json!([{ "alg": "SHA-256", "content": sum }]),
         );
     }
+
     Value::Object(fields)
 }
 
@@ -525,6 +546,7 @@ mod tests {
         bytes[..4].copy_from_slice(b"\x7fELF");
         bytes[4] = 2;
         bytes[5] = 1;
+
         if loader {
             bytes[0x20] = 64;
             bytes[0x36] = 56;
@@ -532,6 +554,7 @@ mod tests {
             bytes.extend([3, 0, 0, 0]);
             bytes.resize(64 + 56, 0);
         }
+
         bytes
     }
 
@@ -541,6 +564,7 @@ mod tests {
         for binary in SERVICES.iter().chain(&["crateward-vmjail"]) {
             write(&dir.join(build::RELEASE).join(binary), "binary");
         }
+
         write(&dir.join(build::FAKE_INTERNET), elf(false));
         write(&dir.join(build::FIRECRACKER), "firecracker");
         write(
@@ -558,12 +582,15 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         stage_binaries(&dir, &out).unwrap();
+
         for binary in SERVICES {
             assert_eq!(mode(&out.join("bin").join(binary)), 0o755, "{binary}");
         }
+
         for file in ["crateward-vmjail", "crateward_fake_internet", "firecracker"] {
             assert_eq!(mode(&out.join("sandbox").join(file)), 0o755, "{file}");
         }
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -575,10 +602,12 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
+
         assert!(
             error.to_string().contains("crateward_feed is missing"),
             "{error}"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -590,12 +619,14 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
+
         assert!(
             error
                 .to_string()
                 .contains("crateward_fake_internet is not static"),
             "{error}"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -607,11 +638,13 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
+
         assert!(
             error
                 .to_string()
                 .contains("no Firecracker: run `cargo xtask firecracker`")
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -622,6 +655,7 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         stage_guest(&dir, &out).unwrap();
+
         assert_eq!(mode(&out.join(bundle::KERNEL)), 0o644);
         assert_eq!(mode(&out.join(bundle::ROOTFS)), 0o644);
         assert_eq!(mode(&out.join(bundle::AUTHORITY)), 0o600);
@@ -629,6 +663,7 @@ mod tests {
             std::fs::read_to_string(out.join(bundle::KERNEL)).unwrap(),
             "kernel"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -640,11 +675,13 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_guest(&dir, &out).unwrap_err();
+
         assert!(
             error
                 .to_string()
                 .contains("no root filesystem: run `cargo xtask rootfs`")
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -652,17 +689,23 @@ mod tests {
     fn exactly_one_kernel_image_is_accepted() {
         let dir = scratch("kernel");
         let error = only(&dir, "kernel-", ".bzImage").unwrap_err().to_string();
+
         assert!(error.contains("no kernel-*.bzImage in"), "{error}");
         assert!(error.contains("run `cargo xtask guest-kernel`"), "{error}");
+
         write(&dir.join("kernel-a.bzImage"), "a");
         write(&dir.join("kernel-a.config"), "config");
+
         assert_eq!(
             only(&dir, "kernel-", ".bzImage").unwrap(),
             dir.join("kernel-a.bzImage")
         );
+
         write(&dir.join("kernel-b.bzImage"), "b");
         let error = only(&dir, "kernel-", ".bzImage").unwrap_err().to_string();
+
         assert!(error.contains("several kernel-*.bzImage in"), "{error}");
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -671,15 +714,18 @@ mod tests {
         let dir = scratch("deploy");
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         stage_deploy(&root, &dir).unwrap();
+
         assert_eq!(mode(&dir.join(bundle::INSTALL_SCRIPT)), 0o755);
         assert_eq!(mode(&dir.join(repo::DEPLOY_README)), 0o644);
         assert_eq!(mode(&dir.join(bundle::CONFIG_EXAMPLE)), 0o644);
         assert!(dir.join(repo::FIREWALL).is_file());
         assert!(dir.join(repo::ANSIBLE).is_dir());
         assert!(dir.join(repo::UNITS).is_dir());
+
         for license in ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-GPL-2.0"] {
             assert_eq!(mode(&dir.join(license)), 0o644, "{license}");
         }
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -688,10 +734,13 @@ mod tests {
         let dir = scratch("bundle");
         write(&dir.join("old.txt"), "old");
         create_bundle_dir(&dir).unwrap();
+
         assert!(!dir.join("old.txt").exists());
+
         for sub in ["bin", "sandbox", "guest"] {
             assert!(dir.join(sub).is_dir(), "{sub}");
         }
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -701,6 +750,7 @@ mod tests {
         let bom: Value = serde_json::from_str(&sbom(&root, "0.0.0").unwrap()).unwrap();
         let components = bom["components"].as_array().unwrap();
         let serde = components.iter().find(|c| c["name"] == "serde").unwrap();
+
         assert!(
             serde["purl"]
                 .as_str()
@@ -710,10 +760,12 @@ mod tests {
         assert_eq!(serde["hashes"][0]["content"].as_str().unwrap().len(), 64);
         assert!(serde["licenses"][0]["expression"].is_string());
         assert!(components.iter().any(|c| c["name"] == "firecracker"));
+
         let linux = components.iter().find(|c| c["name"] == "linux").unwrap();
         assert!(!linux["version"].as_str().unwrap().is_empty());
         assert!(components.iter().any(|c| c["name"] == "debian"));
         assert!(components.iter().any(|c| c["name"] == "rust-cargo"));
+
         // Workspace members are the product, not components.
         assert!(!components.iter().any(|c| c["name"] == "crateward_core"));
     }

@@ -96,12 +96,14 @@ mod tests {
     fn disk_alerts_deduplicate_across_percentages() {
         let a = HumanEscalation::DiskUsageAboveThreshold { percent: 86 };
         let b = HumanEscalation::DiskUsageAboveThreshold { percent: 91 };
+
         assert_eq!(a.dedup_key(), b.dedup_key());
     }
 
     #[test]
     fn escape_is_the_highest_category() {
         let escape = HumanEscalation::SandboxEscapeIndicator { job: None }.category();
+
         for other in [
             HumanEscalation::KvmError,
             HumanEscalation::CanaryFailure,

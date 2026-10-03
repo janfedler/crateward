@@ -73,6 +73,7 @@ pub fn dispatch(args: &[String]) -> Option<ExitCode> {
     if args.get(1).map(String::as_str) != Some(SLOT) {
         return None;
     }
+
     Some(match serve_slot(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -88,6 +89,7 @@ fn tls_config(pem: &str) -> Result<Option<Arc<rustls::ServerConfig>>, Box<dyn Er
     if pem.trim().is_empty() {
         return Ok(None);
     }
+
     let (cert, key) = tls::split_pem(pem).ok_or("the authority is not a certificate and a key")?;
     let authority = tls::Authority::from_pem(&cert, &key)?;
     Ok(Some(tls::server_config(Arc::new(authority))?))
@@ -117,12 +119,15 @@ fn serve_slot(args: &[String]) -> Result<(), Box<dyn Error>> {
         .and_then(|a| a.parse().ok())
         .ok_or("usage: slot <uid>")?;
     let capture = capture::open().map_err(|e| format!("opening the packet socket: {e}"))?;
+
     // Still single threaded, so the switch covers every thread started
     // later. Moving every UID away from 0 clears all capabilities.
     become_user(uid).map_err(|e| format!("switching to user {uid}: {e}"))?;
+
     if rustix::process::getuid().as_raw() == 0 {
         return Err("still root after switching users".into());
     }
+
     sandbox::limit(Limits {
         address_space: 1 << 30,
         cpu_seconds: 3_600,

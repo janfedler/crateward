@@ -31,6 +31,7 @@ fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+
     if out.status.success() {
         Ok(text)
     } else {
@@ -59,6 +60,7 @@ fn check_playbooks(ansible: &Path) -> Result<(), TaskError> {
             "-e",
             "@vars.example.yml",
         ];
+
         check(
             Command::new("ansible-playbook")
                 .current_dir(ansible)
@@ -68,6 +70,7 @@ fn check_playbooks(ansible: &Path) -> Result<(), TaskError> {
         )?;
         eprintln!("xtask: {playbook} parses");
     }
+
     Ok(())
 }
 
@@ -86,6 +89,7 @@ fn check_install_script(script: &Path) -> Result<(), TaskError> {
         }
         Err(_) => eprintln!("xtask: no shellcheck here, CI runs it on install.sh"),
     }
+
     Ok(())
 }
 
@@ -96,9 +100,11 @@ fn check_units(units: &Path) -> Result<(), TaskError> {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
+
     for name in &names {
         verify_unit(units, name)?;
     }
+
     eprintln!("xtask: {} units verify", names.len());
     Ok(())
 }
@@ -114,6 +120,7 @@ fn verify_unit(units: &Path, name: &str) -> Result<(), TaskError> {
     if problems.is_empty() {
         return Ok(());
     }
+
     Err(TaskError::Check(format!(
         "{name}:\n{}",
         problems.join("\n")
@@ -186,11 +193,13 @@ mod tests {
         let playbook = read("deploy/ansible/site.yml");
         let url = cargo["url"].as_str().unwrap();
         let sha256 = cargo["sha256"].as_str().unwrap();
+
         assert!(playbook.contains(&format!("cargo_url: {url}\n")), "{url}");
         assert!(
             playbook.contains(&format!("cargo_sha256: {sha256}\n")),
             "{sha256}"
         );
+
         let version = pins["version"].as_str().unwrap();
         assert!(playbook.contains(&format!("cargo-{version}-x86_64-unknown-linux-gnu")));
     }
@@ -209,6 +218,7 @@ mod tests {
             .unwrap()
             .parse()
             .unwrap();
+
         assert!(minutes * 60 >= config.sandbox.full_timeout_secs + 600);
     }
 
@@ -217,13 +227,16 @@ mod tests {
     #[test]
     fn the_playbooks_cover_every_unit() {
         let playbook = read("deploy/ansible/components.yml");
+
         for user in ["site.yml", "uninstall.yml"] {
             assert!(read(&format!("deploy/ansible/{user}")).contains("    - components.yml\n"));
         }
+
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for entry in std::fs::read_dir(root.join(repo::UNITS)).unwrap() {
             let name = entry.unwrap().file_name().into_string().unwrap();
             let stem = name.rsplit_once('.').unwrap().0;
+
             assert!(playbook.contains(&format!("  - {stem}\n")), "{name}");
         }
     }
@@ -238,6 +251,7 @@ mod tests {
             "x.service: Failed to create unit",
         ]
         .join("\n");
+
         assert_eq!(
             unit_problems(&stderr),
             [
@@ -254,6 +268,7 @@ mod tests {
         let Err(TaskError::Io(named, _)) = check_units(path) else {
             panic!("the missing directory was not reported");
         };
+
         assert_eq!(named, path);
     }
 

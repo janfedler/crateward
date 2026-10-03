@@ -45,15 +45,18 @@ fn missing(tool: &str) -> bool {
     if missing && !required {
         eprintln!("skipping: {tool} is not installed");
     }
+
     missing && !required
 }
 
 /// An ext4 image of `files`, as the orchestrator formats scratch disks.
 fn image(name: &str, files: &[(&str, &[u8], u32)]) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
+
     if missing(MKFS_EXT4) {
         return None;
     }
+
     let dir = workdir(name);
     let root = dir.join("root");
     for (path, data, mode) in files {
@@ -62,6 +65,7 @@ fn image(name: &str, files: &[(&str, &[u8], u32)]) -> Option<PathBuf> {
         std::fs::write(&file, data).unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(*mode)).unwrap();
     }
+
     let image = dir.join("scratch.img");
     let status = Command::new(MKFS_EXT4)
         .args(["-q", "-F", "-d"])
@@ -70,7 +74,9 @@ fn image(name: &str, files: &[(&str, &[u8], u32)]) -> Option<PathBuf> {
         .arg("8M")
         .status()
         .unwrap();
+
     assert!(status.success());
+
     Some(image)
 }
 
@@ -101,19 +107,24 @@ fn the_scanner_reports_what_a_job_left_behind() {
     ) else {
         return;
     };
+
     let spec = ScanSpec {
         planted: vec!["/work/home/.cargo/credentials.toml".into()],
         ..ScanSpec::default()
     };
+
     let Some(report) = scan(&image, &spec) else {
         return;
     };
+
     assert!(report.error.is_none(), "{report:?}");
+
     let outside: Vec<&str> = report
         .outside_build
         .iter()
         .map(|e| e.path.as_str())
         .collect();
+
     assert!(
         outside.contains(&"/work/home/.local/bin/dropper"),
         "{outside:?}"
@@ -135,7 +146,9 @@ fn an_image_that_is_no_ext4_becomes_an_error_in_the_report() {
     let Some(report) = scan(&path, &ScanSpec::default()) else {
         return;
     };
+
     assert!(report.incomplete, "{report:?}");
+
     let error = report.error.as_deref().unwrap_or_default();
     assert!(error.starts_with("not a readable ext4 image"), "{report:?}");
 }
@@ -148,6 +161,7 @@ fn a_scanner_that_does_not_exist_is_an_error() {
         &ScanSpec::default(),
     )
     .unwrap_err();
+
     assert!(
         error.to_string().starts_with("scratch scanner: starting: "),
         "{error}"
@@ -159,6 +173,7 @@ fn the_export_and_the_builder_make_an_image_of_the_target_directory() {
     if missing(MKFS_EROFS) {
         return;
     }
+
     let Some(image) = image(
         "export",
         &[
@@ -168,13 +183,16 @@ fn the_export_and_the_builder_make_an_image_of_the_target_directory() {
     ) else {
         return;
     };
+
     let out = image.with_file_name("target.erofs");
     match export_to_erofs(Path::new(ORCHESTRATOR), &image, &out, &[]) {
         Ok(()) => {}
         Err(error) if sandbox::unavailable(&error) => return,
         Err(error) => panic!("{error}"),
     }
+
     assert!(erofs_with(&out, &["libx-0123.rmeta"]));
+
     // Only the target directory leaves the scratch disk.
     assert!(!erofs_with(&out, &["credentials.toml"]));
 }
@@ -188,6 +206,7 @@ fn an_export_of_something_that_is_no_image_fails_with_its_reason() {
     if sandbox::unavailable(&error) {
         return;
     }
+
     assert!(
         matches!(&error, ChildError::Failed { child: "scratch export", stderr, .. }
             if stderr.contains("not a readable ext4 image")),
@@ -220,6 +239,7 @@ fn payload(dir: &Path) -> (BlobStore, PayloadSpec) {
         files: Vec::new(),
         stubs: Vec::new(),
     };
+
     (blobs, spec)
 }
 
@@ -228,6 +248,7 @@ fn the_payload_image_holds_the_probe_and_the_vendored_crate() {
     if missing(MKFS_EROFS) {
         return;
     }
+
     let dir = workdir("payload");
     let (blobs, spec) = payload(&dir);
     let out = dir.join("payload.erofs");
@@ -236,6 +257,7 @@ fn the_payload_image_holds_the_probe_and_the_vendored_crate() {
         Err(error) if sandbox::unavailable(&error) => return,
         Err(error) => panic!("{error}"),
     }
+
     assert!(erofs_with(
         &out,
         &["probe", "vendor", "demo-1.0.0", "Cargo.toml"]
@@ -253,6 +275,7 @@ fn a_builder_that_fails_is_reported_instead_of_the_broken_pipe() {
         &dir.join("payload.erofs"),
     )
     .unwrap_err();
+
     assert!(
         matches!(&error, PayloadError::Child(ChildError::Failed { status, .. })
             if status.code() == Some(1)),

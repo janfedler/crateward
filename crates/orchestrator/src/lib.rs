@@ -85,6 +85,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
         .map_err(fatal)?;
     store.migrate().await.map_err(fatal)?;
     let policies = Policies::from_config(&config.stages).map_err(fatal)?;
+
     // Installed before the warm build, so a stop request during it ends
     // its VM through reconciliation instead of leaving it behind.
     let stop = Stop::install().map_err(fatal)?;
@@ -102,16 +103,21 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
         },
         blobs: BlobStore::open(&config.instance.data_dir.join(host::BLOBS)).map_err(fatal)?,
     };
+
     if let Some(warm_config) = &sandbox.warm {
         template.setup.warm = warm_cache(&booted, &template, &store, warm_config, &stop).await?;
     }
+
     if stop.is_requested() {
         return Ok(());
     }
+
     tokio::spawn(app::reap_loop(store, policies.clone(), stop.clone()));
+
     for task in spawn_slots(config, &template, &policies, &stop).await? {
         task.await.map_err(fatal)?.map_err(fatal)?;
     }
+
     tracing::info!("stopping");
     Ok(())
 }
@@ -131,6 +137,7 @@ struct Booted {
 /// snapshot.
 async fn boot(config: &Config) -> Result<Booted, ComponentError> {
     let sandbox = &config.sandbox;
+
     // A deploy switches the guest files by moving a link (ADR 0002).
     // Resolving them once keeps a running orchestrator on the files its
     // base snapshot was made from.
@@ -149,6 +156,7 @@ async fn boot(config: &Config) -> Result<Booted, ComponentError> {
     if !reconciled.cgroups.is_empty() || !reconciled.directories.is_empty() {
         tracing::warn!(?reconciled, "removed leftovers of an earlier run");
     }
+
     let started = std::time::Instant::now();
     let snapshot = FirecrackerBackend::create_base_snapshot(&fc, &boot, &work.join("snapshot"))
         .await
@@ -214,14 +222,17 @@ fn check_host(sandbox: &SandboxConfig) -> Result<(), ComponentError> {
             bin.display()
         )));
     }
+
     let slots_dir = &sandbox.slots_dir;
     std::fs::create_dir_all(slots_dir).map_err(fatal)?;
+
     if !jail::decoy::atime_works(slots_dir).map_err(fatal)? {
         return Err(fatal(format!(
             "reads do not update access times below {}; mount it with relatime or strictatime",
             slots_dir.display()
         )));
     }
+
     Ok(())
 }
 
@@ -232,9 +243,11 @@ fn placeholders(work: &Path) -> Result<JobDrives, ComponentError> {
         scratch: work.join("placeholder-scratch.img"),
         warm: work.join("placeholder-warm.img"),
     };
+
     for file in [&drives.payload, &drives.scratch, &drives.warm] {
         std::fs::File::create(file).map_err(fatal)?;
     }
+
     Ok(drives)
 }
 
@@ -280,6 +293,7 @@ async fn warm_cache(
             return Ok(None);
         }
     };
+
     let snapshot = booted.work.join("warm-snapshot");
     let builder = match warm_builder(booted, slot0, &snapshot).await {
         Ok(builder) => builder,
@@ -288,6 +302,7 @@ async fn warm_cache(
             slot0.clone()
         }
     };
+
     tracing::info!(
         probes = plan.probes.len(),
         units = plan.units,
@@ -303,8 +318,10 @@ async fn warm_cache(
             None
         }
     };
+
     // Its memory file is as large as its guest memory, in tmpfs.
     let _ = std::fs::remove_dir_all(&snapshot);
+
     match built {
         None => Ok(None),
         Some(Ok(image)) => {
@@ -329,6 +346,7 @@ async fn warm_builder(
     let Some((vcpus, memory)) = booted.warm_machine else {
         return Ok(slot0.clone());
     };
+
     let mut fc = booted.fc.clone();
     fc.limits = SlotLimits {
         cpus: u32::from(vcpus),
@@ -340,6 +358,7 @@ async fn warm_builder(
         memory_mib: memory,
         ..booted.spec.clone()
     };
+
     let started = std::time::Instant::now();
     let base = FirecrackerBackend::create_base_snapshot(&fc, &spec, snapshot).await?;
     tracing::info!(
@@ -365,11 +384,13 @@ async fn spawn_slots(
     let url = config.database.url.expose_secret();
     let lease = Duration::from_secs(config.stages.sandbox.lease_secs);
     let canary_every = Duration::from_secs(config.sandbox.canary_interval_minutes * 60);
+
     // No slot claims a job before the first canaries ran on these guest
     // files: a new version must pass them first (ADR 0002). A failure
     // pauses the stage, which the workers then honor.
     let ran = Arc::new(watch::channel(canary_every.is_zero()).0);
     let mut tasks = Vec::new();
+
     for slot in 0..config.sandbox.slots {
         let store = Store::connect(url).await.map_err(fatal)?;
         let heartbeats = Store::connect(url).await.map_err(fatal)?;
@@ -377,6 +398,7 @@ async fn spawn_slots(
             slot,
             ..template.clone()
         };
+
         let worker = SandboxWorker::new(store, heartbeats, sandbox, policies.clone(), lease);
         let canaries = (slot == 0 && !canary_every.is_zero()).then_some(canary_every);
         let (ran, stop) = (Arc::clone(&ran), stop.clone());
@@ -386,6 +408,7 @@ async fn spawn_slots(
                 .inspect_err(|error| tracing::error!(slot, %error, "job store failed"))
         }));
     }
+
     Ok(tasks)
 }
 
@@ -404,6 +427,7 @@ async fn slot_loop(
             () = stop.wait() => {}
         }
     }
+
     let mut last_canary: Option<tokio::time::Instant> = None;
     while !stop.is_requested() {
         if let Some(every) = canaries
@@ -413,10 +437,12 @@ async fn slot_loop(
             last_canary = Some(tokio::time::Instant::now());
             ran.send_replace(true);
         }
+
         if !worker.run_once().await? {
             stop.sleep(Duration::from_secs(1)).await;
         }
     }
+
     Ok(())
 }
 
@@ -472,20 +498,27 @@ mod tests {
             std::process::id(),
             rand::random::<u32>()
         ));
+
         use std::os::unix::fs::PermissionsExt as _;
         let first = lock_instance(&dir).unwrap();
         let mode = first.metadata().unwrap().permissions().mode();
+
         assert_eq!(mode & 0o777, 0o600);
+
         let second = lock_instance(&dir).unwrap_err().to_string();
         assert!(second.contains("another orchestrator"), "{second}");
+
         drop(first);
         drop(lock_instance(&dir).unwrap());
+
         // A planted link is not followed.
         let lock = dir.join("orchestrator.lock");
         std::fs::remove_file(&lock).unwrap();
         std::os::unix::fs::symlink(dir.join("elsewhere"), &lock).unwrap();
+
         assert!(lock_instance(&dir).is_err());
         assert!(!dir.join("elsewhere").exists());
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

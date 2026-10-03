@@ -80,10 +80,12 @@ impl<'a, W: Write> Forwarder<'a, W> {
                 Err(_) => break,
             }
         }
+
         if tracing {
             let totals = self.totals.unwrap_or_default();
             write_message(self.out, &GuestMessage::TraceEnd(totals))?;
         }
+
         write_message(self.out, &GuestMessage::Exited(exit))?;
         Ok(())
     }
@@ -106,6 +108,7 @@ impl<'a, W: Write> Forwarder<'a, W> {
             }
             Event::Trace(Batch::Done(totals)) => self.totals = Some(totals),
         }
+
         Ok(())
     }
 }
@@ -128,6 +131,7 @@ fn spawn_reader<R: Read + Send + 'static>(
                 }
             }
         }
+
         let _ = events.send(Event::Closed);
     });
 }
@@ -158,10 +162,13 @@ pub fn run_job<W: Write>(
         write_message(out, &GuestMessage::Error("empty argv".into()))?;
         return Ok(());
     };
+
     let tracing = tracer.is_some();
+
     if let Some(tracer) = tracer.as_deref_mut() {
         tracer.clear();
     }
+
     let start_ns = monotonic_ns();
     let mut child = match command(spec, program, args, options).spawn() {
         Ok(child) => child,
@@ -171,16 +178,20 @@ pub fn run_job<W: Write>(
             return Ok(());
         }
     };
+
     let pid = child.id();
     write_message(out, &GuestMessage::Started { pid })?;
 
     let (sender, events) = mpsc::channel();
+
     if let Some(stdout) = child.stdout.take() {
         spawn_reader(stdout, OutputStream::Stdout, sender.clone());
     }
+
     if let Some(stderr) = child.stderr.take() {
         spawn_reader(stderr, OutputStream::Stderr, sender.clone());
     }
+
     let stop = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(u64::from(spec.timeout_secs));
     let mut forwarder = Forwarder::new(out, spec.output_limit);
@@ -194,17 +205,21 @@ pub fn run_job<W: Write>(
                 });
             });
         }
+
         drop(sender);
         let result = supervise(&mut child, pid, deadline, &events, &mut forwarder);
+
         // The trace ends only after the job's process group is gone.
         stop.store(true, Ordering::Release);
         let exit = result?;
+
         // What the job wrote must reach the scratch disk before the host
         // reads it. The VM ends without unmounting. Tests on the host run
         // without an identity and must not sync the host's disks.
         if options.identity.is_some() {
             rustix::fs::sync();
         }
+
         forwarder.finish(tracing, &events, exit)
     })
 }
@@ -224,6 +239,7 @@ fn command(spec: &JobSpec, program: &str, args: &[String], options: RunOptions) 
     if let Some((uid, gid)) = options.identity {
         command.uid(uid).gid(gid);
     }
+
     command
 }
 
@@ -237,6 +253,7 @@ fn supervise<W: Write>(
     forwarder: &mut Forwarder<'_, W>,
 ) -> Result<ExitStatus, AgentError> {
     let mut timed_out = false;
+
     while forwarder.open_streams > 0 {
         let remaining = deadline.saturating_duration_since(Instant::now());
         match events.recv_timeout(remaining) {
@@ -249,6 +266,7 @@ fn supervise<W: Write>(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
+
     // A job can close both streams and keep running, so the deadline also
     // applies while waiting for the process itself.
     let status = loop {
@@ -258,10 +276,12 @@ fn supervise<W: Write>(
         {
             break status;
         }
+
         if !timed_out && Instant::now() >= deadline {
             timed_out = true;
             kill_group(pid);
         }
+
         match events.recv_timeout(Duration::from_millis(20)) {
             Ok(event) => forwarder.handle(event)?,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -270,6 +290,7 @@ fn supervise<W: Write>(
             }
         }
     };
+
     // Nothing of the job may outlive it: processes that stayed in the group
     // are killed here. A process that left the group with `setsid` dies with
     // the VM, which ends after every job.
@@ -309,6 +330,7 @@ mod tests {
         while let Some(m) = read_message(&mut reader, MAX_FRAME_LEN).unwrap() {
             messages.push(m);
         }
+
         messages
     }
 
@@ -328,6 +350,7 @@ mod tests {
     #[test]
     fn reports_output_and_exit_code_with_a_clean_environment() {
         let messages = run(&spec("echo $MARKER; echo ${HOME:-unset}; exit 3", 10, 1024));
+
         assert!(matches!(
             messages.first(),
             Some(GuestMessage::Started { .. })
@@ -346,6 +369,7 @@ mod tests {
             .iter()
             .filter(|m| **m == GuestMessage::OutputTruncated)
             .count();
+
         assert_eq!(truncations, 1);
         assert_eq!(
             messages.last(),
@@ -357,6 +381,7 @@ mod tests {
     fn kills_the_whole_group_on_timeout() {
         let started = Instant::now();
         let messages = run(&spec("sleep 60 & sleep 60", 1, 1024));
+
         assert_eq!(
             messages.last(),
             Some(&GuestMessage::Exited(ExitStatus::TimedOut))
@@ -368,6 +393,7 @@ mod tests {
     fn deadline_applies_after_the_streams_close() {
         let started = Instant::now();
         let messages = run(&spec("exec >/dev/null 2>&1; sleep 60", 1, 1024));
+
         assert_eq!(
             messages.last(),
             Some(&GuestMessage::Exited(ExitStatus::TimedOut))
@@ -379,6 +405,7 @@ mod tests {
     fn an_empty_argv_is_an_error_message() {
         let mut job = spec("", 1, 1);
         job.argv.clear();
+
         assert_eq!(run(&job), [GuestMessage::Error("empty argv".into())]);
     }
 
@@ -387,7 +414,9 @@ mod tests {
         let mut job = spec("pwd; echo oops >&2; kill -9 $$", 10, 1024);
         job.cwd = "/tmp".into();
         let messages = run(&job);
+
         assert_eq!(stdout_of(&messages), "/tmp\n");
+
         let stderr: Vec<u8> = messages
             .iter()
             .filter_map(|m| match m {
@@ -399,6 +428,7 @@ mod tests {
             })
             .flatten()
             .collect();
+
         assert_eq!(stderr, b"oops\n");
         assert_eq!(
             messages.last(),
@@ -411,6 +441,7 @@ mod tests {
         let mut job = spec("", 1, 1);
         job.argv = vec!["/nonexistent/program".into()];
         let messages = run(&job);
+
         assert!(matches!(messages.as_slice(), [GuestMessage::Error(_)]));
     }
 }

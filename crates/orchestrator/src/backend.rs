@@ -93,6 +93,7 @@ impl JobEnd {
 impl std::fmt::Display for JobEnd {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.name())?;
+
         match self {
             Self::GuestStopped(reason)
             | Self::VmmCrashed(reason)
@@ -136,18 +137,22 @@ pub fn settle(
         }
         (_, end) => end?,
     };
+
     let mut cleanup = cleanup.into_iter();
     if end.is_escape_indicator() {
         for error in cleanup {
             tracing::warn!(slot, %error, "cleanup failed after an escape indicator");
         }
+
         return Ok(end);
     }
+
     match cleanup.next() {
         Some(error) => {
             for later in cleanup {
                 tracing::warn!(slot, error = %later, "cleanup also failed");
             }
+
             Err(error)
         }
         None => Ok(end),
@@ -305,9 +310,11 @@ impl FirecrackerBackend {
         let snapshot = async {
             let mut agent = vm.agent(Instant::now() + BASE_BOOT_TIMEOUT).await?;
             agent.ping().await.map_err(VmError::from)?;
+
             if let TracingStatus::Unavailable(reason) = &agent.tracing {
                 return Err(BackendError::TracingUnavailable(reason.clone()));
             }
+
             drop(agent);
             Ok(vm.snapshot(&launch, &boot.rootfs, out).await?)
         }
@@ -362,8 +369,10 @@ impl FirecrackerBackend {
             Some(cgroup.path().to_path_buf()),
             job.network_log.clone(),
         );
+
         let started = Instant::now();
         let mut vm = Vm::restore(&launch, &self.snapshot, job.drives.as_ref()).await?;
+
         // No crate code has run yet, so a failure up to here is ours.
         let mut agent = match ready_agent(&vm, job.workspace).await {
             Ok(agent) => agent,
@@ -372,10 +381,12 @@ impl FirecrackerBackend {
                 return Err(error.into());
             }
         };
+
         let restore = started.elapsed();
         let run_started = Instant::now();
         let result = tokio::time::timeout(wall_clock, agent.run(job.spec)).await;
         let run = run_started.elapsed();
+
         // Errors from here on are kept, not returned: the decoy is checked
         // whatever happened.
         let end = run_end(result, cgroup, &mut vm, &launch).await;
@@ -423,7 +434,9 @@ async fn broken_agent(
     if oom > 0 || pids > 0 {
         return Ok(JobEnd::ResourceLimit);
     }
+
     let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
+
     // The console's last lines usually say why. The guest wrote them, so
     // they are escaped.
     let tail = console_tail(&launch.dir.join("firecracker.log"));
@@ -441,13 +454,16 @@ async fn stop_slot(
     if let Err(error) = cgroup.kill_and_wait() {
         cleanup.push(error.into());
     }
+
     if let Err(error) = vm.kill().await {
         cleanup.push(error.into());
     }
+
     let decoy = vm.jail_root().map(crate::jail::decoy::inspect);
     if let Err(error) = vm.remove().await {
         cleanup.push(error.into());
     }
+
     (decoy, cleanup)
 }
 
@@ -461,15 +477,18 @@ impl VmBackend for FirecrackerBackend {
         if slot >= self.config.slots {
             return Err(BackendError::NoSuchSlot(slot));
         }
+
         let mut limits = self.config.limits;
         limits.memory_mib = limits.memory_mib.saturating_add(job.scratch_mib);
         let cgroup = self.cgroups.create_slot(&slot.to_string(), limits)?;
         let result = self.run_in_slot(slot, job, wall_clock, &cgroup).await;
+
         // The cgroup goes away whatever happened, and with it any process.
         let mut cleanup: Vec<BackendError> = Vec::new();
         if let Err(error) = cgroup.remove() {
             cleanup.push(error.into());
         }
+
         let dir = self.config.slots_dir.join(format!("{SLOT_PREFIX}{slot}"));
         if dir.exists()
             && let Err(source) = std::fs::remove_dir_all(&dir)
@@ -479,6 +498,7 @@ impl VmBackend for FirecrackerBackend {
                 source,
             });
         }
+
         match result {
             Ok(JobRun { end, restore, run }) => {
                 let end = settle(slot, Ok(end), None, cleanup)?;
@@ -488,6 +508,7 @@ impl VmBackend for FirecrackerBackend {
                 for later in cleanup {
                     tracing::warn!(slot, error = %later, "cleanup failed after a failed run");
                 }
+
                 Err(error)
             }
         }
@@ -496,6 +517,7 @@ impl VmBackend for FirecrackerBackend {
     async fn reconcile(&self) -> Result<Reconciled, BackendError> {
         let cgroups = self.cgroups.remove_all_slots()?;
         let mut directories = Vec::new();
+
         if self.config.slots_dir.exists() {
             let entries =
                 std::fs::read_dir(&self.config.slots_dir).map_err(|source| BackendError::Io {
@@ -513,6 +535,7 @@ impl VmBackend for FirecrackerBackend {
                 }
             }
         }
+
         Ok(Reconciled {
             cgroups,
             directories,
@@ -538,6 +561,7 @@ pub fn classify_exit(status: Option<std::process::ExitStatus>, detail: &str) -> 
         // Firecracker still runs: the guest's agent went away.
         return JobEnd::GuestStopped(format!("the agent stopped answering: {detail}"));
     };
+
     match (status.code(), status.signal()) {
         (Some(0), _) => JobEnd::GuestStopped(format!("the guest stopped: {detail}")),
         (Some(code @ (2 | 148 | 149 | 150 | 157)), _) => {
@@ -562,10 +586,12 @@ fn console_tail(path: &std::path::Path) -> String {
     let Ok(mut file) = std::fs::File::open(path) else {
         return "unavailable".into();
     };
+
     let len = file.metadata().map_or(0, |m| m.len());
     let _ = file.seek(SeekFrom::Start(len.saturating_sub(2048)));
     let mut tail = Vec::new();
     let _ = file.take(2048).read_to_end(&mut tail);
+
     // `render` keeps at most 512 bytes per call.
     tail.chunks(512).map(crate::trace::render).collect()
 }
@@ -600,6 +626,7 @@ impl VmBackend for FakeBackend {
         if let Ok(mut received) = self.received.lock() {
             received.push((slot, job.spec));
         }
+
         let end = self
             .script
             .lock()
@@ -633,9 +660,12 @@ mod tests {
     fn escape_indicators_outrank_every_error() {
         // A touched decoy wins over the run's error and over cleanup errors.
         let end = settle(0, Err(failed()), Some(Decoy::Touched), vec![failed()]);
+
         assert_eq!(end.unwrap(), JobEnd::DecoyTouched);
+
         let end = settle(0, Ok(JobEnd::HostTimeout), Some(Decoy::Touched), vec![]);
         assert_eq!(end.unwrap(), JobEnd::DecoyTouched);
+
         // A crashed VMM keeps its result when cleanup fails, in both stages.
         let crashed = JobEnd::VmmCrashed("SIGSEGV".into());
         let end = settle(
@@ -644,11 +674,15 @@ mod tests {
             Some(Decoy::Untouched),
             vec![failed()],
         );
+
         assert_eq!(end.unwrap(), crashed);
+
         let end = settle(0, Ok(crashed.clone()), None, vec![failed(), failed()]);
         assert_eq!(end.unwrap(), crashed);
+
         // Even when the jail root is gone.
         let end = settle(0, Ok(crashed.clone()), Some(Decoy::JailGone), vec![]);
+
         assert_eq!(end.unwrap(), crashed);
     }
 
@@ -660,6 +694,7 @@ mod tests {
             Some(Decoy::JailGone),
             vec![failed()],
         );
+
         let error = end.unwrap_err().to_string();
         assert!(error.contains("jail root disappeared"), "{error}");
     }
@@ -667,14 +702,18 @@ mod tests {
     #[test]
     fn otherwise_the_run_error_then_the_cleanup_error_decide() {
         let end = settle(0, Err(failed()), Some(Decoy::Untouched), vec![]);
+
         assert!(matches!(end, Err(BackendError::NoSuchSlot(9))));
+
         let end = settle(
             0,
             Ok(JobEnd::HostTimeout),
             Some(Decoy::Untouched),
             vec![BackendError::NoSuchSlot(1), BackendError::NoSuchSlot(2)],
         );
+
         assert!(matches!(end, Err(BackendError::NoSuchSlot(1))));
+
         let end = settle(0, Ok(JobEnd::ResourceLimit), Some(Decoy::Untouched), vec![]);
         assert_eq!(end.unwrap(), JobEnd::ResourceLimit);
     }
@@ -702,17 +741,20 @@ mod tests {
         use std::os::unix::process::ExitStatusExt;
         let code = |c: i32| Some(std::process::ExitStatus::from_raw(c << 8));
         let signal = |s: i32| Some(std::process::ExitStatus::from_raw(s));
+
         assert!(matches!(classify_exit(None, "x"), JobEnd::GuestStopped(_)));
         assert!(matches!(
             classify_exit(code(0), "x"),
             JobEnd::GuestStopped(_)
         ));
+
         for c in [2, 148, 149, 150, 157] {
             assert!(
                 matches!(classify_exit(code(c), "x"), JobEnd::VmmCrashed(_)),
                 "{c}"
             );
         }
+
         assert_eq!(classify_exit(code(151), "x"), JobEnd::ResourceLimit);
         assert!(matches!(
             classify_exit(code(1), "vcpu: FaultyKvmExit(InternalError)"),
@@ -735,6 +777,7 @@ mod tests {
             JobEnd::VmmCrashed("SIGSEGV".into()).to_string(),
             "vmm_crashed: SIGSEGV"
         );
+
         let finished = JobEnd::Finished(RunOutcome {
             exit: ExitStatus::Code(1),
             stdout: b"secret".to_vec(),
@@ -742,6 +785,7 @@ mod tests {
             truncated: false,
             trace: Box::default(),
         });
+
         assert_eq!(finished.to_string(), "finished");
     }
 
@@ -754,8 +798,10 @@ mod tests {
             truncated: false,
             trace: Box::default(),
         });
+
         let backend = FakeBackend::new([finished.clone(), JobEnd::HostTimeout]);
         let d = Duration::from_secs(1);
+
         assert_eq!(backend.run_job(0, spec(), d).await.unwrap().end, finished);
         assert_eq!(
             backend.run_job(1, spec(), d).await.unwrap().end,

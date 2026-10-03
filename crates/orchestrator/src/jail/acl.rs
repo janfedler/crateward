@@ -37,13 +37,16 @@ pub fn owner_and_user_only(uid: u32) -> Vec<u8> {
         (ACL_MASK, RWX, UNDEFINED_ID),
         (ACL_OTHER, 0, UNDEFINED_ID),
     ];
+
     let mut out = Vec::with_capacity(4 + entries.len() * 8);
     out.extend_from_slice(&VERSION.to_le_bytes());
+
     for (tag, perm, id) in entries {
         out.extend_from_slice(&tag.to_le_bytes());
         out.extend_from_slice(&perm.to_le_bytes());
         out.extend_from_slice(&id.to_le_bytes());
     }
+
     out
 }
 
@@ -70,8 +73,10 @@ mod tests {
     #[test]
     fn encoding_matches_the_kernel_layout() {
         let bytes = owner_and_user_only(160_000);
+
         assert_eq!(bytes.len(), 4 + 5 * 8);
         assert_eq!(bytes[..4], 2_u32.to_le_bytes());
+
         // Second entry: ACL_USER with rwx for the given UID.
         assert_eq!(bytes[12..14], ACL_USER.to_le_bytes());
         assert_eq!(bytes[14..16], 7_u16.to_le_bytes());
@@ -91,9 +96,11 @@ mod tests {
             .arg(&dir)
             .output();
         std::fs::remove_dir_all(&dir).unwrap();
+
         // getfacl is optional on developer machines.
         let Ok(out) = out else { return };
         let text = String::from_utf8_lossy(&out.stdout);
+
         assert!(text.contains("user:160000:rwx"), "{text}");
         assert!(text.contains("group::---"), "{text}");
         assert!(text.contains("other::---"), "{text}");

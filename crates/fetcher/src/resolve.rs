@@ -107,12 +107,14 @@ pub enum LockfileError {
 pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, LockfileError> {
     let parsed: Lockfile = toml::from_str(lockfile)?;
     let mut packages = Vec::new();
+
     for entry in parsed.package {
         let Some(origin) = entry.source else { continue };
         let package = format!("{} {}", entry.name, entry.version);
         if origin != "registry+https://github.com/rust-lang/crates.io-index" {
             return Err(LockfileError::ForeignSource { package, origin });
         }
+
         let checksum = entry.checksum.ok_or(LockfileError::NoChecksum(package))?;
         packages.push(LockedPackage {
             name: entry.name,
@@ -120,6 +122,7 @@ pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, LockfileErr
             checksum,
         });
     }
+
     Ok(packages)
 }
 
@@ -167,6 +170,7 @@ async fn resolve_in(
         index_path: name.index_path(),
         version: version.to_string(),
     };
+
     let server = proxy::serve(&socket, index, target).map_err(io("starting the index proxy"))?;
     let output = Command::new(exe)
         .arg(RESOLVE)
@@ -179,6 +183,7 @@ async fn resolve_in(
         .output()
         .await;
     server.abort();
+
     let output = output.map_err(ChildError::io(CHILD, "running"))?;
     if !output.status.success() {
         return Err(ChildError::Failed {
@@ -188,11 +193,13 @@ async fn resolve_in(
         }
         .into());
     }
+
     let outcome: ResolveOutcome =
         serde_json::from_slice(&output.stdout).map_err(|e| ChildError::answer(CHILD, e))?;
     if !outcome.ok {
         return Ok(Resolution::Failed(outcome.message));
     }
+
     tokio::fs::read_to_string(probe.join("Cargo.lock"))
         .await
         .map(Resolution::Locked)
@@ -220,6 +227,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 "#;
         let packages = locked_packages(lock).unwrap();
+
         assert_eq!(packages.len(), 1);
         assert_eq!(packages[0].name, "serde");
     }
@@ -227,6 +235,7 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
     #[test]
     fn foreign_sources_are_rejected() {
         let lock = "[[package]]\nname = \"x\"\nversion = \"1.0.0\"\nsource = \"git+https://example.com/x\"\n";
+
         assert!(matches!(
             locked_packages(lock),
             Err(LockfileError::ForeignSource { package, origin })
@@ -237,6 +246,7 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
     #[test]
     fn a_registry_package_needs_a_checksum() {
         let lock = "[[package]]\nname = \"x\"\nversion = \"1.0.0\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n";
+
         assert!(matches!(
             locked_packages(lock),
             Err(LockfileError::NoChecksum(package)) if package == "x 1.0.0"
@@ -257,6 +267,7 @@ checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
             &CrateName::parse("Inflector").unwrap(),
             &semver::Version::parse("0.11.4").unwrap(),
         );
+
         assert!(manifest.contains(r#"target = { package = "Inflector", version = "=0.11.4" }"#));
     }
 }

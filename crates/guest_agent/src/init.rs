@@ -75,6 +75,7 @@ pub fn mount_filesystems() -> Result<(), AgentError> {
             }
         }
     }
+
     Ok(())
 }
 
@@ -97,6 +98,7 @@ pub fn disable_ipv6() {
 pub fn shut_down() -> ! {
     rustix::fs::sync();
     let _ = rustix::system::reboot(rustix::system::RebootCommand::Restart);
+
     // Only reached if reboot failed. Returning from PID 1 panics the kernel,
     // and `panic=1` on the command line turns that into a restart as well.
     loop {

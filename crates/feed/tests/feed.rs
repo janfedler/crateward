@@ -47,19 +47,23 @@ async fn serve(
     let path = req.uri().path().to_owned();
     let mut s = state.lock().unwrap();
     *s.hits.entry(path.clone()).or_default() += 1;
+
     if s.broken.contains(&path) {
         return Ok(Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(Full::default())
             .unwrap());
     }
+
     let Some(body) = s.files.get(&path).cloned() else {
         return Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Full::default())
             .unwrap());
     };
+
     let tag = etag(&body);
+
     if req
         .headers()
         .get("if-none-match")
@@ -72,6 +76,7 @@ async fn serve(
             .body(Full::default())
             .unwrap());
     }
+
     Ok(Response::builder()
         .header("etag", tag)
         .body(Full::new(Bytes::from(body)))
@@ -106,6 +111,7 @@ fn rss(items: &[(&str, &str)]) -> String {
             } else {
                 format!("<crates:version>{v}</crates:version>")
             };
+
             format!("<item><crates:name>{n}</crates:name>{version}</item>")
         })
         .collect();
@@ -136,6 +142,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
     let Some(db) = TestDb::new("feed").await else {
         return;
     };
+
     let store = db.migrated().await;
     let state: Shared = Arc::default();
     let base = start_mock(Arc::clone(&state)).await;
@@ -168,19 +175,23 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
                 index_line("Popular", "2.0.0", "")
             ),
         );
+
         // The CDN has not caught up with 1.1.0 yet.
         s.files.insert(
             "/index/la/gg/lagging".into(),
             index_line("lagging", "1.0.0", ""),
         );
     }
+
     let urls = Urls {
         rss_updates: format!("{base}/rss/updates.xml"),
         rss_new_crates: format!("{base}/rss/crates.xml"),
         index_root: format!("{base}/index/"),
     };
+
     let mut feed = Feed::new(client(), client(), urls, store);
     feed.index_retry = Duration::ZERO;
+
     assert_eq!(
         feed.download_template().await.unwrap(),
         format!("{base}/crates")
@@ -201,6 +212,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
         ),
     );
     let second = feed.poll_once().await.unwrap();
+
     assert_eq!(second.enqueued, 1, "{second:?}");
     assert_eq!(
         second.feed_items, 0,
@@ -219,6 +231,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
         rss(&[("brand-new", "0.1.0"), ("Popular", "2.0.0")]),
     );
     let third = feed.poll_once().await.unwrap();
+
     assert_eq!(third.enqueued, 0, "{third:?}");
     assert_eq!(third.already_known, 2, "{third:?}");
 
@@ -230,19 +243,23 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
         .await
         .unwrap()
         .unwrap();
+
     assert_eq!(first_claim.name, "brand-new");
     assert_eq!(first_claim.priority, 60);
+
     let popular = check
         .get(JobId(first_claim.id.0 + 1))
         .await
         .unwrap()
         .unwrap();
+
     assert_eq!(popular.name, "Popular");
     assert_eq!(popular.priority, 0);
     assert_eq!(
         check.count_by_state().await.unwrap().get("Discovered"),
         Some(&3)
     );
+
     db.drop().await;
 }
 
@@ -265,6 +282,7 @@ impl World {
             rss_new_crates: format!("{base}/rss/crates.xml"),
             index_root: format!("{base}/index/"),
         };
+
         let mut feed = Feed::new(client(), client(), urls, store);
         feed.index_retry = Duration::ZERO;
         let world = Self { state, feed, db };
@@ -286,6 +304,7 @@ impl World {
     async fn jobs(&self) -> Vec<(String, i16)> {
         let store = self.db.store().await;
         let mut jobs = Vec::new();
+
         while let Some(job) = store
             .claim(Stage::Fetch, "t", Duration::from_secs(30))
             .await
@@ -293,6 +312,7 @@ impl World {
         {
             jobs.push((job.name, job.priority));
         }
+
         jobs.sort();
         jobs
     }
@@ -307,6 +327,7 @@ async fn deleted_crates_are_dropped_and_lagging_versions_wait_for_their_turn() {
     let Some(mut world) = World::new("waiting").await else {
         return;
     };
+
     world.serve(
         "/rss/updates.xml",
         rss(&[("ghost", "1.0.0"), ("lagging", "1.1.0")]),
@@ -323,12 +344,14 @@ async fn deleted_crates_are_dropped_and_lagging_versions_wait_for_their_turn() {
     // The lagging version is not due again for an hour. The deleted crate
     // is not looked up again at all.
     let second = world.feed.poll_once().await.unwrap();
+
     assert_eq!(second.feed_items, 0, "{second:?}");
     assert_eq!(second.missing, 0, "{second:?}");
     assert_eq!(second.waiting, 1, "{second:?}");
     assert_eq!(world.hits("/index/gh/os/ghost"), 1);
     assert_eq!(world.hits("/index/la/gg/lagging"), 1);
     assert!(world.jobs().await.is_empty());
+
     world.finish().await;
 }
 
@@ -337,6 +360,7 @@ async fn priority_adds_new_crates_popularity_and_build_time_signals() {
     let Some(mut world) = World::new("priority").await else {
         return;
     };
+
     world
         .db
         .store()
@@ -365,7 +389,9 @@ async fn priority_adds_new_crates_popularity_and_build_time_signals() {
             index_line(name, "2.0.0", extra)
         )
     };
+
     let links = r#","links":"z""#;
+
     // The index file of a crate with one version marks a new crate.
     world.serve("/index/so/lo/solo", index_line("solo", "1.0.0", ""));
     world.serve("/index/bu/sy/busy", two("busy", ""));
@@ -375,6 +401,7 @@ async fn priority_adds_new_crates_popularity_and_build_time_signals() {
 
     let report = world.feed.poll_once().await.unwrap();
     assert_eq!(report.enqueued, 5, "{report:?}");
+
     let expected = [
         ("both", 90),
         ("busy", 30),
@@ -382,10 +409,12 @@ async fn priority_adds_new_crates_popularity_and_build_time_signals() {
         ("quiet", 0),
         ("solo", 40),
     ];
+
     assert_eq!(
         world.jobs().await,
         expected.map(|(name, priority)| (name.to_owned(), priority))
     );
+
     world.finish().await;
 }
 
@@ -394,6 +423,7 @@ async fn a_failing_index_fetch_fails_the_poll_and_the_version_stays_queued() {
     let Some(mut world) = World::new("failing").await else {
         return;
     };
+
     world.serve("/rss/updates.xml", rss(&[("flaky", "1.0.0")]));
     world.serve("/index/fl/ak/flaky", index_line("flaky", "1.0.0", ""));
     let broken = "/index/fl/ak/flaky".to_owned();
@@ -410,10 +440,12 @@ async fn a_failing_index_fetch_fails_the_poll_and_the_version_stays_queued() {
     // The feeds did not change, so only the queued version can bring the job.
     world.state.lock().unwrap().broken.remove(&broken);
     let report = world.feed.poll_once().await.unwrap();
+
     assert_eq!(report.feed_items, 0, "{report:?}");
     assert_eq!(report.enqueued, 1, "{report:?}");
     assert_eq!(report.waiting, 0, "{report:?}");
     assert_eq!(world.jobs().await, [("flaky".to_owned(), 40)]);
+
     world.finish().await;
 }
 
@@ -422,6 +454,7 @@ async fn an_index_file_that_does_not_parse_is_a_permanent_error() {
     let Some(mut world) = World::new("garbled").await else {
         return;
     };
+
     world.serve("/rss/updates.xml", rss(&[("garbled", "1.0.0")]));
     world.serve("/index/ga/rb/garbled", "this is not json\n".into());
 
@@ -429,5 +462,6 @@ async fn an_index_file_that_does_not_parse_is_a_permanent_error() {
     assert!(matches!(error, FeedError::Parse(_)), "{error}");
     assert!(!error.is_transient());
     assert!(world.jobs().await.is_empty());
+
     world.finish().await;
 }

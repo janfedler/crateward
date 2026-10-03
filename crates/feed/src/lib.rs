@@ -46,19 +46,23 @@ async fn start(config: &Config) -> Result<Feed, FeedError> {
         timeout: Duration::from_secs(60),
         allow_plain_http: false,
     };
+
     let rss = PoliteClient::new(&client(c.static_requests_per_second))?;
     let index = PoliteClient::new(&client(c.index_requests_per_second))?;
     let mut store = Store::connect(config.database.url.expose_secret()).await?;
     store.migrate().await?;
+
     let mut index_root = c.index_url.to_string();
     if !index_root.ends_with('/') {
         index_root.push('/');
     }
+
     let urls = Urls {
         rss_updates: c.rss_updates_url.to_string(),
         rss_new_crates: c.rss_new_crates_url.to_string(),
         index_root,
     };
+
     let mut feed = Feed::new(rss, index, urls, store);
     feed.popular_threshold = i64::from(config.triage.popular_min_reverse_dependencies);
     Ok(feed)
@@ -85,6 +89,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
                 Ok(store) => dump::refresh(&client, &url, &store).await,
                 Err(error) => Err(error.into()),
             };
+
             match result {
                 Ok(crates) => tracing::info!(
                     crates,
@@ -95,6 +100,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
                     tracing::warn!(%error, "dump refresh failed, retrying at the next interval");
                 }
             }
+
             tokio::time::sleep(every).await;
         }
     });
@@ -122,8 +128,10 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 }
                 Err(error) => return Err(fatal(error)),
             }
+
             stop.sleep(interval).await;
         }
+
         tracing::info!("stopping");
         Ok(())
     })

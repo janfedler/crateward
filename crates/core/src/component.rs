@@ -119,6 +119,7 @@ mod tests {
             .into_iter()
             .filter(|c| c.executes_crate_code())
             .collect();
+
         assert_eq!(executing, vec![Component::GuestAgent]);
     }
 
@@ -128,6 +129,7 @@ mod tests {
             .into_iter()
             .filter(|c| c.zone() == Zone::Trusted)
             .collect();
+
         assert_eq!(
             trusted,
             vec![

@@ -73,6 +73,7 @@ impl Supervisor<'_> {
         if reaped > 0 {
             tracing::warn!(reaped, "reaped expired leases");
         }
+
         self.breakers().await?;
         let deadline = self
             .config
@@ -89,6 +90,7 @@ impl Supervisor<'_> {
                 "jobs waited too long for a VM and are scored statically"
             );
         }
+
         self.disks().await?;
         let trimmed = self
             .store
@@ -97,6 +99,7 @@ impl Supervisor<'_> {
         if trimmed > 0 {
             tracing::info!(trimmed, "trimmed raw data of old unflagged runs");
         }
+
         self.escape().await?;
         self.canaries().await?;
         self.alerts().await
@@ -107,6 +110,7 @@ impl Supervisor<'_> {
         let now = self.store.now_epoch().await?;
         let window_start = now - i64::try_from(policy.window.as_secs()).unwrap_or(i64::MAX);
         let window = self.store.stage_counts(window_start).await?;
+
         for (stage, state) in self.store.breakers().await? {
             let since = match state {
                 crateward_core::breaker::BreakerState::HalfOpen { since, .. } => {
@@ -120,12 +124,14 @@ impl Supervisor<'_> {
             let Some(change) = change else { continue };
             self.store.set_breaker(stage, next).await?;
             tracing::warn!(stage = stage.name(), ?change, ?counts, "circuit breaker");
+
             if change == Change::Opened {
                 self.store
                     .raise_alert(&HumanEscalation::StageFailingAfterRetries { stage })
                     .await?;
             }
         }
+
         Ok(())
     }
 
@@ -133,11 +139,13 @@ impl Supervisor<'_> {
         let threshold = self.config.storage.disk_alert_percent;
         let instance = &self.config.instance;
         let mut scratch_full = false;
+
         for (path, is_scratch) in [(&instance.data_dir, false), (&instance.run_dir, true)] {
             let Some(percent) = usage(path) else {
                 tracing::warn!(path = %path.display(), "cannot read filesystem usage");
                 continue;
             };
+
             if percent >= threshold {
                 tracing::warn!(path = %path.display(), percent, "filesystem above the threshold");
                 self.store
@@ -146,6 +154,7 @@ impl Supervisor<'_> {
                 scratch_full |= is_scratch;
             }
         }
+
         if scratch_full {
             let detail = "the scratch filesystem is above the alert threshold";
             if self.store.pause(PauseReason::Disk, None, detail).await? {
@@ -154,22 +163,27 @@ impl Supervisor<'_> {
         } else if self.store.lift_pause(PauseReason::Disk).await? {
             tracing::info!("sandbox stage resumed: scratch filesystem has room again");
         }
+
         Ok(())
     }
 
     async fn escape(&mut self) -> Result<(), StoreError> {
         let sandbox = &self.config.sandbox;
+
         // The spare slot, used for the base snapshot, is included.
         let slot_uids = sandbox.slot_uid_base..=sandbox.slot_uid_base.saturating_add(sandbox.slots);
         let mut findings = self.integrity.manifest();
         findings.extend(self.integrity.decoys(&self.config.supervisor.decoys));
         findings.extend(self.integrity.processes(slot_uids));
+
         if findings.is_empty() {
             return Ok(());
         }
+
         for finding in &findings {
             tracing::error!(%finding, "sandbox escape indicator");
         }
+
         let detail = format!("host escape indicator: {}", findings.join("; "));
         self.store
             .pause(PauseReason::Quarantine, None, &detail)
@@ -197,6 +211,7 @@ impl Supervisor<'_> {
                 }
             }
         }
+
         Ok(())
     }
 
@@ -215,12 +230,15 @@ impl Supervisor<'_> {
             } else {
                 AlertOutcome::Suppressed
             };
+
             self.store.mark_alert(alert.id, &outcome).await?;
+
             if matches!(outcome, AlertOutcome::Failed(_)) {
                 // Keep the order. Try again next round.
                 break;
             }
         }
+
         Ok(())
     }
 }
@@ -273,12 +291,15 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let stop = Stop::install().map_err(fatal)?;
 
         let interval = Duration::from_secs(config.supervisor.interval_secs);
+
         while !stop.is_requested() {
             if let Err(error) = supervisor.round().await {
                 tracing::error!(%error, "supervisor round failed");
             }
+
             stop.sleep(interval).await;
         }
+
         tracing::info!("stopping");
         Ok(())
     })

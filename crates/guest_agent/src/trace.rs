@@ -133,6 +133,7 @@ fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
             .and_then(|b| b.try_into().ok())
             .map_or(0, u16::from_be_bytes)
     };
+
     match family {
         AF_INET if len >= 8 => {
             let ip: [u8; 4] = addr
@@ -150,6 +151,7 @@ fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
         }
         AF_UNIX => {
             let path = addr.get(2..len.max(2)).unwrap_or_default();
+
             // A path name ends at its NUL. An abstract name keeps its bytes.
             let path = if path.first() == Some(&0) {
                 path
@@ -157,6 +159,7 @@ fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
                 let end = path.iter().position(|&b| b == 0).unwrap_or(path.len());
                 path.get(..end).unwrap_or_default()
             };
+
             SocketAddress::Unix(path.to_vec())
         }
         other => SocketAddress::Other(other),
@@ -172,6 +175,7 @@ fn chain(error: &dyn std::error::Error) -> String {
         text.push_str(&inner.to_string());
         source = inner.source();
     }
+
     text
 }
 
@@ -237,10 +241,12 @@ fn exec(body: &[u8]) -> Option<TraceKind> {
     let args = body.get(8 + FILENAME_LEN..8 + FILENAME_LEN + ARGS_LEN)?;
     let args = args.get(..args_len)?;
     let mut argv: Vec<Vec<u8>> = args.split(|&b| b == 0).map(<[u8]>::to_vec).collect();
+
     // The vector ends with a NUL, which leaves one empty piece.
     if args.last() == Some(&0) {
         argv.pop();
     }
+
     Some(TraceKind::Exec { filename, argv })
 }
 
@@ -253,6 +259,7 @@ fn open(body: &[u8]) -> Option<TraceKind> {
     } else {
         format!("<unresolved: error {path_len}>").into_bytes()
     };
+
     Some(TraceKind::Open { path, flags })
 }
 
@@ -274,6 +281,7 @@ fn estimate(event: &TraceEvent) -> usize {
         TraceKind::Mount { fstype } => fstype.len(),
         _ => 0,
     };
+
     strings + 64
 }
 
@@ -348,6 +356,7 @@ fn load(object: &[u8], builder_uid: u32) -> Result<Ebpf, TraceError> {
     for (global, name, member) in OFFSETS {
         values.push((global, btf.offset(name, member)?));
     }
+
     let agent = rustix::process::getpid()
         .as_raw_nonzero()
         .get()
@@ -359,6 +368,7 @@ fn load(object: &[u8], builder_uid: u32) -> Result<Ebpf, TraceError> {
     for (global, value) in &values {
         loader.override_global(global, value, true);
     }
+
     Ok(loader.load(object)?)
 }
 
@@ -404,6 +414,7 @@ impl Tracer {
                 .map_err(TraceError::program(name))?;
             program.attach().map_err(TraceError::program(name))?;
         }
+
         for name in LSM_HOOKS {
             let program: &mut Lsm = program(&mut ebpf, name)?;
             program
@@ -411,6 +422,7 @@ impl Tracer {
                 .map_err(TraceError::program(name))?;
             program.attach().map_err(TraceError::program(name))?;
         }
+
         let ring = map(&mut ebpf, "EVENTS")?;
         let dropped = map(&mut ebpf, "DROPPED")?;
         Ok(Self {
@@ -448,6 +460,7 @@ impl Tracer {
         let mut sent_bytes = 0_usize;
         let mut batch = Vec::new();
         let mut batch_bytes = 0;
+
         loop {
             // Read the flag first: records written before it was set are
             // then drained below.
@@ -459,35 +472,44 @@ impl Tracer {
                     totals.malformed += 1;
                     continue;
                 };
+
                 let size = estimate(&event);
                 if sent_bytes + size > MAX_TRACE_BYTES {
                     totals.dropped_by_agent += 1;
                     continue;
                 }
+
                 sent_bytes += size;
                 batch_bytes += size;
                 totals.events += 1;
                 batch.push(event);
+
                 if batch_bytes >= BATCH_BYTES {
                     if !send(Batch::Events(std::mem::take(&mut batch))) {
                         return;
                     }
+
                     batch_bytes = 0;
                 }
             }
+
             if !batch.is_empty() {
                 if !send(Batch::Events(std::mem::take(&mut batch))) {
                     return;
                 }
+
                 batch_bytes = 0;
             }
+
             if stopping && !read_any {
                 break;
             }
+
             if !read_any {
                 std::thread::sleep(IDLE);
             }
         }
+
         totals.dropped_in_kernel = self.dropped_in_kernel().saturating_sub(dropped_before);
         let _ = send(Batch::Done(totals));
     }
@@ -512,6 +534,7 @@ mod tests {
         for v in [kind, 100, 101, 1000] {
             r.extend_from_slice(&v.to_le_bytes());
         }
+
         r.extend_from_slice(&time_ns.to_le_bytes());
         r
     }
@@ -535,14 +558,17 @@ mod tests {
             b"/usr/bin/curl",
             b"curl\0-d\0@/work/home/.aws/credentials\0",
         );
+
         let event = decode(&record, 2_000_000).unwrap();
         assert_eq!(
             (event.ms, event.pid, event.tid, event.uid),
             (3, 100, 101, 1000)
         );
+
         let TraceKind::Exec { filename, argv } = event.kind else {
             panic!("not an exec");
         };
+
         assert_eq!(filename, b"/usr/bin/curl");
         assert_eq!(argv, [&b"curl"[..], b"-d", b"@/work/home/.aws/credentials"]);
     }
@@ -558,6 +584,7 @@ mod tests {
             r.extend_from_slice(&a);
             decode(&r, 0).unwrap().kind
         };
+
         let v4 = [2, 0, 0x01, 0xbb, 10, 0, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(
             sock(&v4),
@@ -566,13 +593,16 @@ mod tests {
                 address: SocketAddress::Ip("10.0.2.1:443".parse().unwrap())
             }
         );
+
         let mut v6 = vec![10, 0, 0, 53, 0, 0, 0, 0];
         v6.extend_from_slice(&std::net::Ipv6Addr::LOCALHOST.octets());
         v6.extend_from_slice(&[0; 4]);
+
         assert!(matches!(
             sock(&v6),
             TraceKind::Connect { address: SocketAddress::Ip(a), .. } if a.to_string() == "[::1]:53"
         ));
+
         let unix = b"\x01\x00/run/dbus/system_bus_socket\0";
         assert_eq!(
             sock(unix),
@@ -581,6 +611,7 @@ mod tests {
                 address: SocketAddress::Unix(b"/run/dbus/system_bus_socket".to_vec())
             }
         );
+
         let abstract_name = b"\x01\x00\0hidden";
         assert!(matches!(
             sock(abstract_name),
@@ -604,6 +635,7 @@ mod tests {
         let mut p = path.to_vec();
         p.resize(PATH_LEN, 0);
         r.extend_from_slice(&p);
+
         assert_eq!(
             decode(&r, 0).unwrap().kind,
             TraceKind::Open {
@@ -611,15 +643,19 @@ mod tests {
                 flags: 0o101
             }
         );
+
         // Every truncation is refused, never read past.
         for cut in 0..r.len() {
             assert!(decode(&r[..cut], 0).is_none());
         }
+
         assert!(decode(&header(99, 0), 0).is_none());
+
         // A length field larger than its buffer is clamped.
         let mut long = exec(b"/bin/sh", b"sh\0");
         long[24..28].copy_from_slice(&i32::MAX.to_le_bytes());
         long[28..32].copy_from_slice(&u32::MAX.to_le_bytes());
+
         assert!(decode(&long, 0).is_some());
     }
 
@@ -630,9 +666,11 @@ mod tests {
             for w in words {
                 r.extend_from_slice(&w.to_le_bytes());
             }
+
             r.extend_from_slice(tail);
             r
         };
+
         let mut fstype = b"overlay\0".to_vec();
         fstype.resize(FSTYPE_LEN, 0);
         let cases = [
@@ -677,19 +715,26 @@ mod tests {
                 },
             ),
         ];
+
         for (r, kind) in cases {
             let event = decode(&r, 0).unwrap();
+
             assert_eq!((event.ms, event.kind), (1, kind));
+
             for cut in 0..r.len() {
                 assert!(decode(&r[..cut], 0).is_none(), "{cut}");
             }
         }
+
         // A record from before the job's start counts as its first ms.
         let fork = record(KIND_FORK, &[7], &[]);
+
         assert_eq!(decode(&fork, u64::MAX).unwrap().ms, 0);
+
         // Bytes after the layout are ignored.
         let mut long = fork;
         long.extend_from_slice(&[0xff; 9]);
+
         assert_eq!(decode(&long, 0).unwrap().kind, TraceKind::Fork { child: 7 });
     }
 }

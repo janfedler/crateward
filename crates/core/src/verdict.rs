@@ -207,6 +207,7 @@ mod tests {
     #[test]
     fn levels_follow_the_score() {
         use super::RiskLevel;
+
         assert_eq!(RiskLevel::from_score(0), RiskLevel::None);
         assert_eq!(RiskLevel::from_score(19), RiskLevel::Low);
         assert_eq!(RiskLevel::from_score(20), RiskLevel::Medium);
@@ -225,6 +226,7 @@ mod tests {
             Coverage::StaticOnly(StaticOnlyReason::CapacityDeadline),
             Coverage::NotApplicableOnLinux,
         ];
+
         for coverage in all {
             assert!(!coverage.label().contains("clean"), "{coverage:?}");
         }
@@ -233,6 +235,7 @@ mod tests {
     #[test]
     fn source_names_are_the_stored_names() {
         use EvidenceSource::{Diff, Disk, Network, Run, Static, Trace};
+
         for source in [Static, Diff, Trace, Network, Disk, Run] {
             assert_eq!(serde_json::to_value(source).unwrap(), source.name());
         }

@@ -46,9 +46,11 @@ fn check_manifest(manifest: &Path) -> Result<(), CliError> {
     for m in &mismatches {
         out!("MISMATCH {}: {}", m.path.display(), m.reason);
     }
+
     if !mismatches.is_empty() {
         return Err(CliError::Differ(mismatches.len()));
     }
+
     out!("{} files match", recorded.len());
     Ok(())
 }

@@ -28,6 +28,7 @@ fn replace_block(text: &str) -> Option<String> {
     if end < start {
         return None;
     }
+
     let mut out = String::with_capacity(text.len());
     out.push_str(text.get(..start)?);
     out.push_str(&block());
@@ -50,10 +51,12 @@ pub fn run(root: &Path, write: bool) -> Result<(), TaskError> {
             path.display()
         ))
     })?;
+
     if updated == text {
         eprintln!("xtask: state diagram is current");
         return Ok(());
     }
+
     if write {
         std::fs::write(&path, updated).map_err(|e| TaskError::Io(path.clone(), e))?;
         eprintln!("xtask: rewrote the state diagram in {}", path.display());
@@ -78,6 +81,7 @@ mod tests {
     fn replacement_is_idempotent() {
         let text = format!("intro\n{BEGIN}\nold\n{END}\noutro\n");
         let once = replace_block(&text).unwrap();
+
         assert_eq!(replace_block(&once).unwrap(), once);
         assert!(once.starts_with("intro\n") && once.ends_with("\noutro\n"));
     }

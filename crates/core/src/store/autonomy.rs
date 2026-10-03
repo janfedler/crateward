@@ -194,8 +194,10 @@ impl Store {
                 "half_open" => BreakerState::HalfOpen { since, reopened },
                 other => return Err(corrupt(format!("breaker state {other}"))),
             };
+
             out.insert(stage, value);
         }
+
         Ok(out)
     }
 
@@ -211,6 +213,7 @@ impl Store {
                 (Some(since), reopened)
             }
         };
+
         let reopened = i32::try_from(reopened).unwrap_or(i32::MAX);
         self.client
             .execute(
@@ -243,17 +246,20 @@ impl Store {
             )
             .await?;
         let mut out: HashMap<Stage, Counts> = HashMap::new();
+
         for row in rows {
             let effect_stage: Option<String> = row.try_get(0)?;
             let event: Option<String> = row.try_get(1)?;
             let effect: Option<String> = row.try_get(2)?;
             let n = u32::try_from(row.try_get::<_, i64>(3)?).unwrap_or(u32::MAX);
+
             if effect.as_deref() == Some("report_infrastructure_failure")
                 && let Some(stage) = effect_stage.as_deref().and_then(stage_by_name)
             {
                 let c = out.entry(stage).or_default();
                 c.failures = c.failures.saturating_add(n);
             }
+
             for stage in Stage::ALL {
                 if event.as_deref() == Some(completion_kind(stage)) {
                     let c = out.entry(stage).or_default();
@@ -261,6 +267,7 @@ impl Store {
                 }
             }
         }
+
         Ok(out)
     }
 
@@ -481,6 +488,7 @@ impl Store {
             )
             .await?;
         let mut expired = 0;
+
         for row in rows {
             let id = JobId(row.try_get(0)?);
             self.complete(
@@ -493,6 +501,7 @@ impl Store {
             .await?;
             expired += 1;
         }
+
         Ok(expired)
     }
 }

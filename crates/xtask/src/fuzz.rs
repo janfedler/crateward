@@ -20,6 +20,7 @@ use crate::{TaskError, io, nested_cargo, run_command};
 pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
     let targets_dir = root.join(repo::FUZZ_TARGETS);
     let mut targets = Vec::new();
+
     for entry in std::fs::read_dir(&targets_dir).map_err(io(&targets_dir))? {
         let path = entry.map_err(io(&targets_dir))?.path();
         if path.extension().is_some_and(|e| e == "rs")
@@ -28,9 +29,11 @@ pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
             targets.push(stem.to_owned());
         }
     }
+
     targets.sort();
     let max_time = format!("-max_total_time={seconds}");
     let mut failed = Vec::new();
+
     for target in &targets {
         let args = [
             "fuzz",
@@ -42,11 +45,13 @@ pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
             "-rss_limit_mb=2048",
             "-max_len=1048576",
         ];
+
         if let Err(error) = run_command(nested_cargo(&root.join(repo::FUZZ)).args(args)) {
             eprintln!("xtask: {error}");
             failed.push(target.clone());
         }
     }
+
     if failed.is_empty() {
         Ok(())
     } else {

@@ -92,10 +92,12 @@ fn each_row<R: Read, const N: usize>(
     for (index, name) in indexes.iter_mut().zip(columns) {
         *index = column(&headers, file, name)?;
     }
+
     let mut record = csv::StringRecord::new();
     while csv.read_record(&mut record).map_err(csv_error(file))? {
         row(indexes.map(|i| record.get(i).unwrap_or_default()));
     }
+
     Ok(())
 }
 
@@ -157,6 +159,7 @@ impl Tables {
             )?,
             _ => return Ok(false),
         }
+
         Ok(true)
     }
 
@@ -166,6 +169,7 @@ impl Tables {
         for (_, target) in self.edges {
             *reverse.entry(target).or_default() += 1;
         }
+
         self.names
             .into_iter()
             .map(|(crate_id, name)| CrateStat {
@@ -186,6 +190,7 @@ pub fn parse<R: Read>(compressed: R) -> Result<Vec<CrateStat>, DumpError> {
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(compressed));
     let mut tables = Tables::default();
     let mut seen = HashSet::new();
+
     for entry in archive.entries()? {
         let entry = entry?;
         let path = entry.path()?.to_string_lossy().into_owned();
@@ -193,13 +198,16 @@ pub fn parse<R: Read>(compressed: R) -> Result<Vec<CrateStat>, DumpError> {
         if tables.read(name, entry)? {
             seen.insert(name.to_owned());
         }
+
         if seen.len() == FILES.len() {
             break;
         }
     }
+
     if let Some(missing) = FILES.into_iter().find(|file| !seen.contains(*file)) {
         return Err(DumpError::Missing(missing));
     }
+
     Ok(tables.stats())
 }
 
@@ -218,6 +226,7 @@ impl Read for ChannelReader {
                 None => return Ok(0),
             }
         }
+
         let n = buf.len().min(self.current.len());
         buf.get_mut(..n)
             .unwrap_or_default()
@@ -242,12 +251,14 @@ pub async fn refresh(client: &PoliteClient, url: &str, store: &Store) -> Result<
             current: bytes::Bytes::new(),
         })
     });
+
     while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
         // The parser stops reading after the four files it needs.
         if tx.send(chunk).await.is_err() {
             break;
         }
     }
+
     drop(tx);
     let stats = parser.await??;
     let rows: Vec<(String, i64, i64)> = stats
@@ -264,6 +275,7 @@ mod tests {
     /// The tar of the files, with the end of archive marker.
     fn tar_of(files: &[(&str, &str)]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
+
         for (name, body) in files {
             let mut header = tar::Header::new_gnu();
             header.set_size(u64::try_from(body.len()).unwrap());
@@ -277,6 +289,7 @@ mod tests {
                 )
                 .unwrap();
         }
+
         builder.into_inner().unwrap()
     }
 
@@ -332,9 +345,11 @@ mod tests {
                 "id,version_id,crate_id,kind\n1,20,1,0\n2,20,1,1\n3,30,1,2\n4,21,1,0\n",
             ),
         ]);
+
         let mut stats = parse(bytes.as_slice()).unwrap();
         stats.sort_by(|a, b| a.name.cmp(&b.name));
         let serde = stats.iter().find(|s| s.name == "serde").unwrap();
+
         assert_eq!(serde.downloads, 1000);
         assert_eq!(serde.reverse_dependencies, 1);
         assert_eq!(
@@ -354,6 +369,7 @@ mod tests {
             ("default_versions.csv", "version_id,crate_id\n20,2\n"),
             ("dependencies.csv", "kind,crate_id,version_id\n0,1,20\n"),
         ]);
+
         assert_eq!(
             sorted(&bytes),
             vec![("app".to_owned(), 7, 0), ("serde".to_owned(), 100, 1)]
@@ -374,6 +390,7 @@ mod tests {
                 "version_id,crate_id,kind\n10,1,0\n20,1,0\n20,1,1\n30,1,0\n30,2,1\n40,9,0\n",
             ),
         ]);
+
         assert_eq!(
             sorted(&bytes),
             vec![
@@ -402,6 +419,7 @@ mod tests {
                 "version_id,crate_id,kind\n20,1,0\n20,y,0\nz,1,0\n",
             ),
         ]);
+
         assert_eq!(
             sorted(&bytes),
             vec![("app".to_owned(), 8, 0), ("serde".to_owned(), 0, 1)]
@@ -437,16 +455,19 @@ mod tests {
             DEFAULTS,
             DEPENDENCIES,
         ]);
+
         assert_eq!(
             csv_error(parse(bytes.as_slice())),
             ("crates.csv", "no column name".to_owned())
         );
+
         let bytes = dump(&[
             DOWNLOADS,
             CRATES,
             DEFAULTS,
             ("dependencies.csv", "version_id,crate_id\n20,1\n"),
         ]);
+
         assert_eq!(
             csv_error(parse(bytes.as_slice())),
             ("dependencies.csv", "no column kind".to_owned())
@@ -463,14 +484,17 @@ mod tests {
             DEFAULTS,
             DEPENDENCIES,
         ];
+
         assert_eq!(
             sorted(&dump(&files)),
             vec![("app".to_owned(), 0, 0), ("serde".to_owned(), 100, 1)]
         );
+
         // Whatever follows the fourth file is never read.
         let mut tar = tar_of(&files);
         tar.truncate(tar.len() - 1024);
         tar.extend([0xFF_u8; 512]);
+
         assert_eq!(sorted(&gzip(&tar)).len(), 2);
     }
 
@@ -483,6 +507,7 @@ mod tests {
             DEFAULTS,
             DEPENDENCIES,
         ]);
+
         assert_eq!(
             sorted(&bytes),
             vec![
@@ -504,6 +529,7 @@ mod tests {
     #[test]
     fn a_missing_file_is_an_error() {
         let bytes = dump(&[("crates.csv", "id,name\n1,a\n")]);
+
         assert!(matches!(
             parse(bytes.as_slice()),
             Err(DumpError::Missing(_))

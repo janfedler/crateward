@@ -51,6 +51,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             format!("analyzer-{}", std::process::id()),
             Duration::from_secs(config.stages.analysis.lease_secs),
         );
+
         let stop = Stop::install().map_err(fatal)?;
         while !stop.is_requested() {
             let analyzed = analyzer.analyze_once().await.map_err(fatal)?;
@@ -60,10 +61,12 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             } else {
                 analyzer.rescore_some().await.map_err(fatal)?
             };
+
             if !analyzed && !finalized && rescored == 0 {
                 stop.sleep(Duration::from_secs(1)).await;
             }
         }
+
         tracing::info!("stopping");
         Ok(())
     })

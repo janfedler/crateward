@@ -131,6 +131,7 @@ impl Fetcher {
             self.lease,
             self.lease / 4,
         );
+
         let result = self.fetch(&job).await;
         beat.abort();
         let event = match result {
@@ -143,6 +144,7 @@ impl Fetcher {
                 }
             }
         };
+
         self.store
             .complete(job.id, &self.worker, event, &self.policies, false)
             .await?;
@@ -165,6 +167,7 @@ impl Fetcher {
         {
             return Ok(FetchResult::Unavailable);
         }
+
         let work = self.setup.work_root.join(format!("job-{}", job.id.0));
         let index = self.index.clone();
         let resolution = resolve(
@@ -184,6 +187,7 @@ impl Fetcher {
             },
             Resolution::Failed(message) => (None, Some(message.clone()), Vec::new()),
         };
+
         let missing = self.fetch_dependencies(&name, &version, &packages).await?;
         let error = error.or(missing);
         let packages_json = serde_json::to_value(&packages).unwrap_or_default();
@@ -211,10 +215,12 @@ impl Fetcher {
         packages: &[LockedPackage],
     ) -> Result<Option<String>, Failure> {
         let mut problem = None;
+
         for package in packages {
             if package.name == name.as_str() && package.version == version.to_string() {
                 continue;
             }
+
             let (Ok(dep_name), Ok(dep_version), Ok(sha)) = (
                 CrateName::parse(&package.name),
                 semver::Version::parse(&package.version),
@@ -223,6 +229,7 @@ impl Fetcher {
                 problem.get_or_insert_with(|| format!("invalid locked package {package:?}"));
                 continue;
             };
+
             if self
                 .ensure_crate(&dep_name, &dep_version, &sha, None)
                 .await?
@@ -236,6 +243,7 @@ impl Fetcher {
                 });
             }
         }
+
         Ok(problem)
     }
 
@@ -252,19 +260,24 @@ impl Fetcher {
         if let Some(file) = self.store.crate_file(sha256).await? {
             return Ok(Some(file));
         }
+
         let Some(bytes) = self.download(name, version, sha256).await? else {
             return Ok(None);
         };
+
         let bytes = Arc::new(bytes);
         let (report, blob) = self.validate(name, version, Arc::clone(&bytes)).await?;
+
         if let Some(dir) = originals
             && let Err(error) = keep_original(dir, sha256, &bytes)
         {
             tracing::warn!(%error, "cannot keep the original crate file");
         }
+
         if !report.findings.is_empty() || report.aborted.is_some() {
             tracing::warn!(%name, %version, findings = report.findings.len(), aborted = ?report.aborted, "archive findings");
         }
+
         let file = CrateFile {
             sha256: *sha256,
             name: name.to_string(),
@@ -275,6 +288,7 @@ impl Fetcher {
             stored_bytes: blob.map(|b| i64::try_from(b.stored_bytes).unwrap_or(i64::MAX)),
             report: serde_json::to_value(&report).unwrap_or_default(),
         };
+
         self.store.record_crate_file(&file).await?;
         Ok(Some(file))
     }
@@ -291,22 +305,27 @@ impl Fetcher {
         let Some(mut response) = self.downloads.stream(&url).await? else {
             return Ok(None);
         };
+
         let mut bytes = Vec::new();
         let mut hasher = sha2::Sha256::new();
+
         while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
             if u64::try_from(bytes.len() + chunk.len()).unwrap_or(u64::MAX) > MAX_CRATE_BYTES {
                 return Err(Failure::permanent(format!(
                     "{name} {version} exceeds {MAX_CRATE_BYTES} bytes"
                 )));
             }
+
             hasher.update(&chunk);
             bytes.extend_from_slice(&chunk);
         }
+
         let digest: [u8; 32] = hasher.finalize().into();
         if &Sha256Digest::from_bytes(digest) != sha256 {
             tracing::warn!(%name, %version, expected = %sha256, "checksum mismatch");
             return Err(checksum_mismatch(name, version));
         }
+
         Ok(Some(bytes))
     }
 
@@ -329,6 +348,7 @@ impl Fetcher {
             } else {
                 None
             };
+
             Ok::<_, std::io::Error>((report, blob))
         })
         .await
@@ -346,6 +366,7 @@ mod tests {
     fn checksum_mismatches_feed_the_circuit_breaker() {
         let name: CrateName = "serde".parse().unwrap();
         let failure = checksum_mismatch(&name, &semver::Version::new(1, 0, 0));
+
         // Only infrastructure failures are counted by the breaker
         // (`Store::stage_counts`).
         assert_eq!(failure.class, FailureClass::Infrastructure);
@@ -358,7 +379,9 @@ mod tests {
         let sha256 = Sha256Digest::from_bytes([7; 32]);
         keep_original(&dir.join("nested"), &sha256, b"crate").unwrap();
         let path = dir.join("nested").join(format!("{sha256}.crate"));
+
         assert_eq!(std::fs::read(path).unwrap(), b"crate");
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -368,6 +391,7 @@ mod tests {
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         gz.write_all(&[0; 1000]).unwrap();
         let bytes = gz.finish().unwrap();
+
         assert_eq!(gunzip(&bytes, 1_000_000).unwrap().len(), 1000);
         assert_eq!(gunzip(&bytes, 10).unwrap().len(), 10);
     }

@@ -92,14 +92,17 @@ pub fn plan(
             *seen.entry(key.clone()).or_default() += 1;
         }
     }
+
     let mut result = Plan::default();
     let mut packages: HashMap<Key, Package> = HashMap::new();
     let mut stubbed: HashSet<Key> = HashSet::new();
     let mut built: HashSet<Key> = HashSet::new();
+
     for s in samples {
         if result.probes.len() >= usize::try_from(max_probes).unwrap_or(usize::MAX) {
             break;
         }
+
         let own: Key = (s.name.clone(), s.version.clone());
         let deps: Vec<&(Key, String)> = s.locked.iter().filter(|(k, _)| *k != own).collect();
         let qualifies = s.locked.iter().any(|(k, _)| *k == own)
@@ -114,9 +117,11 @@ pub fn plan(
         let (Ok(name), Ok(version)) = (CrateName::parse(&s.name), s.version.parse()) else {
             continue;
         };
+
         if !qualifies {
             continue;
         }
+
         for ((n, v), sum) in &s.locked {
             if let Some(blake3) = blobs.get(sum) {
                 packages
@@ -129,6 +134,7 @@ pub fn plan(
                     });
             }
         }
+
         built.extend(deps.iter().map(|(k, _)| k.clone()));
         stubbed.insert(own.clone());
         result.stubs.push(format!("{}-{}", own.0, own.1));
@@ -138,6 +144,7 @@ pub fn plan(
             lockfile: s.lockfile.clone(),
         });
     }
+
     let mut packages: Vec<Package> = packages.into_values().collect();
     packages.sort_by(|a, b| (&a.name, &a.version).cmp(&(&b.name, &b.version)));
     result.packages = packages;
@@ -153,17 +160,20 @@ pub fn plan(
 /// show in the logged end of the output.
 fn script(plan: &Plan, probe_secs: u64) -> String {
     let mut out = String::from("#!/bin/sh\nslow=\n");
+
     for (i, stub) in plan.stubs.iter().enumerate() {
         let dir = if i == 0 {
             guest::PROBE.to_owned()
         } else {
             format!("{}/probes/{}", guest::PAYLOAD, i - 1)
         };
+
         out.push_str(&format!(
             "cd {dir} && timeout -k 10 {probe_secs} cargo check --locked --offline --keep-going\n\
              case $? in 124|137) slow=\"$slow {stub}\" ;; esac\n"
         ));
     }
+
     out.push_str("[ -z \"$slow\" ] || echo \"crateward-warm: timed out:$slow\" >&2\n");
     out
 }
@@ -174,12 +184,15 @@ pub fn rejection(report: &RunReport) -> Option<String> {
     if let Some(why) = behavior_problem(report) {
         return Some(format!("{why}: {}", first_example(&report.trace)));
     }
+
     let Some(scratch) = &report.scratch else {
         return Some("the scratch disk was not scanned".into());
     };
+
     if scratch.units.is_empty() {
         return Some("the replays compiled nothing".into());
     }
+
     let entry = unexpected_entry(scratch)?;
     Some(format!(
         "the scratch disk holds unexpected entries: {entry}"
@@ -220,6 +233,7 @@ fn behavior_problem(report: &RunReport) -> Option<&'static str> {
             "the fake internet saw traffic",
         ),
     ];
+
     problems
         .into_iter()
         .find(|(bad, _)| *bad)
@@ -272,6 +286,7 @@ pub async fn plan_from_store(
     let fetches = store.recent_fetches(i64::from(config.sample_jobs)).await?;
     let mut samples = Vec::new();
     let mut checksums: HashSet<String> = HashSet::new();
+
     for (_, name, version, lockfile, packages) in fetches {
         let locked: Vec<Locked> = serde_json::from_value(packages).unwrap_or_default();
         let locked: Vec<(Key, String)> = locked
@@ -286,6 +301,7 @@ pub async fn plan_from_store(
             locked,
         });
     }
+
     let digests: Vec<Vec<u8>> = checksums
         .iter()
         .filter_map(|c| c.parse::<Sha256Digest>().ok())
@@ -327,11 +343,13 @@ pub fn machine(sandbox: &SandboxConfig, config: &WarmConfig) -> Option<(u8, u32)
             .memory_mib_per_slot
             .saturating_add(sandbox.scratch_mib_per_slot),
     );
+
     let memory = (share.saturating_sub(scratch_mib(config)) / 2)
         .min(slots.saturating_mul(sandbox.memory_mib_per_slot));
     if sandbox.slots < 2 || memory < sandbox.memory_mib_per_slot {
         return None;
     }
+
     let vcpus = sandbox.slots.saturating_mul(sandbox.vcpus_per_slot);
     Some((u8::try_from(vcpus).ok()?, u32::try_from(memory).ok()?))
 }
@@ -422,6 +440,7 @@ pub async fn build(
     let Some((first, rest)) = plan.probes.split_first() else {
         return Ok(None);
     };
+
     let spec = PayloadSpec {
         name: first.name.clone(),
         version: first.version.clone(),
@@ -434,10 +453,12 @@ pub async fn build(
         )],
         stubs: plan.stubs.clone(),
     };
+
     let files = JobFiles {
         warm: None,
         ..JobFiles::named(&sandbox.setup, "warm")
     };
+
     let result = replay(sandbox, builder, config, plan, spec, &files).await;
     files.remove();
     result.map(Some)
@@ -460,6 +481,7 @@ async fn replay(
         cwd: guest::PAYLOAD.into(),
         timeout: Duration::from_secs(config.timeout_secs),
     };
+
     let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
     let report = warming.execute(0, spec, &tokens, files, &run).await?;
     tracing::info!(
@@ -475,14 +497,17 @@ async fn replay(
         ),
         "warm build finished"
     );
+
     if let Some(why) = rejection(&report) {
         return Err(WarmError::Rejected(why));
     }
+
     let image = pack(sandbox, config, plan, &files.scratch).await?;
     if let Err(error) = promotion_check(sandbox, plan, &image).await {
         let _ = std::fs::remove_file(&image);
         return Err(error.into());
     }
+
     Ok(image)
 }
 
@@ -515,11 +540,13 @@ async fn pack(
         let _ = std::fs::remove_file(&staging);
         return Err(WarmError::TooLarge(size));
     }
+
     let digest = blake3_file(&staging).map_err(image_io(&staging))?;
     let named = work.join(format!(
         "warm-{}.erofs",
         digest.get(..16).unwrap_or_default()
     ));
+
     std::fs::rename(&staging, &named).map_err(image_io(&staging))?;
     Ok(named)
 }
@@ -535,6 +562,7 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
     let (Some(first), Some(stub)) = (plan.probes.first(), plan.stubs.first()) else {
         return Err(CheckError::NoProbe);
     };
+
     let spec = PayloadSpec {
         name: first.name.clone(),
         version: first.version.clone(),
@@ -544,10 +572,12 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
         files: Vec::new(),
         stubs: vec![stub.clone()],
     };
+
     let files = JobFiles {
         warm: Some(image.to_path_buf()),
         ..JobFiles::named(&sandbox.setup, "warm-check")
     };
+
     let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
     let run = RunPlan::check(sandbox.setup.check_timeout);
     let result = sandbox.execute(0, spec, &tokens, &files, &run).await;
@@ -563,15 +593,18 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
         compiled,
         "warm build cache promotion check"
     );
+
     if report.outcome != BuildOutcome::Succeeded {
         return Err(CheckError::Ended {
             outcome: report.outcome,
             stderr: crate::trace::render(report.stderr_tail.as_bytes()),
         });
     }
+
     if compiled > PROMOTION_MAX_UNITS {
         return Err(CheckError::Compiled(compiled));
     }
+
     // Everything but the unit count applies as for the warm build.
     match rejection(&report).filter(|w| !w.contains("compiled nothing")) {
         Some(why) => Err(CheckError::Rejected(why)),
@@ -623,19 +656,24 @@ mod tests {
             sample("b", &[serde, rare]),
             sample("c", &[serde]),
         ];
+
         let blobs = stored(&samples);
         let all: HashSet<String> = blobs.keys().cloned().collect();
         let plan = plan(&samples, &all, &blobs, 2, 10);
+
         // `b` locks `rare`, which only one sample locks.
         assert_eq!(plan.stubs, ["a-1.0.0", "c-1.0.0"]);
         assert_eq!(plan.units, 1);
+
         let text = script(&plan, 900);
         assert!(text.contains(
             "cd /cw/probe && timeout -k 10 900 cargo check --locked --offline --keep-going\n\
              case $? in 124|137) slow=\"$slow a-1.0.0\" ;; esac\n"
         ));
+
         assert!(text.contains("cd /cw/probes/0 && "));
         assert!(text.ends_with("echo \"crateward-warm: timed out:$slow\" >&2\n"));
+
         // The gate: nothing eligible, nothing replayed.
         assert!(
             super::plan(&samples, &HashSet::new(), &blobs, 2, 10)
@@ -651,16 +689,23 @@ mod tests {
         ))
         .unwrap();
         let warm = config.sandbox.warm.take().unwrap();
+
         // Three slots of 1 vCPU, 4 GiB and a 4 GiB scratch disk: 24 GiB,
         // less the 8 GiB scratch disk of the warm build, halved.
         assert_eq!(machine(&config.sandbox, &warm), Some((3, 8192)));
+
         config.sandbox.scratch_mib_per_slot = 2048;
+
         assert_eq!(machine(&config.sandbox, &warm), Some((3, 5120)));
+
         // Not more than one slot has.
         config.sandbox.scratch_mib_per_slot = 512;
+
         assert_eq!(machine(&config.sandbox, &warm), None);
+
         config.sandbox.scratch_mib_per_slot = 4096;
         config.sandbox.slots = 1;
+
         assert_eq!(machine(&config.sandbox, &warm), None);
     }
 
@@ -672,11 +717,13 @@ mod tests {
             sample("x", &[("serde", "1.0.0"), ("a", "1.0.0")]),
             sample("y", &[("serde", "1.0.0"), ("a", "1.0.0")]),
         ];
+
         let blobs = stored(&samples);
         let mut blobs = blobs;
         blobs.insert("sum-a-1.0.0".into(), "blob".into());
         let all: HashSet<String> = blobs.keys().cloned().collect();
         let plan = plan(&samples, &all, &blobs, 2, 10);
+
         assert_eq!(plan.stubs, ["a-1.0.0"]);
     }
 
@@ -684,6 +731,7 @@ mod tests {
     fn an_image_that_cannot_be_read_names_its_path() {
         let path = Path::new("/nonexistent/warm.erofs");
         let error = blake3_file(path).map_err(image_io(path)).unwrap_err();
+
         assert!(matches!(error, WarmError::Image { .. }));
         assert!(error.to_string().starts_with("/nonexistent/warm.erofs: "));
     }
@@ -694,11 +742,14 @@ mod tests {
             sample("a", &[("serde", "1.0.0")]),
             sample("b", &[("serde", "1.0.0")]),
         ];
+
         let blobs: HashMap<String, String> =
             [("sum-serde-1.0.0".to_owned(), "b".to_owned())].into();
         let all: HashSet<String> = blobs.keys().cloned().collect();
+
         assert!(plan(&samples, &all, &blobs, 2, 10).probes.is_empty());
     }
+
     use crate::scratch::Entry;
     use crate::trace::{FileAccess, Process, Role, SocketUse, Tamper};
     use crate::worker::{Connection, Leak, NetworkSummary};
@@ -856,6 +907,7 @@ mod tests {
                 r.network.udp_datagrams = 1;
             }),
         ];
+
         for (expected, change) in cases {
             assert_eq!(rejected(change).as_deref(), Some(expected));
         }
@@ -898,10 +950,13 @@ mod tests {
                 r.scratch = Some(ScratchReport::default());
             }),
         ];
+
         for (expected, fix) in steps {
             assert_eq!(rejection(&report).as_deref(), Some(expected));
+
             fix(&mut report);
         }
+
         assert_eq!(
             rejection(&report).as_deref(),
             Some("the replays compiled nothing")
@@ -940,6 +995,7 @@ mod tests {
             ("/work/link", |s| s.links_outside.clear()),
             ("/work/home/.aws/credentials", |s| s.planted_changed.clear()),
         ];
+
         for (expected, fix) in steps {
             assert_eq!(
                 rejection(&report),
@@ -947,8 +1003,10 @@ mod tests {
                     "the scratch disk holds unexpected entries: {expected}"
                 ))
             );
+
             fix(report.scratch.as_mut().unwrap());
         }
+
         assert_eq!(rejection(&report), None);
     }
 }

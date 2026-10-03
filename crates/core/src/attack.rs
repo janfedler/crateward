@@ -29,6 +29,7 @@ impl Technique {
         if self.id.starts_with("TA") {
             return format!("https://attack.mitre.org/tactics/{}/", self.id);
         }
+
         format!(
             "https://attack.mitre.org/techniques/{}/",
             self.id.replace('.', "/")
@@ -202,12 +203,15 @@ fn finding(kind: &str) -> Vec<Technique> {
 #[must_use]
 pub fn techniques(signal: &str, location: Option<&str>) -> Vec<Technique> {
     let location = location.unwrap_or_default();
+
     if let Some(kind) = signal.strip_prefix("static:") {
         return finding(kind);
     }
+
     if signal.starts_with("exec_") {
         return execution(signal, location);
     }
+
     match signal {
         "read_cargo_credentials" | "read_git_credentials" | "read_aws" | "read_secrets" => {
             vec![CREDENTIAL_FILES]

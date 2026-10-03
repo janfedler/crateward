@@ -86,6 +86,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             analyzer.policies.clone(),
             stop.clone(),
         ));
+
         while !stop.is_requested() {
             // Idle time goes to reports an older analyzer wrote.
             if !analyzer.run_once().await.map_err(fatal)?
@@ -94,6 +95,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 stop.sleep(Duration::from_secs(1)).await;
             }
         }
+
         tracing::info!("stopping");
         Ok(())
     })

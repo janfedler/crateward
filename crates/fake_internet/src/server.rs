@@ -128,10 +128,12 @@ pub enum EventKind {
 #[must_use]
 pub fn hex(data: &[u8]) -> String {
     use std::fmt::Write as _;
+
     let mut out = String::with_capacity(data.len() * 2);
     for b in data {
         let _ = write!(out, "{b:02x}");
     }
+
     out
 }
 
@@ -139,9 +141,11 @@ pub fn hex(data: &[u8]) -> String {
 #[must_use]
 pub fn unhex(text: &str) -> Option<Vec<u8>> {
     let (pairs, rest) = text.as_bytes().as_chunks::<2>();
+
     if !rest.is_empty() {
         return None;
     }
+
     pairs
         .iter()
         .map(|[a, b]| {
@@ -165,12 +169,15 @@ impl Log {
             MAX_EVENTS => EventKind::Truncated,
             _ => return,
         };
+
         let event = Event {
             ms: u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX),
             kind,
         };
+
         if let Ok(mut line) = serde_json::to_vec(&event) {
             line.push(b'\n');
+
             // A full disk or a closed log ends logging, not the sinks.
             let _ = self.out.write_all(&line).and_then(|()| self.out.flush());
         }
@@ -191,13 +198,16 @@ fn serve_dns(socket: &UdpSocket, address: Ipv4Addr, log: &Shared) {
         let Ok((len, from)) = socket.recv_from(&mut buffer) else {
             continue;
         };
+
         let query = buffer.get(..len).unwrap_or_default();
         let Some(question) = dns::parse_query(query) else {
             continue;
         };
+
         if let Some(reply) = dns::answer(query, &question, address) {
             let _ = socket.send_to(&reply, from);
         }
+
         emit(
             log,
             EventKind::Dns {
@@ -214,6 +224,7 @@ fn serve_udp(socket: &UdpSocket, log: &Shared) {
         let Ok((len, _)) = socket.recv_from(&mut buffer) else {
             continue;
         };
+
         let data = buffer.get(..len).unwrap_or_default();
         emit(
             log,
@@ -231,10 +242,12 @@ fn complete(data: &[u8], plaintext: bool) -> bool {
     if data.len() >= MAX_CAPTURE {
         return true;
     }
+
     if let Some(end) = http_header_end(data) {
         let body = content_length(data.get(..end).unwrap_or_default()).unwrap_or(0);
         return data.len() >= end.saturating_add(body);
     }
+
     !plaintext && matches!(sniff(data), Sniffed::Tls { .. })
 }
 
@@ -250,24 +263,30 @@ fn read_request(
     let mut data = Vec::new();
     let mut total = 0_u64;
     let mut buffer = [0_u8; 16 * 1024];
+
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() || !timeout(left) {
             break;
         }
+
         let Ok(read) = reader.read(&mut buffer) else {
             break;
         };
+
         if read == 0 {
             break;
         }
+
         total += read as u64;
         let room = MAX_CAPTURE.saturating_sub(data.len());
         data.extend_from_slice(buffer.get(..read.min(room)).unwrap_or_default());
+
         if complete(&data, plaintext) {
             break;
         }
     }
+
     (data, total)
 }
 
@@ -283,11 +302,14 @@ impl Read for Replay<'_> {
         if self.prefix.is_empty() {
             return self.stream.read(buf);
         }
+
         let n = self.prefix.len().min(buf.len());
         let (head, rest) = self.prefix.split_at(n);
+
         if let Some(target) = buf.get_mut(..n) {
             target.copy_from_slice(head);
         }
+
         self.prefix = rest;
         Ok(n)
     }
@@ -297,6 +319,7 @@ impl Write for Replay<'_> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.stream.write(buf)
     }
+
     fn flush(&mut self) -> std::io::Result<()> {
         self.stream.flush()
     }
@@ -318,19 +341,23 @@ fn terminate(
         prefix: hello,
         stream,
     };
+
     let (plain, _) = {
         let mut tls = rustls::Stream::new(&mut conn, &mut io);
         read_request(&mut tls, |_| true, deadline, true)
     };
+
     if conn.is_handshaking() {
         return None;
     }
+
     if matches!(sniff(&plain), Sniffed::Http { .. }) {
         let mut tls = rustls::Stream::new(&mut conn, &mut io);
         let _ = tls.write_all(HTTP_RESPONSE);
         tls.conn.send_close_notify();
         let _ = tls.flush();
     }
+
     Some(plain)
 }
 
@@ -351,8 +378,10 @@ fn handle(mut stream: TcpStream, log: &Shared, tls: Option<&Arc<rustls::ServerCo
         deadline,
         false,
     );
+
     let sniffed = sniff(&data);
     let mut decrypted = None;
+
     match (&sniffed, tls) {
         (Sniffed::Http { .. }, _) => {
             let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
@@ -366,6 +395,7 @@ fn handle(mut stream: TcpStream, log: &Shared, tls: Option<&Arc<rustls::ServerCo
         }
         _ => {}
     }
+
     emit(
         log,
         EventKind::Tcp {
@@ -381,10 +411,12 @@ fn handle(mut stream: TcpStream, log: &Shared, tls: Option<&Arc<rustls::ServerCo
 
 fn serve_tcp(listener: &TcpListener, log: &Shared, tls: Option<&Arc<rustls::ServerConfig>>) {
     let active = Arc::new(AtomicUsize::new(0));
+
     for stream in listener.incoming() {
         let Ok(stream) = stream else {
             continue;
         };
+
         if active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             active.fetch_sub(1, Ordering::SeqCst);
             let dst = rustix::net::sockopt::ip_original_dst(&stream)
@@ -392,6 +424,7 @@ fn serve_tcp(listener: &TcpListener, log: &Shared, tls: Option<&Arc<rustls::Serv
             emit(log, EventKind::Refused { dst });
             continue;
         }
+
         let log = Arc::clone(log);
         let active = Arc::clone(&active);
         let tls = tls.cloned();
@@ -430,11 +463,13 @@ pub fn serve(
         start: Instant::now(),
         events: 0,
     }));
+
     let dns_log = Arc::clone(&log);
     let address = config.address;
     std::thread::spawn(move || serve_dns(&dns_socket, address, &dns_log));
     let udp_log = Arc::clone(&log);
     std::thread::spawn(move || serve_udp(&udp_socket, &udp_log));
+
     if let Some(socket) = capture {
         let packet_log = Arc::clone(&log);
         std::thread::spawn(move || {
@@ -447,10 +482,12 @@ pub fn serve(
                     },
                     None => EventKind::PacketLimit,
                 };
+
                 emit(&packet_log, kind);
             });
         });
     }
+
     serve_tcp(&listener, &log, tls.as_ref());
     Ok(())
 }
@@ -462,6 +499,7 @@ mod tests {
     #[test]
     fn hex_round_trips() {
         let data = b"\x00\xffabc";
+
         assert_eq!(unhex(&hex(data)).unwrap(), data);
         assert!(unhex("abc").is_none());
         assert!(unhex("zz").is_none());
@@ -476,6 +514,7 @@ mod tests {
             self.0.lock().unwrap().extend_from_slice(buf);
             Ok(buf.len())
         }
+
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
@@ -490,6 +529,7 @@ mod tests {
             tcp_port: 0,
             udp_port: 0,
         };
+
         // Bind to ephemeral ports by hand to learn the TCP port.
         let listener = TcpListener::bind((config.address, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -498,6 +538,7 @@ mod tests {
             start: Instant::now(),
             events: 0,
         }));
+
         let server_log = Arc::clone(&log);
         std::thread::spawn(move || serve_tcp(&listener, &server_log, None));
         let mut client = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
@@ -505,11 +546,14 @@ mod tests {
         client.write_all(request).unwrap();
         let mut reply = Vec::new();
         client.read_to_end(&mut reply).unwrap();
+
         assert!(reply.starts_with(b"HTTP/1.1 404"));
+
         let deadline = Instant::now() + Duration::from_secs(5);
         while sink.0.lock().unwrap().is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
+
         let text = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
         let event: Event = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         let EventKind::Tcp {
@@ -521,6 +565,7 @@ mod tests {
         else {
             panic!("{text}");
         };
+
         assert!(matches!(sniffed, Sniffed::Http { .. }));
         assert_eq!(bytes, request.len() as u64);
         assert!(unhex(&data).unwrap().ends_with(b"token"));

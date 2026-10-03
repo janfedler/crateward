@@ -216,20 +216,25 @@ impl Scanner<'_> {
         let mut read_total = 0_u64;
         let mut elf = false;
         let mut found = vec![false; self.spec.tokens.len()];
+
         while read_total < MAX_FILE_SEARCH && self.searched < MAX_TOTAL_SEARCH {
             let n = file.read_bytes(&mut buffer)?;
             if n == 0 {
                 break;
             }
+
             let chunk = buffer.get(..n).unwrap_or_default();
             if read_total == 0 {
                 elf = chunk.starts_with(b"\x7fELF");
             }
+
             read_total += n as u64;
             self.searched += n as u64;
+
             // Keep the tail of the previous chunk, so a token split across
             // two reads is still found.
             window.extend_from_slice(chunk);
+
             for (i, token) in self.spec.tokens.iter().enumerate() {
                 if !found.get(i).copied().unwrap_or(true)
                     && !token.is_empty()
@@ -238,16 +243,20 @@ impl Scanner<'_> {
                     if let Some(f) = found.get_mut(i) {
                         *f = true;
                     }
+
                     let r = &mut self.report;
                     push(&mut r.tokens_found, &mut r.omitted, (i, guest.to_owned()));
                 }
             }
+
             let keep = window.len().saturating_sub(longest);
             window.drain(..keep);
         }
+
         if read_total >= MAX_FILE_SEARCH || self.searched >= MAX_TOTAL_SEARCH {
             self.report.incomplete = true;
         }
+
         Ok(elf)
     }
 
@@ -264,6 +273,7 @@ impl Scanner<'_> {
         } else {
             None
         };
+
         Ok(Entry {
             path: format!("{WORK}{relative}"),
             kind: kind(file_type).into(),
@@ -279,16 +289,20 @@ impl Scanner<'_> {
             self.report.incomplete = true;
             return Ok(());
         }
+
         for entry in self.fs.read_dir(path.as_path())? {
             let entry = entry?;
             if matches!(entry.file_name().as_ref(), b"." | b"..") {
                 continue;
             }
+
             self.entries += 1;
+
             if self.entries > MAX_ENTRIES {
                 self.report.incomplete = true;
                 return Ok(());
             }
+
             let child = entry.path();
             let relative = render(child.as_ref());
             let meta = entry.metadata()?;
@@ -302,12 +316,15 @@ impl Scanner<'_> {
             if stray {
                 push(&mut r.outside_build, &mut r.omitted, item.clone());
             }
+
             if item.mode & 0o6000 != 0 && file_type != FileType::Directory {
                 push(&mut r.setid, &mut r.omitted, item.clone());
             }
+
             match file_type {
                 FileType::Directory => {
                     r.directories += 1;
+
                     if relative != "/lost+found" {
                         self.visit(&child, depth + 1)?;
                     }
@@ -318,6 +335,7 @@ impl Scanner<'_> {
                         push(&mut r.links_outside, &mut r.omitted, item);
                     }
                 }
+
                 // Overlayfs records a deleted lower file as a character
                 // device (a whiteout), prepared in its work directory and
                 // moved into the upper one.
@@ -325,6 +343,7 @@ impl Scanner<'_> {
                 _ => push(&mut r.special, &mut r.omitted, item),
             }
         }
+
         Ok(())
     }
 
@@ -340,6 +359,7 @@ impl Scanner<'_> {
     ) -> Result<(), Ext4Error> {
         let r = &mut self.report;
         r.files += 1;
+
         if let Some(unit) = unit_name(relative) {
             if r.units.len() < MAX_UNITS {
                 r.units.push(unit.to_owned());
@@ -347,6 +367,7 @@ impl Scanner<'_> {
                 r.omitted += 1;
             }
         }
+
         r.bytes = r.bytes.saturating_add(item.size);
         let elf = !planted && self.search(child, &item.path)?;
         let executable = item.mode & 0o111 != 0 || elf;
@@ -355,6 +376,7 @@ impl Scanner<'_> {
             let r = &mut self.report;
             push(&mut r.executables_outside_target, &mut r.omitted, item);
         }
+
         Ok(())
     }
 }
@@ -370,10 +392,12 @@ pub fn scan(fs: &Ext4, spec: &ScanSpec) -> ScratchReport {
         entries: 0,
         searched: 0,
     };
+
     if let Err(error) = scanner.visit(&ExtPath::new("/"), 0) {
         scanner.report.error = Some(error.to_string());
         scanner.report.incomplete = true;
     }
+
     for planted in &spec.planted {
         let relative = planted.strip_prefix(WORK).unwrap_or(planted);
         let intact = fs.read(relative).is_ok_and(|data| {
@@ -381,10 +405,12 @@ pub fn scan(fs: &Ext4, spec: &ScanSpec) -> ScratchReport {
                 .iter()
                 .any(|t| !t.is_empty() && data.windows(t.len()).any(|w| w == t.as_bytes()))
         });
+
         if !intact {
             scanner.report.planted_changed.push(planted.clone());
         }
     }
+
     scanner.report
 }
 
@@ -422,6 +448,7 @@ pub fn unit_owner(parent: &str, name: &str) -> Option<String> {
         (hash.len() == 16 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
             .then(|| owner.replace('-', "_"))
     };
+
     match parent.rsplit('/').next()? {
         ".fingerprint" | "build" => strip_hash(name),
         "deps" => {
@@ -491,50 +518,63 @@ pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, 
     let mut builder = tar::Builder::new(out);
     let mut stack = vec![(ExtPath::new("/target"), 0_usize)];
     let (mut entries, mut bytes) = (0_u64, 0_u64);
+
     while let Some((dir, depth)) = stack.pop() {
         if depth > MAX_DEPTH {
             return Err(ExportError::TooDeep);
         }
+
         let name = tar_name(&dir)?;
         let mut header = tar_header(tar::EntryType::Directory, &fs.metadata(dir.as_path())?, 0);
         builder.append_data(&mut header, format!("{name}/"), io::empty())?;
+
         for entry in fs.read_dir(dir.as_path())? {
             let entry = entry?;
             if matches!(entry.file_name().as_ref(), b"." | b"..") {
                 continue;
             }
+
             entries += 1;
+
             if entries > MAX_EXPORT_ENTRIES {
                 return Err(ExportError::TooManyEntries);
             }
+
             let path = entry.path();
             let file_name = render(entry.file_name().as_ref());
             if unit_owner(&name, &file_name).is_some_and(|owner| excluded.contains(&owner)) {
                 continue;
             }
+
             let meta = entry.metadata()?;
             match meta.file_type() {
                 FileType::Directory => stack.push((path, depth + 1)),
                 FileType::Regular => {
                     let name = tar_name(&path)?;
                     bytes = bytes.saturating_add(meta.len());
+
                     if bytes > MAX_EXPORT_BYTES {
                         return Err(ExportError::TooLarge);
                     }
+
                     let mut header = tar_header(tar::EntryType::Regular, &meta, meta.len());
+
                     // A reader that yields exactly the announced size.
                     let mut data = Vec::new();
                     let file = fs.open(path.as_path())?;
                     file.take(meta.len()).read_to_end(&mut data)?;
+
                     if data.len() as u64 != meta.len() {
                         return Err(ExportError::Short(name));
                     }
+
                     builder.append_data(&mut header, &name, data.as_slice())?;
                 }
                 _ => {}
             }
         }
     }
+
     builder.into_inner()?.flush()?;
     Ok((entries, bytes))
 }
@@ -602,21 +642,25 @@ pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), GeometryE
             .map(u32::from_le_bytes)
             .ok_or(GeometryError::Truncated)
     };
+
     let blocks = u64::from(u32_at(0x150)?) << 32 | u64::from(u32_at(0x4)?);
     let first_data_block = u64::from(u32_at(0x14)?);
     let log_block_size = u32_at(0x18)?;
     let blocks_per_group = u64::from(u32_at(0x20)?);
     let incompat = u32_at(0x60)?;
     let desc_size = u32_at(0xfc)? >> 16;
+
     if log_block_size > 6 || blocks_per_group == 0 {
         return Err(GeometryError::Impossible);
     }
+
     let block_size = 1024_u64 << log_block_size;
     let desc_size = if incompat & 0x80 == 0 {
         32
     } else {
         u64::from(desc_size).max(64)
     };
+
     let groups = blocks
         .saturating_sub(first_data_block)
         .div_ceil(blocks_per_group);
@@ -624,6 +668,7 @@ pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), GeometryE
     {
         return Err(GeometryError::TooLarge { blocks, groups });
     }
+
     Ok(())
 }
 
@@ -692,6 +737,7 @@ fn serve_scan(spec: Option<&String>) -> Result<(), Box<dyn Error>> {
             ..ScratchReport::default()
         },
     };
+
     let mut stdout = io::stdout().lock();
     serde_json::to_writer(&mut stdout, &report)?;
     stdout.flush()?;
@@ -716,6 +762,7 @@ mod tests {
                 std::fs::write(&full, data)?;
                 std::fs::set_permissions(&full, std::fs::Permissions::from_mode(*mode))?;
             }
+
             Ok(())
         })
     }
@@ -727,6 +774,7 @@ mod tests {
             std::process::id(),
             rand::random::<u32>()
         ));
+
         let root = dir.join("root");
         std::fs::create_dir_all(root.join("target/debug")).ok()?;
         std::fs::create_dir_all(root.join("home/.cargo")).ok()?;
@@ -786,14 +834,18 @@ mod tests {
             eprintln!("skipping: mkfs.ext4 is not available");
             return;
         };
+
         let fs = Ext4::load(Box::new(data)).unwrap();
         let report = scan(&fs, &spec());
+
         assert!(report.error.is_none(), "{:?}", report.error);
+
         let paths: Vec<&str> = report
             .outside_build
             .iter()
             .map(|e| e.path.as_str())
             .collect();
+
         assert!(paths.contains(&"/work/home/.config/autostart/evil.desktop"));
         assert!(paths.contains(&"/work/home/.local/bin/dropper"));
         assert!(!paths.iter().any(|p| p.starts_with("/work/target")));
@@ -841,6 +893,7 @@ mod tests {
                 std::fs::write(&path, b"data")?;
                 std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
             };
+
             write("home/.local/su", 0o4755)?;
             write(".warm/upper/debug/deps/libw-0123456789abcdef.rlib", 0o755)?;
             write(".warm/other/tool", 0o755)?;
@@ -863,8 +916,10 @@ mod tests {
             eprintln!("skipping: mkfs.ext4 is not available");
             return;
         };
+
         let fs = Ext4::load(Box::new(data)).unwrap();
         let report = scan(&fs, &spec());
+
         assert_eq!(report.error, None);
         assert!(!report.incomplete);
         assert_eq!(
@@ -902,8 +957,10 @@ mod tests {
             paths(&report.executables_outside_target),
             ["/work/.warm/other/tool", "/work/home/.local/su"]
         );
+
         let mut units = report.units.clone();
         units.sort_unstable();
+
         assert_eq!(units, ["libw-0123456789abcdef.rlib", "z.so"]);
         assert_eq!(
             (report.files, report.bytes, report.directories),
@@ -914,15 +971,18 @@ mod tests {
             report.planted_changed,
             ["/work/home/.cargo/credentials.toml"]
         );
+
         let link = report
             .links_outside
             .iter()
             .find(|e| e.path.ends_with("/abs"));
         let link = link.unwrap();
+
         assert_eq!(
             (link.kind.as_str(), link.target.as_deref()),
             ("symlink", Some("/etc/passwd"))
         );
+
         let su = report.setid.first().unwrap();
         assert_eq!(
             (su.kind.as_str(), su.mode & 0o7777, su.size),
@@ -941,9 +1001,11 @@ mod tests {
         ] {
             assert!(in_build_area(build), "{build}");
         }
+
         for other in ["/targets", "/home/target", "/.warmer", "/home/.cargo", "/"] {
             assert!(!in_build_area(other), "{other}");
         }
+
         assert!(is_cargo_state("/home/.cargo/.package-cache-mutate"));
         assert!(is_cargo_state("/home/.cargo/registry/CACHEDIR.TAG"));
         assert!(!is_cargo_state("/home/.cargo/registry/src"));
@@ -969,10 +1031,13 @@ mod tests {
             eprintln!("skipping: mkfs.ext4 is not available");
             return;
         };
+
         let fs = Ext4::load(Box::new(data)).unwrap();
         let report = scan(&fs, &spec());
+
         assert_eq!(report.error, None);
         assert!(report.incomplete);
+
         // The file below the limit is not seen.
         assert_eq!(report.files, 0);
     }
@@ -1001,11 +1066,13 @@ mod tests {
         ]) else {
             return;
         };
+
         let fs = Ext4::load(Box::new(data)).unwrap();
         let mut tar = Vec::new();
         export(&fs, &mut tar, &["stub-crate".into()]).unwrap();
         let mut archive = tar::Archive::new(tar.as_slice());
         let mut seen = Vec::new();
+
         for entry in archive.entries().unwrap() {
             let entry = entry.unwrap();
             let path = entry.path().unwrap().to_string_lossy().into_owned();
@@ -1013,8 +1080,10 @@ mod tests {
                 // Set ID bits never survive.
                 assert_eq!(entry.header().mode().unwrap(), 0o755);
             }
+
             seen.push(path);
         }
+
         assert!(seen.contains(&"target/debug/deps/libx-0123.rmeta".to_owned()));
         assert!(seen.contains(&"target/debug/.fingerprint/x-0123/lib-x".to_owned()));
         assert!(seen.iter().all(|p| p.starts_with("target/")));
@@ -1024,6 +1093,7 @@ mod tests {
     #[test]
     fn unit_owners_follow_cargo_names() {
         let h = "0123456789abcdef";
+
         assert_eq!(
             unit_owner("target/debug/.fingerprint", &format!("serde-json-{h}")).as_deref(),
             Some("serde_json")
@@ -1055,26 +1125,34 @@ mod tests {
         let mut sb = vec![0_u8; 1024];
         sb[0x4..0x8].copy_from_slice(&u32::MAX.to_le_bytes());
         sb[0x20..0x24].copy_from_slice(&1_u32.to_le_bytes());
+
         assert!(matches!(
             check_geometry(&sb, 1 << 20),
             Err(GeometryError::TooLarge { .. })
         ));
+
         sb[0x4..0x8].copy_from_slice(&1024_u32.to_le_bytes());
+
         assert_eq!(check_geometry(&sb, 1 << 20), Ok(()));
+
         sb[0x150..0x154].copy_from_slice(&1_u32.to_le_bytes());
+
         assert!(matches!(
             check_geometry(&sb, 1 << 20),
             Err(GeometryError::TooLarge { .. })
         ));
+
         let Some(data) = image(&[("/target/debug/x", b"x", 0o644)]) else {
             return;
         };
+
         assert_eq!(check_geometry(&data[1024..2048], data.len() as u64), Ok(()));
     }
 
     #[test]
     fn a_superblock_that_cannot_be_read_or_makes_no_sense_is_named() {
         let sb = vec![0_u8; 1024];
+
         assert_eq!(
             check_geometry(&sb[..100], 1 << 20),
             Err(GeometryError::Truncated)
@@ -1088,6 +1166,7 @@ mod tests {
         let Some(data) = image(&[(deep.as_str(), b"x", 0o644)]) else {
             return;
         };
+
         let fs = Ext4::load(Box::new(data)).unwrap();
         assert!(matches!(
             export(&fs, io::sink(), &[]),
@@ -1101,6 +1180,7 @@ mod tests {
         for (i, b) in data.iter_mut().enumerate() {
             *b = (i.wrapping_mul(2_654_435_761) >> 13) as u8;
         }
+
         assert!(Ext4::load(Box::new(data)).is_err());
     }
 
@@ -1109,8 +1189,10 @@ mod tests {
         let Some(data) = image(&[("/target/debug/x", b"x", 0o644)]) else {
             return;
         };
+
         let fs = Ext4::load(Box::new(data)).unwrap();
         let report = scan(&fs, &spec());
+
         assert_eq!(
             report.planted_changed,
             ["/work/home/.cargo/credentials.toml"]

@@ -76,14 +76,17 @@ impl Honeytokens {
             owner,
             mode,
         };
+
         let file = |path: &str, contents: String| FileSpec {
             path: dir(path, 0o600),
             contents: contents.into_bytes(),
         };
+
         let token = |kind, value: &str| Token {
             kind,
             value: value.to_owned(),
         };
+
         Self {
             tokens: vec![
                 token("cargo_registry_token", &cargo),
@@ -154,12 +157,16 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(7);
         let a = Honeytokens::generate(&mut rng, 1000);
         let b = Honeytokens::generate(&mut rng, 1000);
+
         assert_ne!(a.records(), b.records());
+
         let cargo = &a.tokens[0].value;
         assert!(cargo.starts_with("cio") && cargo.len() == 35);
         assert!(a.tokens[3].value.starts_with("AKIA") && a.tokens[3].value.len() == 20);
+
         let leaked = format!("POST /x HTTP/1.1\r\n\r\ntoken={cargo}");
         let found = Honeytokens::found_in(&a.tokens, leaked.as_bytes());
+
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, "cargo_registry_token");
         assert!(Honeytokens::found_in(&b.tokens, leaked.as_bytes()).is_empty());
@@ -171,6 +178,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(7);
         let set = Honeytokens::generate(&mut rng, 1000);
         let kinds: Vec<_> = set.tokens.iter().map(|t| t.kind).collect();
+
         assert_eq!(
             kinds,
             [
@@ -182,6 +190,7 @@ mod tests {
                 "ssh_private_key",
             ]
         );
+
         let value = |kind: &str| {
             set.tokens
                 .iter()
@@ -190,11 +199,13 @@ mod tests {
                 .value
                 .clone()
         };
+
         let directories: Vec<_> = set
             .directories
             .iter()
             .map(|d| (d.path.as_str(), d.owner, d.mode))
             .collect();
+
         assert_eq!(
             directories,
             [
@@ -204,6 +215,7 @@ mod tests {
                 ("/work/home/.aws", 1000, 0o755),
             ]
         );
+
         let files: Vec<_> = set
             .files
             .iter()
@@ -219,6 +231,7 @@ mod tests {
              -----END OPENSSH PRIVATE KEY-----\n",
             value("ssh_private_key")
         );
+
         assert_eq!(
             files,
             [
@@ -268,6 +281,7 @@ mod tests {
     fn a_seed_gives_the_same_values() {
         let make = || Honeytokens::generate(&mut rand::rngs::StdRng::seed_from_u64(7), 1000);
         let expected = make().records();
+
         assert_eq!(make().records(), expected);
     }
 }

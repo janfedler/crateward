@@ -119,6 +119,7 @@ impl Platform {
         if p.contains("not(") {
             return Self::Any;
         }
+
         if p.contains("windows") {
             Self::Windows
         } else if p.contains("target_os=\"macos\"")
@@ -265,18 +266,22 @@ fn must_escape(c: char) -> bool {
 #[must_use]
 pub fn evidence(text: &str) -> String {
     let mut out = String::new();
+
     for c in text.chars() {
         let piece = if must_escape(c) {
             format!("\\u{{{:x}}}", u32::from(c))
         } else {
             c.to_string()
         };
+
         if out.len() + piece.len() > MAX_EVIDENCE {
             out.push('…');
             return out;
         }
+
         out.push_str(&piece);
     }
+
     out
 }
 
@@ -293,6 +298,7 @@ mod tests {
             Severity::High,
         ] {
             let value = serde_json::to_value(severity).unwrap();
+
             assert_eq!(value.as_str(), Some(severity.name()));
         }
     }
@@ -301,9 +307,11 @@ mod tests {
     fn platform_and_context_names_are_the_serialized_names() {
         use CodeContext::*;
         use Platform::*;
+
         for platform in [Any, Linux, Unix, Windows, Apple] {
             assert_eq!(serde_json::to_value(platform).unwrap(), platform.name());
         }
+
         for context in [BuildScript, ProcMacro, Library, Binary, Test] {
             assert_eq!(serde_json::to_value(context).unwrap(), context.name());
         }
@@ -334,8 +342,10 @@ mod tests {
             YaraMatch { rule: "r".into() },
             UnparsableSource,
         ];
+
         for kind in kinds {
             let value = serde_json::to_value(&kind).unwrap();
+
             assert_eq!(value["kind"], kind.name());
         }
     }
@@ -356,6 +366,7 @@ mod tests {
     fn evidence_is_truncated_on_character_boundaries() {
         let long = "é".repeat(300);
         let e = evidence(&long);
+
         assert!(e.ends_with('…'));
         assert!(e.len() <= MAX_EVIDENCE + '…'.len_utf8());
     }

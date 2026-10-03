@@ -87,6 +87,7 @@ pub fn dispatch(args: &[String]) -> Option<ExitCode> {
         [_, RESOLVE, ..] => Err("usage: sandbox-resolve <workdir> <proxy-socket> <cargo>".into()),
         _ => return None,
     };
+
     Some(child::exit(result))
 }
 
@@ -109,13 +110,16 @@ fn relay(tcp: TcpStream, socket: &Path) {
     let Ok(unix) = UnixStream::connect(socket) else {
         return;
     };
+
     let (Ok(mut tcp_read), Ok(mut unix_write)) = (tcp.try_clone(), unix.try_clone()) else {
         return;
     };
+
     let upstream = std::thread::spawn(move || {
         let _ = io::copy(&mut tcp_read, &mut unix_write);
         let _ = unix_write.shutdown(Shutdown::Write);
     });
+
     let (mut tcp_write, mut unix_read) = (tcp, unix);
     let _ = io::copy(&mut unix_read, &mut tcp_write);
     let _ = tcp_write.shutdown(Shutdown::Write);
@@ -132,6 +136,7 @@ fn serve_relay(socket: &Path) -> Result<u16, Box<dyn Error>> {
     if !up.is_ok_and(|status| status.success()) {
         return Err("cannot bring loopback up".into());
     }
+
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     let socket = socket.to_path_buf();
@@ -153,6 +158,7 @@ fn write_cargo_config(workdir: &Path, port: u16) -> io::Result<()> {
          [source.crateward-proxy]\nregistry = \"sparse+http://127.0.0.1:{port}/index/\"\n\n\
          [net]\nretry = 1\n"
     );
+
     std::fs::write(dir.join("config.toml"), config)
 }
 
@@ -208,6 +214,7 @@ fn run_cargo(workdir: &Path, cargo: &Path) -> Result<ResolveOutcome, ChildError>
         Err(ChildError::TimedOut { .. }) => Some("cargo generate-lockfile timed out".to_owned()),
         Err(other) => return Err(other),
     };
+
     Ok(ResolveOutcome {
         ok: failure.is_none(),
         message: failure.unwrap_or_default(),
@@ -246,6 +253,7 @@ pub fn validate_in_sandbox(
         });
         child.output(MAX_REPORT_BYTES)
     })?;
+
     serde_json::from_slice(&report).map_err(|e| ChildError::answer(VALIDATE_NAME, e))
 }
 

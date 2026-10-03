@@ -89,14 +89,18 @@ async fn handshake(stream: &mut UnixStream, port: u32) -> Result<(), AgentError>
         if stream.read(&mut byte).await? == 0 {
             return Err(AgentError::NotReady("no listener on the vsock port".into()));
         }
+
         if byte == *b"\n" {
             break;
         }
+
         line.extend_from_slice(&byte);
+
         if line.len() > MAX_HANDSHAKE_LINE {
             return Err(AgentError::Unexpected("overlong vsock handshake".into()));
         }
     }
+
     if line.starts_with(b"OK ") {
         Ok(())
     } else {
@@ -124,6 +128,7 @@ impl AgentConnection {
             agent_version: String::new(),
             tracing: TracingStatus::Unavailable("no Hello yet".into()),
         };
+
         connection
             .send(&HostMessage::Hello {
                 version: PROTOCOL_VERSION,
@@ -166,6 +171,7 @@ impl AgentConnection {
                     if Instant::now() >= deadline {
                         return Err(AgentError::NotReady(reason));
                     }
+
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
                 Ok(Err(other)) => return Err(other),
@@ -184,10 +190,12 @@ impl AgentConnection {
             if let Some(message) = self.decoder.next_message()? {
                 return Ok(message);
             }
+
             let read = self.stream.read(&mut self.buffer).await?;
             if read == 0 {
                 return Err(AgentError::Closed);
             }
+
             self.decoder
                 .push(self.buffer.get(..read).unwrap_or_default())?;
         }
@@ -200,6 +208,7 @@ impl AgentConnection {
     /// Fails if the agent does not answer `Pong`.
     pub async fn ping(&mut self) -> Result<(), AgentError> {
         self.send(&HostMessage::Ping).await?;
+
         match self.recv().await? {
             GuestMessage::Pong => Ok(()),
             other => Err(AgentError::Unexpected(other.name().into())),
@@ -213,6 +222,7 @@ impl AgentConnection {
     /// Fails if the agent refuses or does not answer `Prepared`.
     pub async fn prepare(&mut self, workspace: Workspace) -> Result<(), AgentError> {
         self.send(&HostMessage::Prepare(workspace)).await?;
+
         match self.recv().await? {
             GuestMessage::Prepared => Ok(()),
             GuestMessage::Error(message) => Err(AgentError::Agent(message)),
@@ -237,7 +247,9 @@ impl AgentConnection {
             truncated: false,
             trace: Box::default(),
         };
+
         let mut trace = crate::trace::TraceBuilder::default();
+
         loop {
             match self.recv().await? {
                 GuestMessage::Started { .. } => {}
@@ -247,6 +259,7 @@ impl AgentConnection {
                     if data.len() > room {
                         outcome.truncated = true;
                     }
+
                     let take = data.get(..data.len().min(room)).unwrap_or_default();
                     match stream {
                         OutputStream::Stdout => outcome.stdout.extend_from_slice(take),

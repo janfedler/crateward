@@ -506,6 +506,7 @@ impl Job {
         if state.is_terminal() {
             return Err(TransitionError::Terminal { state });
         }
+
         let not_allowed = TransitionError::NotAllowed { state, event };
         let mut next = *self;
 
@@ -547,10 +548,12 @@ impl Job {
                 if self.dynamic_runs > 0 {
                     return Err(not_allowed);
                 }
+
                 next.triage = Some(Triage::StaticOnly(StaticOnlyReason::CapacityDeadline));
                 next.enter(JobState::StaticallyAnalyzed);
                 Effect::None
             }
+
             (
                 JobState::StaticallyAnalyzed | JobState::DynamicallyAnalyzed,
                 JobEvent::Scored { escalate },
@@ -562,6 +565,7 @@ impl Job {
                     if !may_escalate {
                         return Err(not_allowed);
                     }
+
                     next.escalated = true;
                     next.run_kind = RunKind::Full;
                     next.enter(JobState::ReadyForSandbox);
@@ -569,13 +573,16 @@ impl Job {
                     next.coverage = Some(self.coverage_now());
                     next.enter(JobState::Scored);
                 }
+
                 Effect::None
             }
             (JobState::Scored, JobEvent::Finalized) => {
                 next.outcome = next.coverage.map(Outcome::Analyzed);
+
                 if next.outcome.is_none() {
                     return Err(not_allowed);
                 }
+
                 next.enter(JobState::Done);
                 Effect::None
             }
@@ -583,6 +590,7 @@ impl Job {
             (_, JobEvent::LeaseExpired) => next.fail_attempt(FailureClass::Transient, limits),
             _ => return Err(not_allowed),
         };
+
         Ok(Transition { job: next, effect })
     }
 
@@ -601,6 +609,7 @@ impl Job {
         if self.dynamic_runs > 0 {
             return Coverage::DynamicLinux;
         }
+
         match self.triage {
             Some(Triage::StaticOnly(reason)) => Coverage::StaticOnly(reason),
             Some(Triage::NotApplicableOnLinux) => Coverage::NotApplicableOnLinux,
@@ -622,10 +631,12 @@ impl Job {
         let Some(stage) = self.state.stage() else {
             return Effect::None;
         };
+
         let stage_limits = limits.for_stage(stage);
         match class {
             FailureClass::Transient => {
                 self.attempts = self.attempts.saturating_add(1);
+
                 if self.attempts >= stage_limits.max_attempts {
                     self.fail(FailureReason::RetriesExhausted { stage });
                     Effect::None
@@ -639,6 +650,7 @@ impl Job {
             }
             FailureClass::Infrastructure => {
                 self.infrastructure_retries = self.infrastructure_retries.saturating_add(1);
+
                 if self.infrastructure_retries > stage_limits.max_infrastructure_retries {
                     self.fail(FailureReason::InfrastructureRetriesExhausted { stage });
                     Effect::None
@@ -703,6 +715,7 @@ pub fn representative_events() -> Vec<JobEvent> {
         JobEvent::Finalized,
         JobEvent::LeaseExpired,
     ];
+
     events.extend(
         FailureClass::ALL
             .into_iter()
@@ -746,6 +759,7 @@ pub fn edges() -> Vec<Edge> {
         max_attempts: 2,
         max_infrastructure_retries: 1,
     });
+
     let events = representative_events();
     let mut seen = std::collections::BTreeSet::new();
     let mut frontier = vec![Job::new()];
@@ -754,6 +768,7 @@ pub fn edges() -> Vec<Edge> {
         if !visited.insert(job) {
             continue;
         }
+
         for event in &events {
             if let Ok(transition) = job.apply(*event, &limits) {
                 let (from, to) = (job.state, transition.job.state);
@@ -766,6 +781,7 @@ pub fn edges() -> Vec<Edge> {
             }
         }
     }
+
     seen.into_iter().collect()
 }
 
@@ -779,9 +795,11 @@ pub fn mermaid_diagram() -> String {
     for edge in edges() {
         let _ = writeln!(out, "    {} --> {}: {}", edge.from, edge.to, edge.label);
     }
+
     for state in JobState::ALL.into_iter().filter(|s| s.is_terminal()) {
         let _ = writeln!(out, "    {state} --> [*]");
     }
+
     out
 }
 
@@ -792,6 +810,7 @@ mod tests {
     #[test]
     fn outcome_names_match_the_serialized_form() {
         use BuildOutcome::*;
+
         for outcome in [Succeeded, Failed, TimedOut, ResourceLimit, GuestStopped] {
             assert_eq!(serde_json::to_value(outcome).unwrap(), outcome.name());
         }
@@ -807,6 +826,7 @@ mod tests {
         for event in events {
             job = job.apply(*event, &LIMITS).unwrap().job;
         }
+
         job
     }
 
@@ -824,6 +844,7 @@ mod tests {
             JobEvent::Scored { escalate: false },
             JobEvent::Finalized,
         ]);
+
         assert_eq!(job.state, JobState::Done);
         assert_eq!(job.outcome, Some(Outcome::Analyzed(Coverage::DynamicLinux)));
         assert_eq!(job.last_build, Some(BuildOutcome::Failed));
@@ -839,6 +860,7 @@ mod tests {
             JobEvent::Scored { escalate: false },
             JobEvent::Finalized,
         ]);
+
         assert_eq!(
             job.outcome,
             Some(Outcome::Analyzed(Coverage::StaticOnly(
@@ -857,6 +879,7 @@ mod tests {
             JobEvent::CapacityDeadlineExpired,
             JobEvent::Scored { escalate: false },
         ]);
+
         assert_eq!(
             job.coverage,
             Some(Coverage::StaticOnly(StaticOnlyReason::CapacityDeadline))
@@ -880,6 +903,7 @@ mod tests {
                 outcome: BuildOutcome::Succeeded,
             },
         ]);
+
         assert_eq!(job.run_kind, RunKind::Full);
         assert_eq!(job.dynamic_runs, 2);
         assert!(matches!(
@@ -894,8 +918,10 @@ mod tests {
         let failure = JobEvent::StageFailed {
             class: FailureClass::Transient,
         };
+
         for attempt in 1..3 {
             let t = job.apply(failure, &LIMITS).unwrap();
+
             assert_eq!(
                 t.effect,
                 Effect::RetryAfterBackoff {
@@ -903,9 +929,12 @@ mod tests {
                     attempt
                 }
             );
+
             job = t.job;
+
             assert_eq!(job.state, JobState::Fetched);
         }
+
         let job = job.apply(failure, &LIMITS).unwrap().job;
         assert_eq!(job.state, JobState::Failed);
         assert_eq!(
@@ -927,6 +956,7 @@ mod tests {
             JobEvent::LeaseExpired,
             JobEvent::SandboxStarted,
         ]);
+
         assert_eq!(job.state, JobState::Running);
         assert_eq!(job.attempts, 1);
     }
@@ -940,6 +970,7 @@ mod tests {
             },
             JobEvent::SandboxStarted,
         ]);
+
         let t = job
             .apply(
                 JobEvent::StageFailed {
@@ -948,6 +979,7 @@ mod tests {
                 &LIMITS,
             )
             .unwrap();
+
         assert_eq!(t.job.state, JobState::Failed);
         assert_eq!(
             t.effect,
@@ -975,7 +1007,9 @@ mod tests {
                 .iter()
                 .any(|stage| stage.claimable_states().contains(&state));
             let expected = !state.is_terminal() && state != JobState::Running;
+
             assert_eq!(claimable, expected, "{state}");
+
             if claimable {
                 assert!(
                     state

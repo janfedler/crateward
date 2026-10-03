@@ -215,15 +215,18 @@ pub fn duration(ms: u64) -> String {
 #[must_use]
 pub fn bytes(n: u64) -> String {
     const UNITS: [&str; 4] = ["KiB", "MiB", "GiB", "TiB"];
+
     if n < 1024 {
         return format!("{n} B");
     }
+
     let mut value = n as f64 / 1024.0;
     let mut unit = 0;
     while value >= 1024.0 && unit < UNITS.len() - 1 {
         value /= 1024.0;
         unit += 1;
     }
+
     format!("{value:.1} {}", UNITS.get(unit).copied().unwrap_or("TiB"))
 }
 
@@ -234,11 +237,13 @@ fn open_mode(flags: u64) -> String {
         1 => "write",
         _ => "read and write",
     }];
+
     for (bit, name) in [(0o100, "create"), (0o1000, "truncate"), (0o2000, "append")] {
         if flags & bit != 0 {
             parts.push(name);
         }
     }
+
     parts.join(", ")
 }
 
@@ -279,8 +284,10 @@ fn process_rows(trace: &Value) -> Vec<ProcessRow> {
             u64_of(p, "ppid").filter(|pp| pids.contains(pp) && Some(*pp) != u64_of(p, "pid"));
         children.entry(parent).or_default().push(p);
     }
+
     let mut rows = Vec::with_capacity(processes.len());
     let mut seen = BTreeSet::new();
+
     // Roots first, then anything a parent loop made unreachable.
     let starts = children
         .get(&None)
@@ -295,12 +302,15 @@ fn process_rows(trace: &Value) -> Vec<ProcessRow> {
             if !seen.insert(pid) {
                 continue;
             }
+
             rows.push(process_row(p, depth));
+
             if let Some(kids) = children.get(&Some(pid)) {
                 stack.extend(kids.iter().rev().map(|k| (*k, depth + 1)));
             }
         }
     }
+
     rows
 }
 
@@ -318,6 +328,7 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
     } else {
         str_of(p, "role")
     };
+
     ProcessRow {
         depth: depth.min(MAX_DEPTH),
         pid: u64_of(p, "pid").unwrap_or(0),
@@ -371,6 +382,7 @@ fn end_text(raw: &str) -> String {
         "unexpectedexit" => "unexpected exit",
         _ => return raw.to_owned(),
     };
+
     match raw.split_once(": ") {
         Some((_, reason)) if !raw.contains('(') => format!("{label}: {reason}"),
         _ => label.to_owned(),
@@ -400,6 +412,7 @@ fn sniffed(c: &Value) -> String {
         let value = str_of(c, key);
         (!value.is_empty()).then(|| format!("{label}{value}"))
     };
+
     match str_of(c, "protocol").as_str() {
         "http" => [
             Some(format!("{} {}", str_of(c, "method"), str_of(c, "target"))),
@@ -423,6 +436,7 @@ fn connection_row(c: &Value) -> ConnectionRow {
             detail = format!("{detail}, inside TLS: {inside}");
         }
     }
+
     ConnectionRow {
         dst: address(&str_of(c, "dst")),
         protocol: str_of(c, "protocol"),
@@ -460,16 +474,19 @@ fn network(view: &mut RunView, net: &Value) {
         view.network_notes
             .push(format!("{n} UDP datagrams other than DNS"));
     }
+
     if let Some(n) = u64_of(net, "refused").filter(|n| *n > 0) {
         view.network_notes
             .push(format!("{n} connections refused over the limit"));
     }
+
     for packet in list(net, "packets") {
         view.network_notes.push(format!(
             "Other frame: {}",
             packet.as_str().unwrap_or_default()
         ));
     }
+
     if net.get("truncated").and_then(Value::as_bool) == Some(true)
         || net.get("packets_truncated").and_then(Value::as_bool) == Some(true)
     {
@@ -481,22 +498,27 @@ fn network(view: &mut RunView, net: &Value) {
 fn trace(view: &mut RunView, trace: &Value) {
     view.processes = process_rows(trace);
     view.compilers = view.processes.iter().filter(|p| p.compiler()).count();
+
     for p in view.processes.iter().filter(|p| p.root) {
         view.alerts
             .push(format!("Process {} ({}) ran as root", p.pid, p.exe));
     }
+
     if trace.get("complete").and_then(Value::as_bool) == Some(false) {
         view.trace_notes
             .push("The agent did not close the trace, so it may be incomplete".to_owned());
     }
+
     if let Some(n) = u64_of(trace, "processes_omitted").filter(|n| *n > 0) {
         view.trace_notes
             .push(format!("{n} more processes not listed"));
     }
+
     if let Some(n) = u64_of(trace, "omitted").filter(|n| *n > 0) {
         view.trace_notes
             .push(format!("{n} file or socket entries not listed"));
     }
+
     if let Some(totals) = trace.get("totals") {
         let dropped = u64_of(totals, "dropped_in_kernel").unwrap_or(0)
             + u64_of(totals, "dropped_by_agent").unwrap_or(0);
@@ -504,6 +526,7 @@ fn trace(view: &mut RunView, trace: &Value) {
             view.trace_notes.push(format!("{dropped} events dropped"));
         }
     }
+
     view.sockets = list(trace, "sockets")
         .iter()
         .map(|s| {
@@ -513,6 +536,7 @@ fn trace(view: &mut RunView, trace: &Value) {
                 Some(3) => "raw",
                 _ => "other",
             };
+
             (
                 duration(u64_of(s, "ms").unwrap_or(0)),
                 str_of(s, "exe"),
@@ -556,10 +580,12 @@ fn scratch(view: &mut RunView, disk: &Value) {
             list(disk, "units").len().to_string(),
         ),
     ];
+
     if disk.get("incomplete").and_then(Value::as_bool) == Some(true) {
         view.scratch
             .push(("Scan".to_owned(), "stopped at a limit".to_owned()));
     }
+
     for (key, why) in [
         ("executables_outside_target", "executable outside target"),
         ("setid", "set user or group ID"),
@@ -582,6 +608,7 @@ fn scratch(view: &mut RunView, disk: &Value) {
             });
         }
     }
+
     for path in list(disk, "planted_changed") {
         view.alerts.push(format!(
             "Planted file {} changed or disappeared",
@@ -603,6 +630,7 @@ pub fn run_views(job: i64, runs: &[(String, Value)]) -> Vec<RunView> {
             if kind == "full" && check {
                 view.superseded = format!("/jobs/{job}/runs/check.json");
             }
+
             view
         })
         .collect()
@@ -621,45 +649,57 @@ pub fn run_view(job: i64, kind: &str, report: &Value) -> RunView {
         stderr: str_of(report, "stderr_tail"),
         ..RunView::default()
     };
+
     let mut facts = vec![("Ended".to_owned(), end_text(&str_of(report, "end")))];
     let exit = exit_text(report.get("exit"));
     if !exit.is_empty() {
         facts.push(("Guest".to_owned(), exit));
     }
+
     if let Some(ms) = u64_of(report, "run_ms") {
         facts.push(("Run time".to_owned(), duration(ms)));
     }
+
     if let Some(ms) = u64_of(report, "restore_ms") {
         facts.push(("VM restore".to_owned(), duration(ms)));
     }
+
     if let Some(files) = u64_of(report, "payload_files") {
         let size = bytes(u64_of(report, "payload_bytes").unwrap_or(0));
         facts.push(("Payload".to_owned(), format!("{files} files, {size}")));
     }
+
     let missing = list(report, "missing_packages");
     if !missing.is_empty() {
         let names: Vec<&str> = missing.iter().filter_map(Value::as_str).collect();
         facts.push(("Missing packages".to_owned(), names.join(", ")));
     }
+
     view.facts = facts;
     leak_alerts(report, &mut view.alerts);
+
     if let Some(t) = report.get("trace") {
         trace(&mut view, t);
+
         if let Some(opens) = u64_of(t, "opens") {
             view.facts
                 .push(("Files opened".to_owned(), opens.to_string()));
         }
     }
+
     if let Some(net) = report.get("network") {
         network(&mut view, net);
     }
+
     if let Some(disk) = report.get("scratch").filter(|d| d.is_object()) {
         scratch(&mut view, disk);
     }
+
     if report.get("truncated").and_then(Value::as_bool) == Some(true) {
         view.facts
             .push(("Output".to_owned(), "cut at the limit".to_owned()));
     }
+
     view
 }
 
@@ -692,13 +732,16 @@ mod tests {
             {"pid": 8, "ppid": 7, "exe": "b", "role": "unknown"},
             {"pid": 9, "ppid": 99, "exe": "orphan", "role": "unknown"}
         ]});
+
         let rows = process_rows(&trace);
         let order: Vec<(u64, usize)> = rows.iter().map(|r| (r.pid, r.depth)).collect();
+
         // 7 and 8 are each other's parents: listed after the real roots.
         assert_eq!(
             order,
             [(1, 0), (3, 1), (4, 2), (2, 1), (9, 0), (7, 0), (8, 1)]
         );
+
         let curl = &rows[2];
         assert_eq!(
             (curl.args.as_str(), curl.exit.as_str(), curl.root),
@@ -716,11 +759,13 @@ mod tests {
             {"pid": 3, "exe": "/work/target/rustc", "role": "rustc"},
             {"pid": 4, "exe": "/usr/local/bin/rustc", "role": "rustc"}
         ]});
+
         let rows = process_rows(&trace);
         let hidden: Vec<(u64, &str, bool)> = rows
             .iter()
             .map(|r| (r.pid, r.role.as_str(), r.compiler()))
             .collect();
+
         assert_eq!(
             hidden,
             [
@@ -753,6 +798,7 @@ mod tests {
                         "executables_outside_target": [], "setid": [], "special": [], "links_outside": [],
                         "planted_changed": ["/home/b/.aws/credentials"], "tokens_found": [], "units": ["a"], "omitted": 0}
         });
+
         let view = run_view(7, "check", &report);
         assert_eq!(view.download, "/jobs/7/runs/check.json");
         assert_eq!(
@@ -801,6 +847,7 @@ mod tests {
             end_text("guest_stopped: kernel panic"),
             "guest stopped: kernel panic"
         );
+
         // The debug form of older reports, cut inside the output bytes.
         assert_eq!(
             end_text("Finished(RunOutcome { exit: Code(0), stdout: [], stderr: [32, 32"),
@@ -815,6 +862,7 @@ mod tests {
     fn the_fake_internet_is_named() {
         assert_eq!(address("10.0.2.1:53"), ":53");
         assert_eq!(address("10.0.2.1"), "fake internet");
+
         for other in ["10.0.2.10:80", "10.0.2.2:1", "/home/b/x", "tls://a.example"] {
             assert_eq!(address(other), other);
         }
@@ -825,12 +873,14 @@ mod tests {
         let runs = |kinds: &[&str]| -> Vec<(String, Value)> {
             kinds.iter().map(|k| ((*k).to_owned(), json!({}))).collect()
         };
+
         let both = run_views(3, &runs(&["check", "full"]));
         assert_eq!(both.len(), 1);
         assert_eq!(
             (both[0].kind.as_str(), both[0].superseded.as_str()),
             ("full", "/jobs/3/runs/check.json")
         );
+
         let check = run_views(3, &runs(&["check"]));
         assert_eq!(
             (check[0].kind.as_str(), check[0].superseded.as_str()),
@@ -845,6 +895,7 @@ mod tests {
             "full",
             &json!({"network": "x", "trace": 3, "scratch": null}),
         );
+
         assert!(view.processes.is_empty() && view.alerts.is_empty() && view.scratch.is_empty());
         assert_eq!(view.outcome_class, "bad");
     }

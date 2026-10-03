@@ -33,30 +33,39 @@ fn u16_at(data: &[u8], at: usize) -> Option<u16> {
 #[must_use]
 pub fn parse_query(data: &[u8]) -> Option<Question> {
     let flags = u16_at(data, 2)?;
+
     // QR must be 0 (query) and the opcode 0 (standard query).
     if flags & 0x8000 != 0 || (flags >> 11) & 0xF != 0 {
         return None;
     }
+
     if u16_at(data, 4)? == 0 {
         return None;
     }
+
     let mut at = 12;
     let mut labels = Vec::new();
     let mut total = 0_usize;
+
     loop {
         let len = usize::from(*data.get(at)?);
         at += 1;
+
         if len == 0 {
             break;
         }
+
         // Compression pointers and the reserved label types.
         if len & 0xC0 != 0 {
             return None;
         }
+
         total += len + 1;
+
         if total > 255 {
             return None;
         }
+
         let label = data.get(at..at + len)?;
         labels.push(
             label
@@ -70,6 +79,7 @@ pub fn parse_query(data: &[u8]) -> Option<Question> {
         );
         at += len;
     }
+
     Some(Question {
         name: labels.join("."),
         qtype: u16_at(data, at)?,
@@ -87,6 +97,7 @@ pub fn answer(query: &[u8], question: &Question, address: Ipv4Addr) -> Option<Ve
     let answers: u16 = u16::from(question.qtype == TYPE_A && question.qclass == 1);
     let mut out = Vec::with_capacity(asked.len() + 32);
     out.extend_from_slice(id);
+
     // QR, AA and RD copied from the query, RA set, NOERROR.
     let rd = query.get(2).map_or(0, |b| b & 0x01);
     out.extend_from_slice(&[0x84 | rd, 0x80]);
@@ -94,12 +105,14 @@ pub fn answer(query: &[u8], question: &Question, address: Ipv4Addr) -> Option<Ve
     out.extend_from_slice(&answers.to_be_bytes());
     out.extend_from_slice(&[0, 0, 0, 0]);
     out.extend_from_slice(asked);
+
     if answers == 1 {
         // Name as a pointer to the question at offset 12, type A, class
         // IN, TTL 60, four bytes of address.
         out.extend_from_slice(&[0xC0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4]);
         out.extend_from_slice(&address.octets());
     }
+
     Some(out)
 }
 
@@ -113,6 +126,7 @@ mod tests {
             q.push(u8::try_from(label.len()).unwrap());
             q.extend_from_slice(label.as_bytes());
         }
+
         q.push(0);
         q.extend_from_slice(&qtype.to_be_bytes());
         q.extend_from_slice(&1_u16.to_be_bytes());
@@ -123,7 +137,9 @@ mod tests {
     fn a_queries_get_the_sink_address() {
         let q = query("Evil.Example.com", TYPE_A);
         let question = parse_query(&q).unwrap();
+
         assert_eq!(question.name, "evil.example.com");
+
         let a = answer(&q, &question, Ipv4Addr::new(10, 0, 2, 1)).unwrap();
         assert_eq!(&a[..2], &[0x12, 0x34]);
         assert_eq!(u16::from_be_bytes([a[6], a[7]]), 1);
@@ -135,10 +151,13 @@ mod tests {
         let q = query("example.com", 28);
         let question = parse_query(&q).unwrap();
         let a = answer(&q, &question, Ipv4Addr::LOCALHOST).unwrap();
+
         assert_eq!(u16::from_be_bytes([a[6], a[7]]), 0);
         assert!(parse_query(&[0; 5]).is_none());
+
         let mut pointer = query("a.b", TYPE_A);
         pointer[12] = 0xC0;
+
         assert!(parse_query(&pointer).is_none());
     }
 

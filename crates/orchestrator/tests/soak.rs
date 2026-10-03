@@ -134,6 +134,7 @@ async fn sequential_jobs_leave_nothing_behind() {
         drives: None,
         network: false,
     };
+
     let config = FirecrackerConfig {
         firecracker: root().join(build::FIRECRACKER),
         launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
@@ -150,6 +151,7 @@ async fn sequential_jobs_leave_nothing_behind() {
         fake_internet: None,
         authority: None,
     };
+
     let cgroups = CgroupTree::own().expect("run through `cargo xtask soak` for a delegated cgroup");
 
     // The base snapshot: boot once in a jail, wait for the agent, snapshot.
@@ -177,7 +179,9 @@ async fn sequential_jobs_leave_nothing_behind() {
         .run_job(0, job("true"), Duration::from_secs(30))
         .await
         .unwrap();
+
     assert!(matches!(warmup.end, JobEnd::Finished(_)), "{warmup:?}");
+
     let fds = open_fds();
     let rss = rss_kib();
     let links = host_links();
@@ -185,6 +189,7 @@ async fn sequential_jobs_leave_nothing_behind() {
     let mut restores = Vec::with_capacity(jobs);
     let mut runs = Vec::with_capacity(jobs);
     let started = Instant::now();
+
     for i in 0..jobs {
         let slot = u32::try_from(i).unwrap() % SLOTS;
         let run = backend
@@ -202,9 +207,11 @@ async fn sequential_jobs_leave_nothing_behind() {
             }
             other => panic!("job {i} ended with {other:?}"),
         }
+
         restores.push(run.restore);
         runs.push(run.run);
     }
+
     let total = started.elapsed();
 
     // The host side wall clock ends a job that would run for a minute.
@@ -212,14 +219,17 @@ async fn sequential_jobs_leave_nothing_behind() {
         .run_job(1, job("sleep 60"), Duration::from_secs(2))
         .await
         .unwrap();
+
     assert_eq!(timed_out.end, JobEnd::HostTimeout);
 
     // Leak checks.
     assert!(cgroups.slots().unwrap().is_empty(), "slot cgroups left");
+
     let dirs: Vec<_> = std::fs::read_dir(&slots_dir).unwrap().collect();
     assert!(dirs.is_empty(), "slot directories left: {dirs:?}");
     assert_eq!(host_links(), links, "host network interfaces changed");
     assert_eq!(open_fds(), fds, "file descriptors leaked");
+
     let grown = rss_kib().saturating_sub(rss);
     assert!(grown < 16 * 1024, "resident memory grew by {grown} KiB");
 
@@ -234,6 +244,7 @@ async fn sequential_jobs_leave_nothing_behind() {
     std::mem::forget(orphan);
     std::mem::forget(crashed_cgroup);
     let reconciled = backend.reconcile().await.unwrap();
+
     assert_eq!(reconciled.cgroups, vec!["slot-2".to_owned()]);
     assert_eq!(reconciled.directories, vec!["slot-2".to_owned()]);
 

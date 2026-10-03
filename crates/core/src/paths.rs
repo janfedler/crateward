@@ -271,6 +271,7 @@ mod tests {
     #[test]
     fn guest_binaries_are_built_for_the_guest_target() {
         let dir = format!("target/{}/release/", build::GUEST_TARGET);
+
         assert!(build::GUEST_AGENT.starts_with(&dir));
         assert!(build::FAKE_INTERNET.starts_with(&dir));
     }
@@ -280,6 +281,7 @@ mod tests {
         for path in [build::ROOTFS_IMAGE, build::EBPF_OBJECT] {
             assert!(path.starts_with(build::GUEST_OUT), "{path}");
         }
+
         assert!(build::FIRECRACKER.starts_with(build::GUEST_BIN));
     }
 }

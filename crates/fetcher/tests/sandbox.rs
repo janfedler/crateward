@@ -35,16 +35,20 @@ const FETCHER: &str = env!("CARGO_BIN_EXE_crateward_fetcher");
 
 fn crate_file(entries: &[(&str, tar::EntryType, &[u8], &str)]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
+
     for (path, kind, data, link) in entries {
         let mut header = tar::Header::new_gnu();
         header.set_entry_type(*kind);
         header.set_size(data.len() as u64);
         header.set_mode(0o644);
+
         if !link.is_empty() {
             header.set_link_name(link).unwrap();
         }
+
         builder.append_data(&mut header, path, *data).unwrap();
     }
+
     let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     gz.write_all(&builder.into_inner().unwrap()).unwrap();
     gz.finish().unwrap()
@@ -66,9 +70,11 @@ fn a_normal_crate_is_storable() {
         ("demo-1.0.0/Cargo.toml", FILE, b"[package]\n", ""),
         ("demo-1.0.0/src/lib.rs", FILE, b"pub fn f() {}\n", ""),
     ]);
+
     let Some(report) = validate(&bytes) else {
         return;
     };
+
     assert!(report.is_storable(), "{report:?}");
     assert!(report.findings.is_empty(), "{report:?}");
     assert_eq!(report.files, 2);
@@ -85,9 +91,11 @@ fn a_hostile_entry_is_a_finding_and_nothing_more() {
             "/etc/passwd",
         ),
     ]);
+
     let Some(report) = validate(&bytes) else {
         return;
     };
+
     assert!(report.is_storable(), "{report:?}");
     assert!(
         matches!(&report.findings[..], [ArchiveFinding::Symlink { target, .. }] if target == "/etc/passwd"),
@@ -100,12 +108,14 @@ fn bytes_that_are_no_archive_abort_the_report() {
     let Some(report) = validate(b"this is not a gzip stream") else {
         return;
     };
+
     assert!(!report.is_storable(), "{report:?}");
 }
 
 #[test]
 fn a_child_that_fails_is_an_error_with_its_status() {
     let error = validate_in_sandbox(Path::new("/bin/false"), b"", "demo", "1.0.0").unwrap_err();
+
     assert!(
         matches!(&error, ChildError::Failed { status, .. } if status.code() == Some(1)),
         "{error}"
@@ -116,6 +126,7 @@ fn a_child_that_fails_is_an_error_with_its_status() {
 fn a_child_that_does_not_exist_is_an_error() {
     let error =
         validate_in_sandbox(Path::new("/nonexistent/fetcher"), b"", "demo", "1.0.0").unwrap_err();
+
     assert!(
         error
             .to_string()
@@ -148,6 +159,7 @@ fn a_resolution_child_that_does_not_exist_is_an_error() {
             &semver::Version::new(1, 0, 0),
         ))
         .unwrap_err();
+
     assert!(
         matches!(&error, ResolveError::Child(ChildError::Io { child, step, .. })
             if *child == "resolution child" && *step == "running"),
@@ -181,11 +193,13 @@ fn resolve(name: &str, script: &str, mode: u32) -> Option<(PathBuf, Output)> {
     if !output.status.success() && sandbox::unavailable(&stderr) {
         return None;
     }
+
     Some((work, output))
 }
 
 fn outcome(output: &Output) -> ResolveOutcome {
     assert!(output.status.success(), "{output:?}");
+
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
@@ -194,6 +208,7 @@ fn a_cargo_that_succeeds_is_a_resolution() {
     let Some((_, output)) = resolve("ok", "exit 0", 0o755) else {
         return;
     };
+
     assert_eq!(
         outcome(&output),
         ResolveOutcome {
@@ -209,6 +224,7 @@ fn a_cargo_that_fails_reports_the_end_of_its_output() {
     let Some((_, output)) = resolve("fails", script, 0o755) else {
         return;
     };
+
     let outcome = outcome(&output);
     assert!(!outcome.ok);
     assert!(
@@ -226,7 +242,9 @@ fn a_cargo_that_cannot_start_ends_the_child_with_an_error() {
     let Some((_, output)) = resolve("no-exec", "exit 0", 0o644) else {
         return;
     };
+
     assert!(!output.status.success(), "{output:?}");
+
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("cargo: starting: "), "{stderr}");
     assert!(output.stdout.is_empty());
@@ -238,9 +256,12 @@ fn cargo_gets_the_relay_and_a_clean_environment() {
     let Some((work, output)) = resolve("env", script, 0o755) else {
         return;
     };
+
     assert!(outcome(&output).ok);
+
     let config = std::fs::read_to_string(work.join("seen-config")).unwrap();
     assert!(config.contains("sparse+http://127.0.0.1:"), "{config}");
+
     let env = std::fs::read_to_string(work.join("seen-env")).unwrap();
     assert!(env.contains("RUSTC=/nonexistent/rustc"), "{env}");
     assert!(!env.contains("hunter2") && !env.contains("SECRET"), "{env}");
@@ -254,9 +275,11 @@ fn cargo_can_write_nothing_but_its_work_directory() {
         "if echo escaped > {} 2>/dev/null; then echo escaped > verdict; else echo contained > verdict; fi",
         escape.display()
     );
+
     let Some((work, output)) = resolve("escape", &script, 0o755) else {
         return;
     };
+
     assert!(outcome(&output).ok);
     assert_eq!(
         std::fs::read_to_string(work.join("verdict")).unwrap(),

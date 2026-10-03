@@ -82,10 +82,13 @@ mod tests {
             ),
             ("src/lib.rs", b"pub fn f() {}"),
         ];
+
         if let Some(b) = build {
             files.push(("build.rs", b));
         }
+
         let mut builder = tar::Builder::new(Vec::new());
+
         for (path, data) in files {
             let mut header = tar::Header::new_gnu();
             header.set_size(data.len() as u64);
@@ -95,6 +98,7 @@ mod tests {
                 .append_data(&mut header, format!("f-0.1.0/{path}"), data)
                 .unwrap();
         }
+
         analyze(
             &builder.into_inner().unwrap(),
             &Rules::builtin().unwrap(),
@@ -109,9 +113,11 @@ mod tests {
         let new = report(Some(b"fn main() { std::process::Command::new(\"sh\"); }"));
         let deps: BTreeSet<String> = ["cc".to_owned()].into();
         let d = diff(&new, &old, "0.0.9", &deps, &BTreeSet::new());
+
         assert!(d.build_script_added);
         assert!(!d.new_findings.is_empty());
         assert_eq!(d.new_dependencies, vec!["cc".to_owned()]);
+
         let same = diff(&new, &new, "0.1.0", &deps, &deps);
         assert!(same.new_findings.is_empty() && !same.build_script_added);
     }

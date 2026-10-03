@@ -25,11 +25,14 @@ pub fn blake3_file(path: &Path) -> Result<String, TaskError> {
         let Some(chunk) = buffer.get(..read) else {
             break;
         };
+
         if chunk.is_empty() {
             break;
         }
+
         hasher.update(chunk);
     }
+
     Ok(hasher.finalize().to_hex().to_string())
 }
 

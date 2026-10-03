@@ -158,6 +158,7 @@ mod tests {
     #[test]
     fn names_match_the_serialized_form() {
         use FailureClass::*;
+
         for class in [Transient, Infrastructure, Permanent, SuspectedCompromise] {
             assert_eq!(serde_json::to_value(class).unwrap(), class.name());
         }

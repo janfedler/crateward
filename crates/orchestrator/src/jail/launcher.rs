@@ -53,6 +53,7 @@ fn run_nft(rules: &str) -> Result<(), LaunchError> {
             .write_all(rules.as_bytes())
             .map_err(step("writing the nft rules"))?;
     }
+
     let status = child.wait().map_err(step("running nft"))?;
     if status.success() {
         Ok(())
@@ -93,6 +94,7 @@ fn read_line<R: BufRead>(input: &mut R, limit: usize) -> Result<String, LaunchEr
             detail: "line missing or too long".into(),
         });
     }
+
     line.pop();
     Ok(line)
 }
@@ -195,6 +197,7 @@ fn open_host_files(spec: &JailSpec) -> Result<HostFiles, LaunchError> {
 /// Moves into new mount, network, IPC and UTS namespaces.
 fn isolate(spec: &JailSpec) -> Result<(), LaunchError> {
     unshare(Namespaces::Isolation).map_err(step("unsharing mount, network, IPC and UTS"))?;
+
     // Nothing done below may propagate back to the host's mount namespace.
     rustix::mount::mount_change(
         "/",
@@ -209,6 +212,7 @@ fn bind_device(root: &Path, device: &Path) -> Result<(), LaunchError> {
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(step("creating /dev in the jail"))?;
     }
+
     bind(device, &target, MountFlags::NOSUID | MountFlags::NOEXEC)
 }
 
@@ -216,6 +220,7 @@ fn bind_device(root: &Path, device: &Path) -> Result<(), LaunchError> {
 /// device nodes and the fake internet.
 fn mount_root(spec: &JailSpec) -> Result<(), LaunchError> {
     let root = &spec.root;
+
     // pivot_root needs the new root to be a mount point.
     rustix::mount::mount_bind(root, root).map_err(step("binding the jail root"))?;
     let hardened = MountFlags::NOSUID | MountFlags::NODEV;
@@ -224,17 +229,21 @@ fn mount_root(spec: &JailSpec) -> Result<(), LaunchError> {
         &root.join(FIRECRACKER_IN_JAIL.trim_start_matches('/')),
         MountFlags::RDONLY | hardened,
     )?;
+
     for mount in &spec.mounts {
         let flags = if mount.writable {
             hardened | MountFlags::NOEXEC
         } else {
             hardened | MountFlags::NOEXEC | MountFlags::RDONLY
         };
+
         bind(&mount.source, &root.join(&mount.target), flags)?;
     }
+
     for device in &spec.devices {
         bind_device(root, device)?;
     }
+
     if let Some(sinks) = &spec.sinks {
         bind(
             &sinks.binary,
@@ -242,6 +251,7 @@ fn mount_root(spec: &JailSpec) -> Result<(), LaunchError> {
             MountFlags::RDONLY | hardened,
         )?;
     }
+
     Ok(())
 }
 
@@ -252,10 +262,12 @@ fn set_up_network(spec: &JailSpec) -> Result<(), LaunchError> {
     let Some(tap) = &spec.tap else {
         return Ok(());
     };
+
     let owner = INSIDE_VM_ID.to_string();
     run_ip(&[
         "tuntap", "add", "dev", tap, "mode", "tap", "user", &owner, "group", &owner,
     ])?;
+
     // A fixed host side MAC lets the fake internet skip frames the host
     // sent, and without an IPv6 link local address the host sends no IPv6
     // at all: every IPv6 frame on the tap is the guest's.
@@ -267,11 +279,13 @@ fn set_up_network(spec: &JailSpec) -> Result<(), LaunchError> {
     run_ip(&["link", "set", "dev", tap, "address", &mac])?;
     run_ip(&["link", "set", "dev", tap, "addrgenmode", "none"])?;
     run_ip(&["link", "set", tap, "up"])?;
+
     if spec.sinks.is_some() {
         let address = format!("{HOST_ADDRESS}/{PREFIX_LEN}");
         run_ip(&["addr", "add", &address, "dev", tap])?;
         run_nft(&ruleset(tap))?;
     }
+
     Ok(())
 }
 
@@ -289,6 +303,7 @@ fn set_limit(resource: Resource, value: u64) -> Result<(), LaunchError> {
         current: Some(value),
         maximum: Some(value),
     };
+
     rustix::process::setrlimit(resource, limit).map_err(step("setting a resource limit"))
 }
 
@@ -301,9 +316,11 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
     pivot(&spec.root)?;
     set_limit(Resource::Nofile, spec.max_open_files)?;
     set_limit(Resource::Fsize, spec.max_file_size)?;
+
     if let Some(events) = files.events {
         start_sinks(events, &files.log, &files.null, files.authority)?;
     }
+
     Ok((files.log, files.null))
 }
 
@@ -319,6 +336,7 @@ fn start_sinks(
     // executes needs new privileges.
     rustix::thread::set_no_new_privs(true).map_err(step("setting no_new_privs"))?;
     let errors = log.try_clone().map_err(step("duplicating the log"))?;
+
     // The jail has no /dev/null to open. Reuse the one opened before. With
     // an authority, stdin is a pipe that carries it and is then closed.
     let stdin = match authority {
@@ -328,6 +346,7 @@ fn start_sinks(
             .map_err(step("duplicating /dev/null"))?
             .into(),
     };
+
     // Started with the namespace's privileges so that it can open its
     // packet socket. It switches to the slot's user itself before it reads
     // anything from the guest.
@@ -344,6 +363,7 @@ fn start_sinks(
         pipe.write_all(&pem)
             .map_err(step("passing the TLS authority"))?;
     }
+
     Ok(())
 }
 
@@ -375,6 +395,7 @@ pub fn run() -> LaunchError {
 
         unshare(Namespaces::User).map_err(step("unsharing the user namespace"))?;
         say("unshared")?;
+
         if read_line(&mut input, 16)? != "mapped" {
             return Err(LaunchError {
                 step: "waiting for the ID maps",
@@ -384,6 +405,7 @@ pub fn run() -> LaunchError {
 
         let (log, null) = build_jail(&spec)?;
         drop(input);
+
         // Sockets and snapshot files Firecracker creates must be usable by
         // the orchestrator. The jail root itself is closed to everybody else.
         rustix::process::umask(rustix::fs::Mode::empty());
@@ -405,6 +427,7 @@ pub fn run() -> LaunchError {
             detail: error.to_string(),
         })
     })();
+
     match result {
         Ok(never) => match never {},
         Err(error) => {

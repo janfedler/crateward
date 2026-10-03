@@ -67,6 +67,7 @@ fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
     } else {
         Isolation::Direct
     };
+
     Launch {
         firecracker: root().join(build::FIRECRACKER),
         dir: scratch(name),
@@ -110,22 +111,27 @@ async fn boot_run_shutdown(jailed: bool) {
     if jailed {
         let pid = vm.pid().unwrap();
         let uid = TEST_SUBID_BASE.to_string();
+
         assert_eq!(status_field(pid, "Uid"), format!("{uid} {uid} {uid} {uid}"));
         assert_eq!(status_field(pid, "CapEff"), "0000000000000000");
         assert_eq!(status_field(pid, "CapPrm"), "0000000000000000");
         assert_eq!(status_field(pid, "NoNewPrivs"), "1");
+
         // 2 means a seccomp filter is installed (Firecracker's own).
         assert_eq!(status_field(pid, "Seccomp"), "2");
+
         // The tap device lives only in the jail's network namespace.
         let host_links = std::process::Command::new(host::IP)
             .args(["-br", "link"])
             .output()
             .unwrap();
+
         assert!(!String::from_utf8_lossy(&host_links.stdout).contains("tap0"));
     }
 
     let outcome = agent.run(job(&["/usr/bin/id"])).await.unwrap();
     let id = String::from_utf8_lossy(&outcome.stdout);
+
     assert_eq!(outcome.exit, ExitStatus::Code(0));
     assert!(id.contains("uid=1000(builder)"), "{id}");
     assert!(!id.contains("groups=0"), "job kept root's groups: {id}");
@@ -145,25 +151,31 @@ async fn boot_run_shutdown(jailed: bool) {
         .lines()
         .filter(|e| !matches!(*e, "bind" | "unbind" | "uevent" | "module"))
         .count();
+
     assert!(bound >= 1, "no device bound to vmgenid: {entries:?}");
 
     let outcome = agent
         .run(job(&["/bin/sh", "-c", "echo out; echo err >&2; exit 7"]))
         .await
         .unwrap();
+
     assert_eq!(outcome.exit, ExitStatus::Code(7));
     assert_eq!(outcome.stdout, b"out\n");
     assert_eq!(outcome.stderr, b"err\n");
 
     agent.shutdown().await.unwrap();
     let status = vm.wait_exit(Duration::from_secs(10)).await.unwrap();
+
     assert!(
         status.is_some(),
         "firecracker did not exit after the guest shut down"
     );
+
     let dir = vm.dir().to_path_buf();
     vm.destroy().await.unwrap();
+
     assert!(!dir.exists(), "VM directory left behind");
+
     eprintln!("jailed={jailed}: boot to agent ready: {boot_time:?}");
 }
 
@@ -183,6 +195,7 @@ async fn snapshot_and_restore_twice(jailed: bool) {
     vm.destroy().await.unwrap();
 
     let mut uuids = Vec::new();
+
     for round in 0..2 {
         // Each restore runs in its own slot, with its own subordinate UID.
         let launch = launch(&format!("restore-{mode}-{round}"), jailed, round + 1);
@@ -193,6 +206,7 @@ async fn snapshot_and_restore_twice(jailed: bool) {
             .await
             .unwrap();
         let restore_time = started.elapsed();
+
         // A file written by one restored VM must not exist in the next one.
         let outcome = agent
             .run(job(&[
@@ -202,31 +216,38 @@ async fn snapshot_and_restore_twice(jailed: bool) {
             ]))
             .await
             .unwrap();
+
         assert_eq!(
             outcome.exit,
             ExitStatus::Code(0),
             "{}",
             String::from_utf8_lossy(&outcome.stderr)
         );
+
         uuids.push(outcome.stdout);
+
         // The guest clock follows the host, not the snapshot.
         let outcome = agent.run(job(&["/bin/date", "+%s"])).await.unwrap();
         let guest: u64 = String::from_utf8_lossy(&outcome.stdout)
             .trim()
             .parse()
             .unwrap();
+
         assert!(
             WallClock::now().secs.abs_diff(guest) <= 5,
             "guest clock {guest} is off"
         );
+
         drop(agent);
         vm.destroy().await.unwrap();
         eprintln!("jailed={jailed}: restore {round} to agent ready: {restore_time:?}");
     }
+
     assert_ne!(
         uuids[0], uuids[1],
         "restored VMs produced the same random UUID"
     );
+
     std::fs::remove_dir_all(&snap_dir).unwrap();
 }
 
@@ -280,8 +301,11 @@ async fn guest_cpu_mitigations_are_not_weaker_than_the_host() {
             .filter_map(|l| l.split_once(':'))
             .map(|(k, v)| (k.to_owned(), v.trim().to_owned()))
             .collect();
+
     assert!(!guest.is_empty(), "guest reported no vulnerability files");
+
     let mut weaker = Vec::new();
+
     for entry in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
         let name = entry.file_name().to_string_lossy().into_owned();
         let host = std::fs::read_to_string(entry.path())
@@ -293,10 +317,12 @@ async fn guest_cpu_mitigations_are_not_weaker_than_the_host() {
             .cloned()
             .unwrap_or_else(|| "missing".into());
         eprintln!("{name:28} host: {host:60} guest: {in_guest}");
+
         if !host.starts_with("Vulnerable") && in_guest.starts_with("Vulnerable") {
             weaker.push(name);
         }
     }
+
     assert!(
         weaker.is_empty(),
         "guest is weaker than the host for {weaker:?}"

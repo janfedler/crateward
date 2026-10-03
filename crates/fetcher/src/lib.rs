@@ -62,6 +62,7 @@ async fn download_template(index: &PoliteClient, root: &str) -> Result<String, B
     let Fetched::Body { body, .. } = index.get(&url, None, 64 * 1024).await? else {
         return Err("index config.json is not available".into());
     };
+
     let config: IndexConfig =
         serde_json::from_slice(&body).map_err(|e| format!("index config.json: {e}"))?;
     Ok(config.dl)
@@ -75,12 +76,14 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
         timeout: Duration::from_secs(120),
         allow_plain_http: false,
     };
+
     let downloads = PoliteClient::new(&client(c.static_requests_per_second))?;
     let index_client = PoliteClient::new(&client(c.index_requests_per_second))?;
     let mut index_root = c.index_url.to_string();
     if !index_root.ends_with('/') {
         index_root.push('/');
     }
+
     let dl = download_template(&index_client, &index_root).await?;
     let index = Index::new(index_client, &index_root);
     let url = config.database.url.expose_secret();
@@ -102,6 +105,7 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
         dl,
         blobs,
     };
+
     let policies = Policies::from_config(&config.stages)?;
     let lease = Duration::from_secs(config.stages.fetch.lease_secs);
     Ok(Fetcher::new(
@@ -128,11 +132,13 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             fetcher.policies.clone(),
             stop.clone(),
         ));
+
         while !stop.is_requested() {
             if !fetcher.run_once().await.map_err(fatal)? {
                 stop.sleep(Duration::from_secs(1)).await;
             }
         }
+
         tracing::info!("stopping");
         Ok(())
     })

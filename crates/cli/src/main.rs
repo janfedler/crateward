@@ -13,10 +13,12 @@
 macro_rules! out {
     ($($arg:tt)*) => {{
         use std::io::Write as _;
+
         if let Err(error) = writeln!(std::io::stdout().lock(), $($arg)*) {
             if error.kind() == std::io::ErrorKind::BrokenPipe {
                 std::process::exit(0);
             }
+
             eprintln!("writing to stdout: {error}");
             std::process::exit(1);
         }
@@ -219,6 +221,7 @@ async fn status(store: Store) -> Result<(), CliError> {
     if pauses.is_empty() {
         out!("pauses: none");
     }
+
     for p in pauses {
         let job = p.job.map_or(String::new(), |j| format!(", job {}", j.0));
         out!(
@@ -228,6 +231,7 @@ async fn status(store: Store) -> Result<(), CliError> {
             p.detail
         );
     }
+
     let breakers = store.breakers().await?;
     for stage in Stage::ALL {
         let state = breakers
@@ -236,10 +240,12 @@ async fn status(store: Store) -> Result<(), CliError> {
             .unwrap_or(BreakerState::Closed);
         out!("breaker {:<16} {}", stage.name(), state.name());
     }
+
     for (name, passed, at) in store.latest_canaries().await? {
         let result = if passed { "passed" } else { "FAILED" };
         out!("canary {name:<16} {result} {} s ago", now - at);
     }
+
     out!(
         "alerts waiting: {}",
         store.pending_alerts(1000).await?.len()
@@ -253,6 +259,7 @@ async fn quarantine_lift(store: Store) -> Result<(), CliError> {
     } else {
         out!("no quarantine was active");
     }
+
     Ok(())
 }
 

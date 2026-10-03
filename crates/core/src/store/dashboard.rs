@@ -178,6 +178,7 @@ impl Store {
                 .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
                 .collect::<Result<Vec<(String, i64)>, StoreError>>()
         };
+
         let coverage = pairs(
             self.client
                 .query(
@@ -187,6 +188,7 @@ impl Store {
                 )
                 .await?,
         )?;
+
         let levels = pairs(
             self.client
                 .query(
@@ -195,6 +197,7 @@ impl Store {
                 )
                 .await?,
         )?;
+
         let daily = pairs(
             self.client
                 .query(
@@ -206,6 +209,7 @@ impl Store {
                 )
                 .await?,
         )?;
+
         Ok(PublicStats {
             versions: row.try_get(0)?,
             finished: row.try_get(1)?,
@@ -268,6 +272,7 @@ impl Store {
                 n.to_ascii_lowercase().replace('-', "_").replace('%', "")
             )
         });
+
         self.client
             .query(
                 &format!(

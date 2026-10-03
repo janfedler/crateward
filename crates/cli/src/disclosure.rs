@@ -94,6 +94,7 @@ pub async fn run(store: Store, command: Command) -> Result<(), CliError> {
             None => out!("job {job} has no disclosure record"),
         },
     }
+
     Ok(())
 }
 

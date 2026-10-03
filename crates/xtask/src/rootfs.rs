@@ -113,6 +113,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         Layer::new(&agent, Some("0755"), &[AGENT_IN_IMAGE]),
         Layer::new(&agent, Some("0644"), &[EBPF_IN_IMAGE]),
     ];
+
     for layer in &layers {
         append(root, &tarball, &epoch, layer)?;
     }
@@ -159,6 +160,7 @@ fn remove_old_bases(work: &Path, keep: &Path) -> Result<(), TaskError> {
             std::fs::remove_file(&path).map_err(io(&path))?;
         }
     }
+
     Ok(())
 }
 
@@ -184,6 +186,7 @@ fn stage_file(source: &Path, target: &Path) -> Result<(), TaskError> {
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(io(parent))?;
     }
+
     std::fs::copy(source, target).map_err(io(source))?;
     Ok(())
 }
@@ -302,6 +305,7 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
     if !debian.packages.is_empty() {
         args.push(include.as_str());
     }
+
     args.extend([
         debian.suite.as_str(),
         partial_path.as_str(),
@@ -343,6 +347,7 @@ fn remove_dir(dir: &Path) -> Result<(), TaskError> {
     if dir.exists() {
         std::fs::remove_dir_all(dir).map_err(io(dir))?;
     }
+
     Ok(())
 }
 
@@ -375,6 +380,7 @@ impl Component {
             "--exclude=manifest.in",
             &format!("{top}/{}", self.dir),
         ];
+
         run_in(root, "tar", &args, &[])
     }
 }
@@ -392,10 +398,12 @@ fn stage_trust(root: &Path, base: &Path, work: &Path) -> Result<PathBuf, TaskErr
     if !bundle.ends_with('\n') {
         bundle.push('\n');
     }
+
     bundle.push_str(&cert);
 
     let staging = work.join("trust");
     remove_dir(&staging)?;
+
     for (name, text) in [
         (TRUST_BUNDLE, bundle.as_str()),
         (TRUST_ANCHOR, cert.as_str()),
@@ -404,6 +412,7 @@ fn stage_trust(root: &Path, base: &Path, work: &Path) -> Result<PathBuf, TaskErr
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(io(parent))?;
         }
+
         std::fs::write(&path, text).map_err(io(&path))?;
     }
 
@@ -525,6 +534,7 @@ mod snapshot_tests {
     fn only_the_snapshot_line_changes() {
         let text = "# c\n[debian]\nsuite = \"trixie\"\nsnapshot = \"20260924T000000Z\"\nvariant = \"minbase\"\n";
         let (updated, old) = with_snapshot(text, "20261001T000000Z").unwrap();
+
         assert_eq!(old, "20260924T000000Z");
         assert_eq!(updated, text.replace("20260924", "20261001"));
         assert!(with_snapshot("[debian]\n", "x").is_none());
@@ -541,15 +551,18 @@ mod stage_tests {
 
     fn succeeds(program: &str, args: &[&str]) {
         let status = Command::new(program).args(args).status().unwrap();
+
         assert!(status.success(), "{program} {args:?}");
     }
 
     fn base_with_bundle(dir: &Path, bundle: Option<&str>) -> PathBuf {
         let tree = dir.join("tree");
         write(&tree.join("etc/hostname"), "guest\n");
+
         if let Some(bundle) = bundle {
             write(&tree.join(TRUST_BUNDLE), bundle);
         }
+
         let base = dir.join("base.tar");
         succeeds(
             "tar",
@@ -580,6 +593,7 @@ mod stage_tests {
     #[test]
     fn bases_of_older_inputs_are_removed() {
         let dir = scratch("bases");
+
         for name in [
             "base-aaaa.tar",
             "base-bbbb.tar",
@@ -589,6 +603,7 @@ mod stage_tests {
         ] {
             write(&dir.join(name), "x");
         }
+
         std::fs::create_dir(dir.join("base-dir.tar.d")).unwrap();
         remove_old_bases(&dir, &dir.join("base-bbbb.tar")).unwrap();
         let mut left: Vec<String> = std::fs::read_dir(&dir)
@@ -596,10 +611,12 @@ mod stage_tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         left.sort();
+
         assert_eq!(
             left,
             ["base-bbbb.tar", "base-dir.tar.d", "base.txt", "rootfs.tar"]
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -612,10 +629,13 @@ mod stage_tests {
             variant: "minbase".into(),
             packages: Vec::new(),
         };
+
         let cached = dir.join(base_name("manifest", "hook"));
         write(&cached, "cached");
         let base = base_layer(&debian, "manifest", "hook", &dir, "1").unwrap();
+
         assert_eq!(base, cached);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -631,28 +651,36 @@ mod stage_tests {
                 "--group=0",
                 "--numeric-owner",
             ];
+
             all.extend(mode);
             all.extend(["--mtime=@1700000000", "-C", dir]);
             all.extend(paths);
             all.into_iter().map(str::to_owned).collect()
         };
+
         let toolchain = Layer::new(Path::new("/w/toolchain"), None, &["usr"]);
         assert_eq!(args(&toolchain), expected(&[], "/w/toolchain", &["usr"]));
+
         let trust = Layer::new(
             Path::new("/w/trust"),
             Some("0644"),
             &[TRUST_BUNDLE, TRUST_ANCHOR],
         );
+
         let paths = [TRUST_BUNDLE, TRUST_ANCHOR];
         assert_eq!(args(&trust), expected(&["--mode=0644"], "/w/trust", &paths));
+
         let agent = Layer::new(Path::new("/w/agent-layer"), Some("0755"), &[AGENT_IN_IMAGE]);
         let paths = ["usr/sbin/crateward-agent"];
+
         assert_eq!(
             args(&agent),
             expected(&["--mode=0755"], "/w/agent-layer", &paths)
         );
+
         let ebpf = Layer::new(Path::new("/w/agent-layer"), Some("0644"), &[EBPF_IN_IMAGE]);
         let paths = ["usr/lib/crateward/guest-ebpf.o"];
+
         assert_eq!(
             args(&ebpf),
             expected(&["--mode=0644"], "/w/agent-layer", &paths)
@@ -690,6 +718,7 @@ mod stage_tests {
             })
             .filter(|(name, ..)| name.starts_with("usr/"))
             .collect();
+
         assert_eq!(
             found,
             [
@@ -697,6 +726,7 @@ mod stage_tests {
                 ("usr/lib/object.o".to_owned(), 0, 0, 0o644, 1_700_000_000),
             ]
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -706,12 +736,15 @@ mod stage_tests {
         let source = dir.join("agent");
         write(&source, "binary");
         stage_file(&source, &dir.join("layer/usr/sbin/agent")).unwrap();
+
         assert_eq!(
             std::fs::read_to_string(dir.join("layer/usr/sbin/agent")).unwrap(),
             "binary"
         );
+
         let error = stage_file(&dir.join("missing"), &dir.join("layer/x")).unwrap_err();
         assert!(error.to_string().contains("missing"), "{error}");
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -724,6 +757,7 @@ mod stage_tests {
         let authority = dir.join(build::AUTHORITY);
         let pem = std::fs::read_to_string(&authority).unwrap();
         let (cert, _key) = crateward_fake_internet::tls::split_pem(&pem).unwrap();
+
         assert_eq!(staging, work.join("trust"));
         assert_eq!(
             std::fs::read_to_string(staging.join(TRUST_BUNDLE)).unwrap(),
@@ -733,10 +767,14 @@ mod stage_tests {
             std::fs::read_to_string(staging.join(TRUST_ANCHOR)).unwrap(),
             cert
         );
+
         let mode = std::fs::metadata(&authority).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+
         stage_trust(&dir, &base, &work).unwrap();
+
         assert_eq!(std::fs::read_to_string(&authority).unwrap(), pem);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -746,7 +784,9 @@ mod stage_tests {
         let base = base_with_bundle(&dir, Some("BASE BUNDLE\n"));
         let staging = stage_trust(&dir, &base, &dir.join("work")).unwrap();
         let bundle = std::fs::read_to_string(staging.join(TRUST_BUNDLE)).unwrap();
+
         assert!(bundle.starts_with("BASE BUNDLE\n-----BEGIN CERTIFICATE-----"));
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -755,12 +795,14 @@ mod stage_tests {
         let dir = scratch("nobundle");
         let base = base_with_bundle(&dir, None);
         let error = stage_trust(&dir, &base, &dir.join("work")).unwrap_err();
+
         assert!(
             error
                 .to_string()
                 .contains("the base has no etc/ssl/certs/ca-certificates.crt"),
             "{error}"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -770,10 +812,12 @@ mod stage_tests {
         let base = base_with_bundle(&dir, Some("B"));
         write(&dir.join(build::AUTHORITY), "junk");
         let error = stage_trust(&dir, &base, &dir.join("work")).unwrap_err();
+
         assert!(
             error.to_string().contains("is not a certificate and a key"),
             "{error}"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -811,13 +855,16 @@ mod stage_tests {
         let dir = scratch("toolchain");
         cached_component(&dir, None);
         let staging = stage_toolchain(&dir, &dir.join("work")).unwrap();
+
         assert_eq!(staging, dir.join("work/toolchain"));
+
         let prefix = staging.join("usr/local");
         assert_eq!(
             std::fs::read_to_string(prefix.join("bin/rustc")).unwrap(),
             "compiler"
         );
         assert!(!prefix.join("manifest.in").exists());
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -828,7 +875,9 @@ mod stage_tests {
         let stale = dir.join("work/toolchain/usr/local/stale");
         write(&stale, "old");
         stage_toolchain(&dir, &dir.join("work")).unwrap();
+
         assert!(!stale.exists());
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -838,6 +887,7 @@ mod stage_tests {
         cached_component(&dir, Some(&"0".repeat(64)));
         let error = stage_toolchain(&dir, &dir.join("work")).unwrap_err();
         let message = error.to_string();
+
         assert!(
             message.contains("rust-1.0-x86_64.tar.xz has SHA-256 "),
             "{message}"
@@ -851,6 +901,7 @@ mod stage_tests {
                 .join("rust-1.0-x86_64.tar.xz")
                 .exists()
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -863,12 +914,14 @@ mod stage_tests {
             "version = \"1.0\"\n[[component]]\ndir = \"c\"\nurl = \"https://example.invalid/rust.zip\"\nsha256 = \"0\"\n",
         );
         let error = stage_toolchain(&dir, &dir.join("work")).unwrap_err();
+
         assert!(
             error
                 .to_string()
                 .contains("unexpected URL https://example.invalid/rust.zip"),
             "{error}"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
@@ -887,13 +940,16 @@ mod hook_tests {
             guest::BUILDER_UID,
             guest::BUILDER_USER
         );
+
         assert!(hook.contains(&useradd), "{useradd}");
         assert_eq!(guest::BUILDER_GID, guest::BUILDER_UID, "--user-group");
+
         let mounts = format!(
             r#"mkdir -p "$root{}" "$root{}""#,
             guest::PAYLOAD,
             guest::WORK
         );
+
         assert!(hook.contains(&mounts), "{mounts}");
     }
 }

@@ -106,6 +106,7 @@ impl Analyzer {
             self.lease,
             self.lease / 4,
         );
+
         let started = std::time::Instant::now();
         let result = self.process(&job).await;
         beat.abort();
@@ -127,6 +128,7 @@ impl Analyzer {
                 }
             }
         };
+
         let worker = self.worker.clone();
         let policies = self.policies.clone();
         self.store
@@ -160,6 +162,7 @@ impl Analyzer {
                 return Ok(0);
             }
         };
+
         self.unrefreshable
             .extend(outdated.iter().filter(|sha| !reports.contains_key(sha)));
         Ok(reports.len())
@@ -180,9 +183,11 @@ impl Analyzer {
     async fn assess(&self, job: &StoredJob) -> Result<(Decision, Option<VersionDiff>), Failure> {
         let name = CrateName::parse(&job.name).map_err(Failure::permanent)?;
         let version = semver::Version::parse(&job.version).map_err(Failure::permanent)?;
+
         if let Some(decision) = self.early_decision(job).await? {
             return Ok((decision, None));
         }
+
         let dependencies = self.dependencies(job).await?;
         let fetches = self.store.other_fetches(&name, job.id).await?;
         let history = earlier_versions(fetches, job, &version);
@@ -218,6 +223,7 @@ impl Analyzer {
                 "the archive failed validation and was not unpacked",
             )));
         }
+
         if self.store.fetch_lockfile(job.id).await?.is_none() {
             // The crate's own report is still useful evidence.
             let _ = self.ensure_reports(&[job.cksum]).await?;
@@ -226,6 +232,7 @@ impl Analyzer {
                 "cargo could not resolve the dependencies",
             )));
         }
+
         Ok(None)
     }
 
@@ -279,6 +286,7 @@ impl Analyzer {
                 dep.tracked = self.store.contains(&dep_name, &dep.version).await?;
             }
         }
+
         Ok(facts)
     }
 
@@ -304,6 +312,7 @@ impl Analyzer {
     async fn ensure_reports(&self, files: &[Sha256Digest]) -> Result<Reports, Failure> {
         let mut reports = Reports::new();
         let mut missing = Vec::new();
+
         for sha in files.iter().collect::<BTreeSet<_>>() {
             if let Some(report) = self.stored_report(sha).await? {
                 reports.insert(*sha, report);
@@ -313,6 +322,7 @@ impl Analyzer {
                 missing.push((*sha, blake3));
             }
         }
+
         let mut batch = Vec::new();
         let mut batch_bytes = 0;
         let mut iter = missing.into_iter().peekable();
@@ -320,11 +330,13 @@ impl Analyzer {
             let tar = self.read_blob(blake3).await?;
             batch_bytes += tar.len();
             batch.push((sha, tar));
+
             if batch_bytes >= BATCH_BYTES || iter.peek().is_none() {
                 reports.extend(self.analyze_batch(std::mem::take(&mut batch)).await?);
                 batch_bytes = 0;
             }
         }
+
         Ok(reports)
     }
 
@@ -358,6 +370,7 @@ impl Analyzer {
             .map_err(Failure::infrastructure)?
             .map_err(Failure::infrastructure)?;
         let mut analyzed = Vec::new();
+
         for (sha, outcome) in shas.into_iter().zip(outcomes) {
             match outcome {
                 Outcome::Report(report) => {
@@ -367,6 +380,7 @@ impl Analyzer {
                 Outcome::Error(error) => tracing::warn!(%sha, %error, "archive not analyzable"),
             }
         }
+
         Ok(analyzed)
     }
 
@@ -417,19 +431,23 @@ fn earlier_versions(
     version: &semver::Version,
 ) -> History {
     let mut history = History::default();
+
     for (_, other, cksum, packages) in fetches {
         let Ok(other) = semver::Version::parse(&other) else {
             continue;
         };
+
         if other >= *version {
             continue;
         }
+
         let names: BTreeSet<String> = parse_locked(&packages)
             .into_iter()
             .map(|p| p.name)
             .filter(|n| n != &job.name)
             .collect();
         history.seen.extend(names.iter().cloned());
+
         if history.previous.as_ref().is_none_or(|p| other > p.version) {
             history.previous = Some(Previous {
                 version: other,
@@ -438,6 +456,7 @@ fn earlier_versions(
             });
         }
     }
+
     history
 }
 
@@ -476,6 +495,7 @@ fn scrub(value: &mut serde_json::Value) {
                     map.insert(key.replace('\0', "\\u{0}"), v);
                 }
             }
+
             map.values_mut().for_each(scrub);
         }
         _ => {}

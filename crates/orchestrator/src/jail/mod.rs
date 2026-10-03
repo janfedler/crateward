@@ -132,15 +132,18 @@ impl JailSpec {
         if !is_simple_name(&self.id) || self.id.contains('.') {
             return fail(format!("id {:?} is not a simple name", self.id));
         }
+
         for path in [&self.root, &self.firecracker, &self.log] {
             if !path.is_absolute() {
                 return fail(format!("{} is not absolute", path.display()));
             }
         }
+
         if let Some(sinks) = &self.sinks {
             if self.tap.is_none() {
                 return fail("the fake internet needs a tap device".into());
             }
+
             for path in [&sinks.binary, &sinks.events]
                 .into_iter()
                 .chain(sinks.authority.as_ref())
@@ -150,19 +153,23 @@ impl JailSpec {
                 }
             }
         }
+
         for mount in &self.mounts {
             if !mount.source.is_absolute() {
                 return fail(format!("{} is not absolute", mount.source.display()));
             }
+
             if !is_simple_name(&mount.target)
                 || matches!(mount.target.as_str(), "dev" | "firecracker")
             {
                 return fail(format!("mount target {:?} is not allowed", mount.target));
             }
+
             if mount.target == FAKE_INTERNET_IN_JAIL.trim_start_matches('/') {
                 return fail(format!("mount target {:?} is reserved", mount.target));
             }
         }
+
         for device in &self.devices {
             let under_dev = device.parent().is_some_and(|p| p.starts_with("/dev"));
             let name_ok = device
@@ -173,11 +180,13 @@ impl JailSpec {
                 return fail(format!("device {} is not allowed", device.display()));
             }
         }
+
         if let Some(tap) = &self.tap
             && (!is_simple_name(tap) || tap.len() > 15)
         {
             return fail(format!("tap name {tap:?} is not allowed"));
         }
+
         Ok(())
     }
 }
@@ -216,16 +225,23 @@ mod tests {
         for target in ["..", "a/b", "dev", "firecracker", ""] {
             let mut s = spec();
             s.mounts[0].target = target.into();
+
             assert!(s.validate().is_err(), "{target:?}");
         }
+
         let mut s = spec();
         s.devices = vec!["/etc/shadow".into()];
+
         assert!(s.validate().is_err());
+
         let mut s = spec();
         s.mounts[0].source = "relative/path".into();
+
         assert!(s.validate().is_err());
+
         let mut s = spec();
         s.tap = Some("a-name-longer-than-15".into());
+
         assert!(s.validate().is_err());
     }
 }

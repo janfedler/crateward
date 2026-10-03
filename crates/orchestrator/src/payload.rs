@@ -198,13 +198,16 @@ pub fn stub_manifest(original: &[u8]) -> Result<String, ManifestError> {
         for key in ["build", "links", "autolib", "default-run"] {
             package.remove(key);
         }
+
         for key in ["autobins", "autoexamples", "autotests", "autobenches"] {
             package.insert(key.into(), toml::Value::Boolean(false));
         }
     }
+
     for key in ["bin", "example", "test", "bench"] {
         manifest.remove(key);
     }
+
     let mut lib = toml::Table::new();
     if let Some(original) = manifest.get("lib").and_then(toml::Value::as_table) {
         for key in ["name", "crate-type", "proc-macro"] {
@@ -213,6 +216,7 @@ pub fn stub_manifest(original: &[u8]) -> Result<String, ManifestError> {
             }
         }
     }
+
     lib.insert("path".into(), toml::Value::String("src/lib.rs".into()));
     manifest.insert("lib".into(), toml::Value::Table(lib));
     Ok(toml::to_string(&manifest)?)
@@ -244,6 +248,7 @@ impl<W: Write> TarWriter<W> {
         ] {
             self.append(&format!("{dir}/{file}"), 0o644, data)?;
         }
+
         Ok(())
     }
 
@@ -267,6 +272,7 @@ impl<W: Write> TarWriter<W> {
             let entry = entry.map_err(io(format!("reading {dir}")))?;
             self.entry(entry, &dir, stub)?;
         }
+
         // Directory sources need a checksum file. `package` must match the
         // lockfile. File hashes are left out: the payload is read only.
         let checksum = format!("{{\"files\":{{}},\"package\":\"{}\"}}", package.checksum);
@@ -283,6 +289,7 @@ impl<W: Write> TarWriter<W> {
         if !entry.header().entry_type().is_file() {
             return Ok(());
         }
+
         let path = entry
             .path()
             .map_err(io(format!("reading {dir}")))?
@@ -291,10 +298,12 @@ impl<W: Write> TarWriter<W> {
         let Some(rest) = path.strip_prefix(dir).and_then(|r| r.strip_prefix('/')) else {
             return Err(PayloadError::Mismatch(dir.to_owned()));
         };
+
         // Cargo trusts this file for vendored sources. Only ours counts.
         if rest == ".cargo-checksum.json" || (stub && rest != "Cargo.toml") {
             return Ok(());
         }
+
         let executable = entry.header().mode().is_ok_and(|m| m & 0o111 != 0);
         let mut data = Vec::new();
         entry
@@ -303,6 +312,7 @@ impl<W: Write> TarWriter<W> {
         if stub {
             return self.stub_files(dir, &path, &data);
         }
+
         let mode = if executable { 0o755 } else { 0o644 };
         self.append(&format!("vendor/{path}"), mode, &data)
     }
@@ -313,6 +323,7 @@ impl<W: Write> TarWriter<W> {
             package: dir.to_owned(),
             source,
         })?;
+
         self.append(&format!("vendor/{path}"), 0o644, stub.as_bytes())?;
         self.append(&format!("vendor/{dir}/src/lib.rs"), 0o644, b"")
     }
@@ -341,21 +352,27 @@ pub fn write_tar<W: Write>(
         builder: tar::Builder::new(out),
         stats: PayloadStats::default(),
     };
+
     let first = ProbeSpec {
         name: spec.name.clone(),
         version: spec.version.clone(),
         lockfile: spec.lockfile.clone(),
     };
+
     tar.probe("probe", &first)?;
+
     for (i, probe) in spec.extra_probes.iter().enumerate() {
         tar.probe(&format!("probes/{i}"), probe)?;
     }
+
     for (path, data) in &spec.files {
         tar.append(path, 0o644, data)?;
     }
+
     for package in &spec.packages {
         tar.package(package, blobs, &spec.stubs)?;
     }
+
     tar.finish()
 }
 
@@ -389,6 +406,7 @@ pub fn build_image(
 ) -> Result<PayloadStats, PayloadError> {
     let mut child = spawn_mkfs(exe, out, Stdio::piped())?;
     let written = write_tar(spec, blobs, BufWriter::new(child.stdin()?));
+
     // A child that dies breaks the pipe. Its own failure says why, so it
     // wins over the write error.
     child.finish(None)?;
@@ -414,6 +432,7 @@ fn serve(out: Option<&String>) -> Result<(), Box<dyn Error>> {
             .collect(),
         write: vec![dir.to_path_buf()],
     };
+
     sandbox::enter(LIMITS, &access)?;
     let error = child::command(MKFS_EROFS)
         .args(["--tar=f", "-T0", "--quiet"])
@@ -428,16 +447,20 @@ mod tests {
 
     fn blob_tar(files: &[(&str, &[u8], u32)]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
+
         for (path, data, mode) in files {
             let mut h = tar::Header::new_gnu();
             h.set_size(data.len() as u64);
             h.set_mode(*mode);
+
             if path.ends_with('/') {
                 h.set_entry_type(tar::EntryType::Directory);
             }
+
             h.set_cksum();
             builder.append_data(&mut h, path, *data).unwrap();
         }
+
         builder.into_inner().unwrap()
     }
 
@@ -447,6 +470,7 @@ mod tests {
             std::process::id(),
             rand::random::<u32>()
         ));
+
         let _ = std::fs::remove_dir_all(&dir);
         let blobs = BlobStore::open(&dir.join("cas")).unwrap();
         let blob = blobs.put(&blob_tar(files)).unwrap();
@@ -464,6 +488,7 @@ mod tests {
             files: Vec::new(),
             stubs: Vec::new(),
         };
+
         (dir, blobs, spec)
     }
 
@@ -474,6 +499,7 @@ mod tests {
             ("demo-1.0.0/build.sh", b"#!/bin/sh", 0o755),
             ("demo-1.0.0/.cargo-checksum.json", b"{\"forged\":1}", 0o644),
         ]);
+
         let mut tar = Vec::new();
         let stats = write_tar(&spec, &blobs, &mut tar).unwrap();
         let mut entries = std::collections::BTreeMap::new();
@@ -485,6 +511,7 @@ mod tests {
             entry.read_to_string(&mut data).unwrap();
             entries.insert(path, (mode, data));
         }
+
         assert!(
             entries["probe/Cargo.toml"]
                 .1
@@ -501,6 +528,7 @@ mod tests {
             format!("{{\"files\":{{}},\"package\":\"{}\"}}", "ab".repeat(32))
         );
         assert_eq!(stats.files, 7);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -513,6 +541,7 @@ mod tests {
             ("demo-1.0.0/build.sh", b"#!/bin/sh", 0o755),
             ("demo-1.0.0/.cargo-checksum.json", b"{}", 0o644),
         ]);
+
         let dep_manifest: &[u8] = b"[package]\nname = \"dep\"\nbuild = \"build.rs\"\n";
         let dep = blobs
             .put(&blob_tar(&[
@@ -539,6 +568,7 @@ mod tests {
         let stats = write_tar(&spec, &blobs, &mut tar).unwrap();
         let mut listing = Vec::new();
         let mut bytes = 0;
+
         for entry in tar::Archive::new(tar.as_slice()).entries().unwrap() {
             let mut entry = entry.unwrap();
             let path = entry.path().unwrap().to_string_lossy().into_owned();
@@ -552,6 +582,7 @@ mod tests {
         let probe = |name: &str, version: &str| {
             probe_manifest(&CrateName::parse(name).unwrap(), &version.parse().unwrap())
         };
+
         let checksum =
             |digit: &str| format!("{{\"files\":{{}},\"package\":\"{}\"}}", digit.repeat(32));
         let expected = [
@@ -581,19 +612,23 @@ mod tests {
                 checksum("cd")
             ),
         ];
+
         assert_eq!(listing, expected);
         assert_eq!(stats.files, expected.len() as u64);
         assert_eq!(stats.bytes, bytes);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn a_blob_of_another_crate_is_refused() {
         let (dir, blobs, spec) = setup(&[("other-2.0.0/Cargo.toml", b"", 0o644)]);
+
         assert!(matches!(
             write_tar(&spec, &blobs, Vec::new()),
             Err(PayloadError::Mismatch(_))
         ));
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -630,10 +665,12 @@ std = []
 "#;
         let stub: toml::Table = stub_manifest(original).unwrap().parse().unwrap();
         let package = stub["package"].as_table().unwrap();
+
         assert!(package.get("build").is_none() && package.get("links").is_none());
         assert!(package.get("default-run").is_none());
         assert_eq!(package["autobins"].as_bool(), Some(false));
         assert!(stub.get("bin").is_none());
+
         let lib = stub["lib"].as_table().unwrap();
         assert_eq!(lib["path"].as_str(), Some("src/lib.rs"));
         assert_eq!(lib["proc-macro"].as_bool(), Some(true));
@@ -658,6 +695,7 @@ std = []
         let (dir, blobs, mut spec) = setup(&[("demo-1.0.0/Cargo.toml", b"not [toml", 0o644)]);
         spec.stubs = vec!["demo-1.0.0".into()];
         let error = write_tar(&spec, &blobs, Vec::new()).unwrap_err();
+
         assert!(
             matches!(&error, PayloadError::Manifest { package, .. } if package == "demo-1.0.0"),
             "{error}"
@@ -667,6 +705,7 @@ std = []
                 .to_string()
                 .starts_with("the manifest of demo-1.0.0: ")
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -675,10 +714,12 @@ std = []
         let (dir, blobs, mut spec) = setup(&[("demo-1.0.0/Cargo.toml", b"[package]", 0o644)]);
         spec.packages[0].blake3 = "0".repeat(64);
         let error = write_tar(&spec, &blobs, Vec::new()).unwrap_err();
+
         assert!(
             matches!(&error, PayloadError::Blob { package, .. } if package == "demo-1.0.0"),
             "{error}"
         );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

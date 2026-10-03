@@ -51,12 +51,14 @@ enum Kind {
 pub fn lint_workspace(root: &Path) -> Result<Vec<Violation>, TaskError> {
     let mut files = Vec::new();
     collect(root, &mut files, false)?;
+
     let mut violations = Vec::new();
     for (path, kind) in files {
         let text = std::fs::read_to_string(&path).map_err(|e| TaskError::Io(path.clone(), e))?;
         let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
         violations.extend(lint_text(&relative, &text, kind));
     }
+
     Ok(violations)
 }
 
@@ -67,6 +69,7 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
         .map(|entry| entry.path())
         .collect();
     paths.sort();
+
     for path in paths {
         let name = path
             .file_name()
@@ -78,11 +81,14 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
             } else {
                 matches!(name, "docs" | "crates" | "config" | "deploy")
             };
+
             if descend && !name.starts_with('.') {
                 collect(&path, out, true)?;
             }
+
             continue;
         }
+
         let in_config = path
             .parent()
             .and_then(Path::file_name)
@@ -93,10 +99,12 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
             Some("toml") if in_config => Some(Kind::TomlComments),
             _ => None,
         };
+
         if let Some(kind) = kind {
             out.push((path, kind));
         }
     }
+
     Ok(())
 }
 
@@ -105,17 +113,21 @@ fn lint_text(path: &Path, text: &str, kind: Kind) -> Vec<Violation> {
     let mut violations = Vec::new();
     let mut fence: Option<String> = None;
     let mut in_comment = false;
+
     for (index, raw) in text.lines().enumerate() {
         let Some(line) = prose_source(raw, kind) else {
             continue;
         };
+
         let trimmed = line.trim_start();
         if let Some(marker) = &fence {
             if trimmed.starts_with(marker.as_str()) {
                 fence = None;
             }
+
             continue;
         }
+
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             let marker: String = trimmed
                 .chars()
@@ -124,6 +136,7 @@ fn lint_text(path: &Path, text: &str, kind: Kind) -> Vec<Violation> {
             fence = Some(marker);
             continue;
         }
+
         let without_comments = strip_html_comments(line, &mut in_comment);
         let prose = strip_non_prose(&without_comments);
         for message in check_prose(&prose) {
@@ -134,6 +147,7 @@ fn lint_text(path: &Path, text: &str, kind: Kind) -> Vec<Violation> {
             });
         }
     }
+
     violations
 }
 
@@ -191,6 +205,7 @@ fn strip_non_prose(line: &str) -> String {
             let Some(end) = code_span_end(&chars, i) else {
                 break;
             };
+
             out.push(' ');
             i = end;
         } else if c == ']' && chars.get(i + 1) == Some(&'(') {
@@ -206,8 +221,10 @@ fn strip_non_prose(line: &str) -> String {
             i += 1;
         }
     }
+
     // Quotations are someone else's words, for example a cited document.
     let out = strip_quotations(&out);
+
     // Bare URLs and reference link definitions.
     out.split(' ')
         .filter(|word| !(word.contains("://") || word.starts_with("www.")))
@@ -225,8 +242,10 @@ fn code_span_end(chars: &[char], start: usize) -> Option<usize> {
         if here == run {
             return Some(at + run);
         }
+
         at += here.max(1);
     }
+
     None
 }
 
@@ -251,6 +270,7 @@ fn autolink_end(chars: &[char], start: usize) -> Option<usize> {
     if !(head.starts_with("http") || head.starts_with("mailto:")) {
         return None;
     }
+
     let close = chars.get(start..)?.iter().position(|&c| c == '>');
     Some(close.map_or(chars.len(), |p| start + p + 1))
 }
@@ -262,7 +282,9 @@ fn strip_quotations(line: &str) -> String {
     if let Some(first) = parts.next() {
         out.push_str(first);
     }
+
     let rest: Vec<&str> = parts.collect();
+
     // With an odd number of quotes the last one is unmatched. Keep its text.
     let pairs = rest.len() / 2;
     for (index, part) in rest.iter().enumerate() {
@@ -271,6 +293,7 @@ fn strip_quotations(line: &str) -> String {
             out.push_str(part);
         }
     }
+
     out
 }
 
@@ -279,21 +302,26 @@ fn check_prose(prose: &str) -> Vec<String> {
     if prose.contains('\u{2014}') {
         messages.push("em dash in prose: use a period, comma or colon".to_owned());
     }
+
     if has_semicolon(prose) {
         messages.push("semicolon in prose: end the sentence with a period".to_owned());
     }
+
     for word in prose.split_whitespace() {
         let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
+
         // Command line flags such as `--no-deps` are names, not prose.
         if word.starts_with('-') {
             continue;
         }
+
         if is_hyphenated_compound(word) && !ALLOWED_HYPHENATED.contains(&word) {
             messages.push(format!(
                 "hyphenated compound {word:?}: write it as separate words, as one word, or in inline code if it is a name"
             ));
         }
     }
+
     messages
 }
 
@@ -332,6 +360,7 @@ mod tests {
     #[test]
     fn flags_em_dashes_and_compounds_in_prose() {
         let found = lint("A read-only disk \u{2014} always.", Kind::Markdown);
+
         assert_eq!(found.len(), 2);
     }
 
@@ -361,6 +390,7 @@ mod tests {
             lint("A list:\n* first;\n* second.", Kind::Markdown).len(),
             1
         );
+
         let fine = "Run `a; b`, see <https://x.org/a;b>, \"quoted; text\".\n\
                     MITRE ATT&amp;CK and &#38; are entities.\n\
                     ```\nlet x = 1;\n```\n";
@@ -370,12 +400,14 @@ mod tests {
     #[test]
     fn rust_comments_are_checked_and_code_is_not() {
         let text = "//! A well-known fact.\nlet x = a-b;\n/// Fine text.\n// One; two.\n";
+
         assert_eq!(lint(text, Kind::RustComments).len(), 2);
     }
 
     #[test]
     fn toml_comments_are_checked_and_values_are_not() {
         let text = "# a user-agent string\nurl = \"https://ntfy.sh\"\n";
+
         assert_eq!(lint(text, Kind::TomlComments).len(), 1);
     }
 
@@ -405,6 +437,7 @@ mod tests {
             ("An \"odd quote", "An  odd quote"),
             ("`a \"b` c\" d", "  c  d"),
         ];
+
         for (input, expected) in cases {
             assert_eq!(strip_non_prose(input), expected, "{input}");
         }
@@ -414,6 +447,7 @@ mod tests {
     fn the_repository_follows_its_own_style() {
         let violations = lint_workspace(&crate::workspace_root()).unwrap();
         let rendered: Vec<String> = violations.iter().map(ToString::to_string).collect();
+
         assert!(rendered.is_empty(), "{}", rendered.join("\n"));
     }
 }

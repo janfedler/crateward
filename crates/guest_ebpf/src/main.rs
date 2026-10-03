@@ -233,6 +233,7 @@ fn config_usize(value: &u32) -> usize {
 #[inline(always)]
 fn current() -> (u32, u32, u32) {
     let pid_tgid = bpf_get_current_pid_tgid();
+
     // SAFETY: the helper returns the current task, valid while the program
     // runs. The reads go through `bpf_probe_read_kernel`.
     let uid = unsafe {
@@ -244,6 +245,7 @@ fn current() -> (u32, u32, u32) {
             field_u32(cred, &OFF_CRED_EUID)
         }
     };
+
     ((pid_tgid >> 32) as u32, pid_tgid as u32, uid)
 }
 
@@ -292,10 +294,13 @@ unsafe fn field_u64(base: *const u8, offset: &u32) -> u64 {
 #[btf_tracepoint(function = "sched_process_fork")]
 pub fn sched_process_fork(ctx: BtfTracePointContext) -> i32 {
     let (tgid, tid, uid) = current();
+
     if !is_tracked(tgid, uid) {
         return 0;
     }
+
     let child: *const u8 = ctx.arg(1);
+
     // SAFETY: `child` is the new task, valid for the tracepoint's duration.
     let (child_pid, child_tgid) = unsafe {
         (
@@ -303,11 +308,14 @@ pub fn sched_process_fork(ctx: BtfTracePointContext) -> i32 {
             field_u32(child, &OFF_TASK_TGID),
         )
     };
+
     // A new thread belongs to a tracked process already.
     if child_pid != child_tgid {
         return 0;
     }
+
     track(child_pid);
+
     match EVENTS.reserve::<Fork>(0) {
         Some(mut entry) => {
             entry.write(Fork {
@@ -319,15 +327,18 @@ pub fn sched_process_fork(ctx: BtfTracePointContext) -> i32 {
         }
         None => dropped(),
     }
+
     0
 }
 
 #[btf_tracepoint(function = "sched_process_exec")]
 pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
     let (tgid, tid, uid) = current();
+
     if !is_tracked(tgid, uid) {
         return 0;
     }
+
     track(tgid);
     let task: *const u8 = ctx.arg(0);
     let bprm: *const u8 = ctx.arg(2);
@@ -335,7 +346,9 @@ pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
         dropped();
         return 0;
     };
+
     let record = entry.as_mut_ptr();
+
     // SAFETY: `record` points to a reserved entry of the right size. The
     // kernel pointers are the tracepoint's arguments.
     unsafe {
@@ -346,6 +359,7 @@ pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
             Ok(bytes) => bytes.len() as i32,
             Err(error) => error,
         };
+
         addr_of_mut!((*record).filename_len).write(filename_len);
 
         let mm = field_u64(task, &OFF_TASK_MM) as *const u8;
@@ -355,14 +369,17 @@ pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
         if len > ARGS_LEN - 1 {
             len = ARGS_LEN - 1;
         }
+
         let len = len & (ARGS_LEN - 1);
         let args = &mut *addr_of_mut!((*record).args);
         let read = match args.get_mut(..len) {
             Some(target) if len > 0 => bpf_probe_read_user_buf(start as *const u8, target).is_ok(),
             _ => false,
         };
+
         addr_of_mut!((*record).args_len).write(if read { len as u32 } else { 0 });
     }
+
     entry.submit(0);
     0
 }
@@ -370,14 +387,18 @@ pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
 #[btf_tracepoint(function = "sched_process_exit")]
 pub fn sched_process_exit(ctx: BtfTracePointContext) -> i32 {
     let (tgid, tid, uid) = current();
+
     // Only the end of a whole process, not of each thread.
     let group_dead: u64 = ctx.arg(1);
     if group_dead & 0xff == 0 || !is_tracked(tgid, uid) {
         return 0;
     }
+
     let task: *const u8 = ctx.arg(0);
+
     // SAFETY: `task` is the exiting task.
     let exit_code = unsafe { field_u32(task, &OFF_TASK_EXIT_CODE) };
+
     match EVENTS.reserve::<Exit>(0) {
         Some(mut entry) => {
             entry.write(Exit {
@@ -389,25 +410,32 @@ pub fn sched_process_exit(ctx: BtfTracePointContext) -> i32 {
         }
         None => dropped(),
     }
+
     0
 }
 
 #[lsm(hook = "file_open")]
 pub fn file_open(ctx: LsmContext) -> i32 {
     let (tgid, tid, uid) = current();
+
     if !is_tracked(tgid, uid) {
         return 0;
     }
+
     let file: *const u8 = ctx.arg(0);
+
     // SAFETY: `file` is the hook's argument.
     if unsafe { field_u32(file, &OFF_FILE_MODE) } & FMODE_KERNEL_INTERNAL != 0 {
         return 0;
     }
+
     let Some(mut entry) = EVENTS.reserve::<Open>(0) else {
         dropped();
         return 0;
     };
+
     let record = entry.as_mut_ptr();
+
     // SAFETY: `record` is a reserved entry. `file` is the hook's argument,
     // and `file + OFF_FILE_PATH` is its `f_path` member, which the verifier
     // checks against the kernel's BTF before `bpf_d_path` may use it.
@@ -419,6 +447,7 @@ pub fn file_open(ctx: LsmContext) -> i32 {
         let len = bpf_d_path(path as *mut _, buffer, PATH_LEN as u32);
         addr_of_mut!((*record).path_len).write(len as i32);
     }
+
     entry.submit(0);
     0
 }
@@ -431,7 +460,9 @@ fn socket_event(kind: u32, socket: *const u8, address: *const u8, addr_len: u32)
         dropped();
         return;
     };
+
     let record = entry.as_mut_ptr();
+
     // SAFETY: `record` is a reserved entry. The kernel pointers come from
     // the hook's arguments.
     unsafe {
@@ -443,25 +474,30 @@ fn socket_event(kind: u32, socket: *const u8, address: *const u8, addr_len: u32)
         addr_of_mut!((*record).addr_len).write(addr_len);
         let addr = &mut *addr_of_mut!((*record).addr);
         addr.fill(0);
+
         let mut len = addr_len as usize;
         if len > ADDR_LEN {
             len = ADDR_LEN;
         }
+
         if let Some(target) = addr.get_mut(..len)
             && len > 0
         {
             let _ = aya_ebpf::helpers::bpf_probe_read_kernel_buf(address, target);
         }
     }
+
     entry.submit(0);
 }
 
 #[lsm(hook = "socket_connect")]
 pub fn socket_connect(ctx: LsmContext) -> i32 {
     let (tgid, _, uid) = current();
+
     if !is_tracked(tgid, uid) {
         return 0;
     }
+
     let socket: *const u8 = ctx.arg(0);
     let address: *const u8 = ctx.arg(1);
     let addr_len: u64 = ctx.arg(2);
@@ -472,11 +508,14 @@ pub fn socket_connect(ctx: LsmContext) -> i32 {
 #[lsm(hook = "socket_sendmsg")]
 pub fn socket_sendmsg(ctx: LsmContext) -> i32 {
     let (tgid, _, uid) = current();
+
     if !is_tracked(tgid, uid) {
         return 0;
     }
+
     let socket: *const u8 = ctx.arg(0);
     let message: *const u8 = ctx.arg(1);
+
     // SAFETY: `message` is the hook's `struct msghdr`, a kernel copy.
     let (name, name_len) = unsafe {
         (
@@ -484,17 +523,20 @@ pub fn socket_sendmsg(ctx: LsmContext) -> i32 {
             field_u32(message, &OFF_MSGHDR_NAMELEN),
         )
     };
+
     // Sends on a connected socket carry no address. The connect was
     // recorded already.
     if name != 0 && name_len != 0 {
         socket_event(KIND_SEND, socket, name as *const u8, name_len);
     }
+
     0
 }
 
 #[inline(always)]
 fn pair_event(kind: u32, first: u32, second: u32) {
     let (tgid, tid, uid) = current();
+
     match EVENTS.reserve::<Pair>(0) {
         Some(mut entry) => {
             entry.write(Pair {
@@ -512,40 +554,49 @@ fn pair_event(kind: u32, first: u32, second: u32) {
 pub fn bpf(ctx: LsmContext) -> i32 {
     let (tgid, _, _) = current();
     let kernel: u64 = ctx.arg(3);
+
     // Everyone but the agent, whether tracked or not: after boot, nothing
     // else in the guest has a reason to use BPF.
     if tgid != config(&AGENT_TGID) && kernel & 0xff == 0 {
         let cmd: u64 = ctx.arg(0);
         pair_event(KIND_BPF, cmd as u32, 0);
     }
+
     0
 }
 
 #[lsm(hook = "ptrace_access_check")]
 pub fn ptrace_access_check(ctx: LsmContext) -> i32 {
     let (tgid, _, uid) = current();
+
     if is_tracked(tgid, uid) {
         let child: *const u8 = ctx.arg(0);
         let mode: u64 = ctx.arg(1);
+
         // SAFETY: `child` is the hook's target task.
         let target = unsafe { field_u32(child, &OFF_TASK_TGID) };
         pair_event(KIND_PTRACE, target, mode as u32);
     }
+
     0
 }
 
 #[lsm(hook = "sb_mount")]
 pub fn sb_mount(ctx: LsmContext) -> i32 {
     let (tgid, tid, uid) = current();
+
     if !is_tracked(tgid, uid) {
         return 0;
     }
+
     let fstype: *const u8 = ctx.arg(2);
     let Some(mut entry) = EVENTS.reserve::<Mount>(0) else {
         dropped();
         return 0;
     };
+
     let record = entry.as_mut_ptr();
+
     // SAFETY: `record` is a reserved entry. `fstype` is a kernel string or
     // null, which the helper reports as an error.
     unsafe {
@@ -556,8 +607,10 @@ pub fn sb_mount(ctx: LsmContext) -> i32 {
             Ok(bytes) => bytes.len() as i32,
             Err(error) => error,
         };
+
         addr_of_mut!((*record).fstype_len).write(len);
     }
+
     entry.submit(0);
     0
 }

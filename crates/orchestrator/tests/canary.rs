@@ -45,10 +45,12 @@ async fn canaries_give_their_known_results() {
     let kernel = kernel();
     let fake_internet =
         root().join("target/x86_64-unknown-linux-musl/release/crateward_fake_internet");
+
     assert!(
         fake_internet.exists(),
         "build crateward_fake_internet for musl first"
     );
+
     let config = FirecrackerConfig {
         firecracker: root().join(build::FIRECRACKER),
         launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
@@ -65,6 +67,7 @@ async fn canaries_give_their_known_results() {
         fake_internet: Some(fake_internet),
         authority: Some(root().join(build::AUTHORITY)),
     };
+
     for placeholder in [
         "placeholder-payload.img",
         "placeholder-scratch.img",
@@ -72,6 +75,7 @@ async fn canaries_give_their_known_results() {
     ] {
         std::fs::File::create(work.join(placeholder)).unwrap();
     }
+
     let boot = BootSpec {
         kernel,
         rootfs: root().join(build::ROOTFS_IMAGE),
@@ -89,6 +93,7 @@ async fn canaries_give_their_known_results() {
         }),
         network: true,
     };
+
     let snapshot = FirecrackerBackend::create_base_snapshot(&config, &boot, &work.join("snapshot"))
         .await
         .unwrap();
@@ -108,6 +113,7 @@ async fn canaries_give_their_known_results() {
         },
         blobs: BlobStore::open(&work.join("cas")).unwrap(),
     };
+
     for canary in canary::ALL {
         let files = JobFiles {
             payload: work.join("job.payload"),
@@ -116,6 +122,7 @@ async fn canaries_give_their_known_results() {
             warm: None,
             warm_placeholder: work.join("placeholder-warm.img"),
         };
+
         let spec = canary.payload(&sandbox.blobs).unwrap();
         let tokens = Honeytokens::generate(&mut rand::rng(), 1000);
         let plan = RunPlan::check(Duration::from_secs(300));
@@ -124,13 +131,16 @@ async fn canaries_give_their_known_results() {
             .await
             .unwrap();
         let problems = canary.check(&report);
+
         assert!(
             problems.is_empty(),
             "{}: {problems:?}\n{}",
             canary.name,
             serde_json::to_string_pretty(&report).unwrap()
         );
+
         eprintln!("{} passed in {} ms", canary.name, report.run_ms);
     }
+
     std::fs::remove_dir_all(&work).unwrap();
 }

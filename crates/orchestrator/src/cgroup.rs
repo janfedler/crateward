@@ -96,12 +96,14 @@ impl CgroupTree {
             .unwrap_or("/")
             .trim_start_matches('/');
         let mut root = Path::new(CGROUP_ROOT).join(relative);
+
         // A restarted orchestrator may already sit in its supervisor leaf.
         if root.file_name().is_some_and(|name| name == "supervisor")
             && let Some(parent) = root.parent()
         {
             root = parent.to_path_buf();
         }
+
         let tree = Self { root };
         tree.prepare()?;
         Ok(tree)
@@ -116,6 +118,7 @@ impl CgroupTree {
         let tree = Self {
             root: root.to_path_buf(),
         };
+
         tree.prepare()?;
         Ok(tree)
     }
@@ -129,18 +132,22 @@ impl CgroupTree {
         if !writable {
             return Err(CgroupError::NotDelegated(self.root.clone()));
         }
+
         let available = read(&self.root.join("cgroup.controllers"))?;
         for controller in ["cpu", "memory", "pids"] {
             if !available.split_whitespace().any(|c| c == controller) {
                 return Err(CgroupError::MissingController(controller));
             }
         }
+
         let supervisor = self.root.join("supervisor");
         std::fs::create_dir_all(&supervisor).map_err(io(&supervisor))?;
+
         for pid in read(&self.root.join("cgroup.procs"))?.lines() {
             // A process may exit between listing and moving it.
             let _ = std::fs::write(supervisor.join("cgroup.procs"), pid);
         }
+
         write(&subtree, "+cpu +memory +pids")
     }
 
@@ -159,6 +166,7 @@ impl CgroupTree {
         if path.exists() {
             SlotCgroup { path: path.clone() }.remove()?;
         }
+
         std::fs::create_dir(&path).map_err(io(&path))?;
         let slot = SlotCgroup { path };
         let period: u64 = 100_000;
@@ -167,11 +175,13 @@ impl CgroupTree {
             &format!("{} {period}", u64::from(limits.cpus) * period),
         )?;
         slot.set("memory.max", &(limits.memory_mib * 1024 * 1024).to_string())?;
+
         // Guest memory must never be written to disk (Firecracker production
         // host guide). The host has no swap, and this makes sure of it.
         if slot.path.join("memory.swap.max").exists() {
             slot.set("memory.swap.max", "0")?;
         }
+
         slot.set("pids.max", &limits.pids.to_string())?;
         Ok(slot)
     }
@@ -192,6 +202,7 @@ impl CgroupTree {
                 removed.push(name);
             }
         }
+
         Ok(removed)
     }
 
@@ -268,12 +279,15 @@ impl SlotCgroup {
     /// Fails if processes remain after a second.
     pub fn kill_and_wait(&self) -> Result<(), CgroupError> {
         self.kill()?;
+
         for _ in 0..200 {
             if !self.populated()? {
                 return Ok(());
             }
+
             std::thread::sleep(Duration::from_millis(5));
         }
+
         Err(CgroupError::StillPopulated(self.path.clone()))
     }
 
@@ -287,6 +301,7 @@ impl SlotCgroup {
         if !self.path.exists() {
             return Ok(());
         }
+
         self.kill_and_wait()?;
         std::fs::remove_dir(&self.path).map_err(io(&self.path))
     }

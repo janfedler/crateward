@@ -57,6 +57,7 @@ impl Integrity {
         if Instant::now() < self.next_manifest_check {
             return Vec::new();
         }
+
         self.next_manifest_check = Instant::now() + self.interval;
         let text = match std::fs::read_to_string(&self.manifest) {
             Ok(text) => text,
@@ -68,10 +69,12 @@ impl Integrity {
                     );
                     self.warned_no_manifest = true;
                 }
+
                 return Vec::new();
             }
             Err(error) => return vec![format!("{}: {error}", self.manifest.display())],
         };
+
         match integrity::parse(&text) {
             Ok(manifest) => integrity::verify(&manifest)
                 .into_iter()
@@ -87,6 +90,7 @@ impl Integrity {
         let mut buffer = [MaybeUninit::<u8>::uninit(); 4096];
         let mut reader = inotify::Reader::new(&self.inotify, &mut buffer);
         let mut gone = Vec::new();
+
         loop {
             match reader.next() {
                 Ok(event) => {
@@ -95,6 +99,7 @@ impl Integrity {
                         .get(&event.wd())
                         .map_or_else(|| "a decoy".to_owned(), |p| p.display().to_string());
                     findings.push(format!("{path}: {:?}", event.events()));
+
                     if event.events().contains(inotify::ReadFlags::IGNORED) {
                         gone.push(event.wd());
                     }
@@ -106,15 +111,18 @@ impl Integrity {
                 }
             }
         }
+
         for wd in gone {
             self.watches.remove(&wd);
         }
+
         let watched: HashSet<PathBuf> = self.watches.values().cloned().collect();
         for decoy in decoys.iter().filter(|d| !watched.contains(*d)) {
             if let Err(error) = self.plant(decoy) {
                 tracing::warn!(path = %decoy.display(), %error, "cannot plant the decoy");
             }
         }
+
         findings
     }
 
@@ -123,6 +131,7 @@ impl Integrity {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
+
             let mut file = std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
@@ -130,6 +139,7 @@ impl Integrity {
                 .open(path)?;
             file.write_all(DECOY)?;
         }
+
         let flags = inotify::WatchFlags::ACCESS
             | inotify::WatchFlags::OPEN
             | inotify::WatchFlags::MODIFY
@@ -171,6 +181,7 @@ fn host_processes() -> Vec<HostProcess> {
         tracing::warn!("cannot list /proc");
         return Vec::new();
     };
+
     entries
         .filter_map(Result::ok)
         .filter_map(|e| e.file_name().to_str()?.parse::<i32>().ok())

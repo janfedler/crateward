@@ -190,8 +190,10 @@ mod tests {
     fn opens_only_when_failures_dominate() {
         let closed = BreakerState::Closed;
         let none = Counts::default();
+
         assert_eq!(POLICY.evaluate(closed, counts(4, 0), none, 0).1, None);
         assert_eq!(POLICY.evaluate(closed, counts(5, 10), none, 0).1, None);
+
         let (state, change) = POLICY.evaluate(closed, counts(5, 5), none, 100);
         assert_eq!(change, Some(Change::Opened));
         assert_eq!(
@@ -210,13 +212,17 @@ mod tests {
             since: 0,
             reopened: 0,
         };
+
         let none = Counts::default();
         assert_eq!(POLICY.evaluate(open, none, none, 299).1, None);
+
         let (half, change) = POLICY.evaluate(open, none, none, 300);
         assert_eq!(change, Some(Change::Probing));
         assert!(half.allows_claims());
+
         // Nothing happened yet: stay half open.
         assert_eq!(POLICY.evaluate(half, none, none, 400).1, None);
+
         let (reopened, change) = POLICY.evaluate(half, none, counts(1, 3), 500);
         assert_eq!(change, Some(Change::Reopened));
         assert_eq!(
@@ -226,12 +232,14 @@ mod tests {
                 reopened: 1
             }
         );
+
         // The second cooldown is twice as long.
         assert_eq!(POLICY.evaluate(reopened, none, none, 500 + 599).1, None);
         assert_eq!(
             POLICY.evaluate(reopened, none, none, 500 + 600).1,
             Some(Change::Probing)
         );
+
         let (closed, change) = POLICY.evaluate(half, none, counts(0, 1), 600);
         assert_eq!(
             (closed, change),

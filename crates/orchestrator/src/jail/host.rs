@@ -140,6 +140,7 @@ pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child
                 .take()
                 .ok_or_else(|| JailError::Launcher("no stdout".into()))?,
         );
+
         let mut json = serde_json::to_vec(spec).map_err(|e| JailError::Launcher(e.to_string()))?;
         json.push(b'\n');
         stdin
@@ -155,6 +156,7 @@ pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child
             .map_err(io("confirming the ID maps"))?;
         expect_line(&mut stdout, "exec").await
     };
+
     match tokio::time::timeout(LAUNCH_TIMEOUT, handshake).await {
         Ok(Ok(())) => Ok(child),
         Ok(Err(error)) => {
@@ -177,9 +179,11 @@ pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child
 /// Fails if the directory cannot be created or the ACL not set.
 pub fn prepare_root(root: &Path, vm_uid: u32) -> Result<(), JailError> {
     use std::os::unix::fs::PermissionsExt;
+
     if root.exists() {
         std::fs::remove_dir_all(root).map_err(io("clearing the jail root"))?;
     }
+
     std::fs::create_dir_all(root).map_err(io("creating the jail root"))?;
     std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700))
         .map_err(io("restricting the jail root"))?;

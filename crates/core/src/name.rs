@@ -57,15 +57,18 @@ impl CrateName {
         if input.is_empty() {
             return Err(CrateNameError::Empty);
         }
+
         if input.len() > MAX_CRATE_NAME_LEN {
             return Err(CrateNameError::TooLong { len: input.len() });
         }
+
         if let Some(index) = input
             .bytes()
             .position(|b| !(b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
         {
             return Err(CrateNameError::InvalidCharacter { index });
         }
+
         if !input
             .bytes()
             .next()
@@ -73,6 +76,7 @@ impl CrateName {
         {
             return Err(CrateNameError::InvalidFirstCharacter);
         }
+
         Ok(Self(input.to_owned()))
     }
 
@@ -106,6 +110,7 @@ impl CrateName {
     #[must_use]
     pub fn index_path(&self) -> String {
         let lower = self.0.to_ascii_lowercase();
+
         // All characters are ASCII, so byte slicing below never splits a
         // character. `get` keeps this panic free regardless.
         match lower.len() {
@@ -165,6 +170,7 @@ mod tests {
             ("MyCrate", "my/cr/mycrate"),
             ("serde_json", "se/rd/serde_json"),
         ];
+
         for (name, path) in cases {
             assert_eq!(CrateName::parse(name).unwrap().index_path(), path, "{name}");
         }
@@ -199,13 +205,16 @@ mod tests {
     #[test]
     fn canonical_form_folds_case_and_separators() {
         let name = CrateName::parse("Serde-JSON").unwrap();
+
         assert_eq!(name.canonical(), "serde_json");
     }
 
     #[test]
     fn serde_round_trip_validates() {
         let name: CrateName = toml::Value::String("tokio".into()).try_into().unwrap();
+
         assert_eq!(name.as_str(), "tokio");
+
         let bad: Result<CrateName, _> = toml::Value::String("to/kio".into()).try_into();
         assert!(bad.is_err());
     }

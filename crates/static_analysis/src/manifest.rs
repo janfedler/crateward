@@ -44,28 +44,33 @@ pub fn parse(manifest: &str, files: &BTreeSet<String>) -> ManifestFacts {
     let Ok(value) = manifest.parse::<toml::Table>() else {
         return ManifestFacts::default();
     };
+
     let package = value.get("package");
     let build_script = match package.and_then(|p| p.get("build")) {
         Some(toml::Value::String(path)) => Some(path.clone()),
         Some(toml::Value::Boolean(false)) => None,
         _ => files.contains("build.rs").then(|| "build.rs".to_owned()),
     };
+
     let lib = value.get("lib");
     let proc_macro = ["proc-macro", "proc_macro"]
         .iter()
         .any(|k| lib.and_then(|l| l.get(*k)).and_then(toml::Value::as_bool) == Some(true));
     let mut target_dependencies = BTreeMap::new();
+
     if let Some(targets) = value.get("target").and_then(toml::Value::as_table) {
         for (target, table) in targets {
             let mut deps = Vec::new();
             for key in ["dependencies", "build-dependencies", "build_dependencies"] {
                 deps.extend(table_keys(table.get(key)));
             }
+
             if !deps.is_empty() {
                 target_dependencies.insert(target.clone(), deps);
             }
         }
     }
+
     let docs_rs_targets = package
         .and_then(|p| p.get("metadata"))
         .and_then(|m| m.get("docs").or_else(|| m.get("docs.rs")))
@@ -143,6 +148,7 @@ mod tests {
             "[package]\nname = \"x\"\nedition = \"2021\"\nlinks = \"z\"\n[lib]\nproc_macro = true\n",
             &files(&["build.rs", "src/lib.rs"]),
         );
+
         assert_eq!(facts.build_script.as_deref(), Some("build.rs"));
         assert!(facts.proc_macro);
         assert_eq!(facts.links.as_deref(), Some("z"));
@@ -158,6 +164,7 @@ mod tests {
              [package.metadata.docs.rs]\ntargets = [\"x86_64-pc-windows-msvc\"]\n",
             &files(&["build.rs"]),
         );
+
         assert_eq!(facts.build_script, None);
         assert_eq!(
             facts.target_dependencies["cfg(windows)"],

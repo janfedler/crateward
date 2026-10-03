@@ -126,6 +126,7 @@ fn main() -> ExitCode {
         Task::DeployCheck => deploy::run(&workspace_root()),
         Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
     };
+
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -148,12 +149,15 @@ fn read(path: &Path) -> Result<String, TaskError> {
 /// Copies a file with `mode`, creating the target's directory.
 fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), TaskError> {
     use std::os::unix::fs::PermissionsExt as _;
+
     if !from.is_file() {
         return Err(TaskError::Check(format!("{} is missing", from.display())));
     }
+
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(io(parent))?;
     }
+
     std::fs::copy(from, to).map_err(io(to))?;
     std::fs::set_permissions(to, std::fs::Permissions::from_mode(mode)).map_err(io(to))
 }
@@ -201,6 +205,7 @@ fn run_command(command: &mut Command) -> Result<(), TaskError> {
         command.get_program().to_string_lossy(),
         args.join(" ")
     );
+
     eprintln!("xtask: running {rendered}");
 
     let status = command
@@ -229,6 +234,7 @@ fn output(dir: &Path, program: &str, args: &[&str]) -> Result<String, TaskError>
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
+
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
@@ -238,6 +244,7 @@ fn output(dir: &Path, program: &str, args: &[&str]) -> Result<String, TaskError>
 fn nested_cargo(dir: &Path) -> Command {
     let mut command = Command::new("cargo");
     command.current_dir(dir);
+
     for name in [
         "RUSTUP_TOOLCHAIN",
         "RUSTC",
@@ -248,6 +255,7 @@ fn nested_cargo(dir: &Path) -> Command {
     ] {
         command.env_remove(name);
     }
+
     command
 }
 
@@ -288,6 +296,7 @@ fn ci() -> Result<(), TaskError> {
     docs_lint()?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;
+
     // The eBPF package has its own lockfile. The root deny.toml applies.
     run(
         "cargo",
@@ -312,9 +321,11 @@ fn docs_lint() -> Result<(), TaskError> {
         eprintln!("xtask: documentation style is clean");
         return Ok(());
     }
+
     for violation in &violations {
         eprintln!("{violation}");
     }
+
     Err(TaskError::Check(format!(
         "{} writing style violation(s), see the writing style section of docs/TESTING.md",
         violations.len()
@@ -444,6 +455,7 @@ fn vendor() -> Result<(), TaskError> {
         ],
         &[],
     )?;
+
     // Deterministic archive: sorted names, fixed owner and timestamps.
     run(
         "tar",

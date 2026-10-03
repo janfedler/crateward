@@ -516,12 +516,14 @@ impl Config {
             path: path.to_owned(),
             source,
         };
+
         let size = std::fs::metadata(path).map_err(read_error)?.len();
         if size > MAX_CONFIG_BYTES {
             return Err(ConfigError::TooLarge {
                 path: path.to_owned(),
             });
         }
+
         let text = std::fs::read_to_string(path).map_err(read_error)?;
         Self::from_toml(&text)
     }
@@ -549,6 +551,7 @@ impl Config {
         self.validate_stages(&mut v);
         self.validate_sandbox(&mut v);
         self.validate_operations(&mut v);
+
         if v.0.is_empty() { Ok(()) } else { Err(v.0) }
     }
 
@@ -581,6 +584,7 @@ impl Config {
             "crates_io.user_agent",
             "must start with 'crateward/' and include contact details (a URL or an email address)",
         );
+
         for (url, key) in [
             (&c.index_url, "crates_io.index_url"),
             (&c.static_url, "crates_io.static_url"),
@@ -590,6 +594,7 @@ impl Config {
         ] {
             v.https(url, key);
         }
+
         for (rate, key) in [
             (
                 c.static_requests_per_second,
@@ -606,6 +611,7 @@ impl Config {
                 "must be above 0 and at most 20 (our own politeness bound)",
             );
         }
+
         v.check(
             (60..=1800).contains(&c.rss_poll_interval_secs),
             "crates_io.rss_poll_interval_secs",
@@ -632,6 +638,7 @@ impl Config {
                 "must be at least 1 and not above backoff_cap_secs",
             );
         }
+
         let hours = self.triage.dynamic_deadline_hours;
         v.at_least(hours, 1, "triage.dynamic_deadline_hours");
     }
@@ -647,6 +654,7 @@ impl Config {
             "sandbox.check_timeout_secs",
             "must be at least 60 and not above full_timeout_secs",
         );
+
         for (path, key) in [
             (&s.firecracker_bin, "sandbox.firecracker_bin"),
             (&s.vmjail_bin, "sandbox.vmjail_bin"),
@@ -661,6 +669,7 @@ impl Config {
         ] {
             v.absolute(path, key);
         }
+
         self.validate_warm(v);
         v.subordinate_ids(s.slot_uid_base, s.slots, "sandbox.slot_uid_base", "UID");
         v.subordinate_ids(s.slot_gid_base, s.slots, "sandbox.slot_gid_base", "GID");
@@ -670,6 +679,7 @@ impl Config {
         let Some(w) = &self.sandbox.warm else {
             return;
         };
+
         v.at_least(w.min_jobs, 2, "sandbox.warm.min_jobs");
         v.check(
             w.max_probes >= 1 && w.max_probes <= w.sample_jobs,
@@ -707,6 +717,7 @@ impl Config {
         let Some(export) = &self.export else {
             return;
         };
+
         v.check(
             export.repository.starts_with("git@github.com:") && export.repository.ends_with(".git"),
             "export.repository",
@@ -749,6 +760,7 @@ impl Config {
         v.at_least(sup.alert_repeat_hours, 1, "supervisor.alert_repeat_hours");
         let minutes = sup.integrity_interval_minutes;
         v.at_least(minutes, 1, "supervisor.integrity_interval_minutes");
+
         for decoy in &sup.decoys {
             v.absolute(decoy, "supervisor.decoys");
         }
@@ -758,6 +770,7 @@ impl Config {
         let Some(ntfy) = &self.ntfy else {
             return;
         };
+
         v.https(&ntfy.server_url, "ntfy.server_url");
         let topic = ntfy.topic.expose_secret();
         v.check(
@@ -777,12 +790,14 @@ mod tests {
     #[test]
     fn example_configuration_is_valid() {
         let config = Config::from_toml(EXAMPLE).unwrap();
+
         assert_eq!(config.sandbox.slots, 3);
     }
 
     #[test]
     fn unknown_keys_are_rejected() {
         let text = EXAMPLE.replace("[instance]\n", "[instance]\ntypo_key = 1\n");
+
         assert!(matches!(
             Config::from_toml(&text),
             Err(ConfigError::Parse(_))
@@ -794,12 +809,14 @@ mod tests {
         let config = Config::from_toml(EXAMPLE).unwrap();
         let debug = format!("{config:?}");
         let topic = &config.ntfy.as_ref().unwrap().topic;
+
         assert!(!debug.contains(topic.expose_secret()));
         assert!(!debug.contains(config.database.url.expose_secret()));
     }
 
     fn issues_for(from: &str, to: &str) -> Vec<ConfigIssue> {
         assert!(EXAMPLE.contains(from), "example lacks {from:?}");
+
         match Config::from_toml(&EXAMPLE.replacen(from, to, 1)) {
             Err(ConfigError::Invalid(issues)) => issues,
             other => panic!("expected validation issues, got {other:?}"),
@@ -813,6 +830,7 @@ mod tests {
                 "listen = \"127.0.0.1:8080\"",
                 &format!("listen = \"{address}\""),
             );
+
             assert_eq!(issues[0].key, "web.listen", "{address}");
         }
     }
@@ -822,6 +840,7 @@ mod tests {
         let config = Config::from_toml(EXAMPLE).unwrap();
         let topic = &config.ntfy.as_ref().unwrap().topic;
         let issues = issues_for(topic.expose_secret(), "alerts");
+
         assert_eq!(issues[0].key, "ntfy.topic");
     }
 
@@ -832,9 +851,11 @@ mod tests {
             "disk_alert_percent = 99",
             1,
         );
+
         match Config::from_toml(&text) {
             Err(ConfigError::Invalid(issues)) => {
                 let keys: Vec<_> = issues.iter().map(|i| i.key.as_str()).collect();
+
                 assert!(keys.contains(&"sandbox.slots"));
                 assert!(keys.contains(&"storage.disk_alert_percent"));
             }
@@ -854,11 +875,13 @@ mod tests {
 
     fn rule(edit: impl FnOnce(&mut Config), key: &str, message: &str) {
         let expected = [(key.to_owned(), message.to_owned())];
+
         assert_eq!(issues_after(edit), expected, "{key}");
     }
 
     fn accepted(edit: impl FnOnce(&mut Config)) {
         let issues = issues_after(edit);
+
         assert!(issues.is_empty(), "{issues:?}");
     }
 
@@ -872,10 +895,13 @@ mod tests {
     ) {
         for &n in ok {
             let issues = issues_after(|c| set(c, n));
+
             assert!(issues.is_empty(), "{key} = {n:?}: {issues:?}");
         }
+
         for &n in bad {
             let expected = [(key.to_owned(), message.to_owned())];
+
             assert_eq!(issues_after(|c| set(c, n)), expected, "{key} = {n:?}");
         }
     }
@@ -916,10 +942,12 @@ mod tests {
             "telemetry.log_filter",
             "must not be empty",
         );
+
         for url in ["mysql://x/y", "localhost", ""] {
             let message = "must be a postgres:// or postgresql:// URL";
             rule(|c| c.database.url = url.into(), "database.url", message);
         }
+
         accepted(|c| c.database.url = "postgres://x/y".into());
     }
 
@@ -939,12 +967,14 @@ mod tests {
                 message,
             );
         }
+
         for agent in [
             "crateward/0.1 (+https://x.example)",
             "crateward/0.1 (me@x.example)",
         ] {
             accepted(|c| c.crates_io.user_agent = agent.into());
         }
+
         rule(
             |c| c.crates_io.index_url = http(),
             "crates_io.index_url",
@@ -1031,6 +1061,7 @@ mod tests {
                 s.backoff_cap_secs = 100;
                 s.backoff_base_secs = n;
             };
+
             limits(
                 backoff,
                 &[1, 100],
@@ -1039,6 +1070,7 @@ mod tests {
                 "must be at least 1 and not above backoff_cap_secs",
             );
         }
+
         limits(
             |c, n| c.triage.dynamic_deadline_hours = n,
             &[1, 12],
@@ -1166,6 +1198,7 @@ mod tests {
     fn export_rules() {
         accepted(|c| c.export = None);
         let message = "must be an SSH URL of a GitHub repository (git@github.com:owner/name.git)";
+
         for repository in [
             "https://github.com/a/b.git",
             "git@github.com:a/b",
@@ -1175,14 +1208,18 @@ mod tests {
             let edit = |c: &mut Config| c.export.as_mut().unwrap().repository = repository.into();
             rule(edit, "export.repository", message);
         }
+
         accepted(|c| c.export.as_mut().unwrap().repository = "git@github.com:a/b.git".into());
+
         for branch in ["", "a b", "a/b", "a.b"] {
             let edit = |c: &mut Config| c.export.as_mut().unwrap().branch = branch.into();
             rule(edit, "export.branch", "must be a plain branch name");
         }
+
         for branch in ["main", "gh-pages", "site_1"] {
             accepted(|c| c.export.as_mut().unwrap().branch = branch.into());
         }
+
         rule(
             |c| c.export.as_mut().unwrap().deploy_key = "key".into(),
             "export.deploy_key",
@@ -1270,6 +1307,7 @@ mod tests {
         let issues =
             issues_after(|c| c.supervisor.decoys = vec!["a".into(), "/b".into(), "c".into()]);
         let one = ("supervisor.decoys".to_owned(), ABSOLUTE.to_owned());
+
         assert_eq!(issues, [one.clone(), one]);
     }
 
@@ -1282,6 +1320,7 @@ mod tests {
                 topic: topic.into(),
             })
         };
+
         let topic = "a".repeat(32);
         rule(|c| c.ntfy = ntfy(http(), &topic), "ntfy.server_url", HTTPS);
         let message =
@@ -1289,6 +1328,7 @@ mod tests {
         let secure = |c: &mut Config, topic: &str| {
             c.ntfy = ntfy(Url::parse("https://ntfy.sh").unwrap(), topic);
         };
+
         for topic in [
             "a".repeat(31),
             "a".repeat(65),
@@ -1296,6 +1336,7 @@ mod tests {
         ] {
             rule(|c| secure(c, &topic), "ntfy.topic", message);
         }
+
         for topic in [
             "a".repeat(32),
             "a".repeat(64),
@@ -1303,9 +1344,11 @@ mod tests {
         ] {
             accepted(|c| secure(c, &topic));
         }
+
         for listen in ["127.0.0.1:8080", "[::1]:8080", "127.5.5.5:1"] {
             accepted(|c| c.web.listen = listen.parse().unwrap());
         }
+
         for listen in ["0.0.0.0:8080", "10.77.0.1:8080", "[::]:8080"] {
             let message = "must be a loopback address, because the dashboard is reached through an SSH tunnel (ADR 0009)";
             rule(
@@ -1333,6 +1376,7 @@ mod tests {
         crates.index_requests_per_second = 0.0;
         crates.rss_poll_interval_secs = 0;
         crates.db_dump_refresh_hours = 0;
+
         for stage in Stage::ALL {
             *stage_mut(c, stage) = StageConfig {
                 lease_secs: 0,
@@ -1342,6 +1386,7 @@ mod tests {
                 backoff_cap_secs: 0,
             };
         }
+
         c.triage.dynamic_deadline_hours = 0;
         c.storage.disk_alert_percent = 0;
         c.storage.raw_log_retention_days = 0;
@@ -1449,6 +1494,7 @@ mod tests {
             c.sandbox.slots = 0;
             c.sandbox.vcpus_per_slot = 0;
         });
+
         let expected = order(&[ORDER_BEFORE_SANDBOX, ORDER_SANDBOX, ORDER_AFTER_SANDBOX]);
         assert_eq!(keys(issues), expected);
     }

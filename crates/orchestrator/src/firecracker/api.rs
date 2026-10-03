@@ -290,6 +290,7 @@ impl Api {
             }
             Err(error) => Err(ApiError::Http(error)),
         };
+
         driver.abort();
         result
     }
@@ -312,15 +313,18 @@ mod tests {
                 uds_path: "/v.sock".into(),
             },
         };
+
         let json = serde_json::to_value(&load).unwrap();
         assert_eq!(json["mem_backend"]["backend_type"], "File");
         assert_eq!(json["vsock_override"]["uds_path"], "/v.sock");
+
         let machine = serde_json::to_value(MachineConfig {
             vcpu_count: 1,
             mem_size_mib: 512,
             smt: false,
         })
         .unwrap();
+
         assert_eq!(machine["mem_size_mib"], 512);
     }
 }

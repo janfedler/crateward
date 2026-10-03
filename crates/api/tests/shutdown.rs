@@ -20,6 +20,7 @@ async fn sigterm_ends_open_live_updates() {
     let Some(db) = TestDb::new("api_shutdown").await else {
         return;
     };
+
     db.migrated().await;
 
     let stop = Stop::install().unwrap();
@@ -28,6 +29,7 @@ async fn sigterm_ends_open_live_updates() {
         writer: db.store().await,
         stop: stop.clone(),
     };
+
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(
@@ -41,6 +43,7 @@ async fn sigterm_ends_open_live_updates() {
     page.write_all(request.as_bytes()).await.unwrap();
     let mut head = [0; 12];
     page.read_exact(&mut head).await.unwrap();
+
     assert_eq!(&head, b"HTTP/1.1 200");
 
     rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::TERM)
@@ -48,5 +51,6 @@ async fn sigterm_ends_open_live_updates() {
     let finished = tokio::time::timeout(Duration::from_secs(10), server).await;
 
     db.drop().await;
+
     assert!(finished.is_ok(), "the server still waits for the open page");
 }

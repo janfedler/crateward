@@ -42,6 +42,7 @@ impl TestDb {
                 std::env::var("CRATEWARD_REQUIRE_DB").is_err(),
                 "CRATEWARD_REQUIRE_DB is set but CRATEWARD_TEST_DATABASE_URL is not"
             );
+
             eprintln!("skipping: CRATEWARD_TEST_DATABASE_URL is not set");
             return None;
         };

@@ -86,6 +86,7 @@ impl Analyzer {
                 }
             }
         };
+
         let worker = self.worker.clone();
         self.store
             .complete(job.id, &worker, event, &self.policies, false)
@@ -113,14 +114,17 @@ impl Analyzer {
                     let was_quiet = before.as_ref().is_some_and(|(v, review)| {
                         !v.level.needs_review() && *review == Review::None
                     });
+
                     let waiting = before
                         .as_ref()
                         .is_some_and(|(_, review)| *review == Review::Pending);
+
                     // No longer high: it leaves the inbox unless a human
                     // already decided.
                     if !verdict.level.needs_review() && waiting {
                         self.store.set_review(job.id, Review::None, None).await?;
                     }
+
                     if verdict.level.needs_review() && was_quiet {
                         self.store.set_review(job.id, Review::Pending, None).await?;
                         self.store
@@ -131,6 +135,7 @@ impl Analyzer {
                 Err(error) => tracing::warn!(job = job.id.0, %error, "rescoring failed"),
             }
         }
+
         Ok(jobs.len())
     }
 
@@ -153,18 +158,21 @@ impl Analyzer {
             Some((_, value)) => Some(serde_json::from_value(value).map_err(|e| data("report", e))?),
             None => None,
         };
+
         let diff: Option<VersionDiff> = match self.store.job_static(job.id).await? {
             Some((_, _, Some(value))) => {
                 Some(serde_json::from_value(value).map_err(|e| data("diff", e))?)
             }
             _ => None,
         };
+
         let mut runs = Vec::new();
         for (kind, value) in self.store.job_runs(job.id).await? {
             let run: RunReport =
                 serde_json::from_value(value).map_err(|e| data(&format!("{kind} run"), e))?;
             runs.push(run);
         }
+
         let version = semver::Version::parse(&job.version)
             .map_err(|e| AnalyzeError::Data(format!("version: {e}")))?;
         let canonical = job.name.to_ascii_lowercase().replace('-', "_");
@@ -206,6 +214,7 @@ impl Analyzer {
                 .await?;
             tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, "verdict needs review");
         }
+
         let worker = self.worker.clone();
         self.store
             .complete(job.id, &worker, JobEvent::Finalized, &self.policies, false)

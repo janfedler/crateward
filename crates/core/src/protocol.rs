@@ -405,6 +405,7 @@ pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, ProtocolError> {
             max: MAX_FRAME_LEN,
         });
     }
+
     let mut frame = Vec::with_capacity(payload.len() + 4);
     frame.extend_from_slice(&len.to_be_bytes());
     frame.extend_from_slice(&payload);
@@ -459,7 +460,9 @@ impl<T: DeserializeOwned> Decoder<T> {
         if self.bytes > self.limits.max_total_bytes {
             return Err(ProtocolError::BudgetExceeded("bytes"));
         }
+
         self.buffer.extend_from_slice(bytes);
+
         // Fail as soon as a header announces an oversized frame.
         self.check_header().map(|_| ())
     }
@@ -468,6 +471,7 @@ impl<T: DeserializeOwned> Decoder<T> {
         let Some(header) = self.buffer.first_chunk::<4>() else {
             return Ok(None);
         };
+
         let len = u32::from_be_bytes(*header);
         if len > self.limits.max_frame_len {
             return Err(ProtocolError::FrameTooLarge {
@@ -475,6 +479,7 @@ impl<T: DeserializeOwned> Decoder<T> {
                 max: self.limits.max_frame_len,
             });
         }
+
         Ok(Some(usize::try_from(len).unwrap_or(usize::MAX)))
     }
 
@@ -488,13 +493,17 @@ impl<T: DeserializeOwned> Decoder<T> {
         let Some(len) = self.check_header()? else {
             return Ok(None);
         };
+
         let Some(payload) = self.buffer.get(4..4 + len) else {
             return Ok(None);
         };
+
         self.frames += 1;
+
         if self.frames > self.limits.max_frames {
             return Err(ProtocolError::BudgetExceeded("frames"));
         }
+
         let message = decode_payload(payload)?;
         self.buffer.drain(..4 + len);
         Ok(Some(message))
@@ -541,6 +550,7 @@ pub fn read_message<R: Read, T: DeserializeOwned>(
             n => filled += n,
         }
     }
+
     let len = u32::from_be_bytes(header);
     if len > max_frame_len {
         return Err(ProtocolError::FrameTooLarge {
@@ -548,6 +558,7 @@ pub fn read_message<R: Read, T: DeserializeOwned>(
             max: max_frame_len,
         });
     }
+
     let mut payload = vec![0_u8; usize::try_from(len).unwrap_or(usize::MAX)];
     reader.read_exact(&mut payload).map_err(|e| {
         if e.kind() == std::io::ErrorKind::UnexpectedEof {
@@ -609,10 +620,12 @@ mod tests {
             timeout_secs: 900,
             output_limit: 1 << 20,
         });
+
         let mut wire = Vec::new();
         write_message(&mut wire, &spec).unwrap();
         let mut reader = wire.as_slice();
         let back: HostMessage = read_message(&mut reader, MAX_FRAME_LEN).unwrap().unwrap();
+
         assert_eq!(back, spec);
         assert!(
             read_message::<_, HostMessage>(&mut reader, MAX_FRAME_LEN)
@@ -625,6 +638,7 @@ mod tests {
     fn oversized_header_is_rejected_before_buffering() {
         let mut decoder = Decoder::<GuestMessage>::new(Limits::default());
         let err = decoder.push(&u32::MAX.to_be_bytes()).unwrap_err();
+
         assert!(matches!(err, ProtocolError::FrameTooLarge { .. }));
     }
 
@@ -636,6 +650,7 @@ mod tests {
         frame[..4].copy_from_slice(&len.to_be_bytes());
         let mut decoder = Decoder::<GuestMessage>::new(Limits::default());
         decoder.push(&frame).unwrap();
+
         assert!(matches!(
             decoder.next_message(),
             Err(ProtocolError::Malformed(_))
@@ -648,10 +663,12 @@ mod tests {
             max_frames: 2,
             ..Limits::default()
         };
+
         let mut decoder = Decoder::<GuestMessage>::new(limits);
         for _ in 0..3 {
             decoder.push(&encode(&GuestMessage::Pong).unwrap()).unwrap();
         }
+
         assert!(decoder.next_message().unwrap().is_some());
         assert!(decoder.next_message().unwrap().is_some());
         assert!(matches!(
@@ -664,6 +681,7 @@ mod tests {
     fn truncated_stream_is_reported() {
         let frame = encode(&GuestMessage::Started { pid: 1 }).unwrap();
         let mut reader = &frame[..frame.len() - 1];
+
         assert!(matches!(
             read_message::<_, GuestMessage>(&mut reader, MAX_FRAME_LEN),
             Err(ProtocolError::Truncated)
@@ -683,11 +701,14 @@ mod tests {
                 let take = splits.next().unwrap().min(rest.len());
                 let (chunk, tail) = rest.split_at(take);
                 decoder.push(chunk).unwrap();
+
                 while let Some(message) = decoder.next_message().unwrap() {
                     decoded.push(message);
                 }
+
                 rest = tail;
             }
+
             prop_assert_eq!(decoded, messages);
             prop_assert!(!decoder.has_partial_frame());
         }
@@ -698,6 +719,7 @@ mod tests {
             if decoder.push(&bytes).is_ok() {
                 while let Ok(Some(_)) = decoder.next_message() {}
             }
+
             let mut reader = bytes.as_slice();
             while let Ok(Some(_)) = read_message::<_, GuestMessage>(&mut reader, MAX_FRAME_LEN) {}
         }

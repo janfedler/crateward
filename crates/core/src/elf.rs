@@ -34,9 +34,11 @@ pub fn is_static(bytes: &[u8]) -> Result<bool, &'static str> {
     if bytes.get(..4) != Some(b"\x7fELF".as_slice()) {
         return Err("not an ELF file");
     }
+
     if bytes.get(4) != Some(&2) || bytes.get(5) != Some(&1) {
         return Err("not a little endian ELF64 file");
     }
+
     let truncated = "truncated ELF header";
     let phoff = read_u64(bytes, 0x20).ok_or(truncated)?;
     let phentsize = read_u16(bytes, 0x36).ok_or(truncated)?;
@@ -52,6 +54,7 @@ pub fn is_static(bytes: &[u8]) -> Result<bool, &'static str> {
             return Ok(false);
         }
     }
+
     Ok(true)
 }
 
@@ -71,6 +74,7 @@ mod tests {
         // static depends on the host target, so only the parse is checked.
         let me = std::env::current_exe().unwrap();
         let bytes = std::fs::read(me).unwrap();
+
         assert!(is_static(&bytes).is_ok());
     }
 }

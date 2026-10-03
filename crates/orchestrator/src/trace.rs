@@ -187,6 +187,7 @@ pub struct TraceSummary {
 pub fn render(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes.get(..MAX_STRING).unwrap_or(bytes));
     let mut out = String::with_capacity(text.len());
+
     for c in text.chars() {
         if c.is_control()
             || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
@@ -196,9 +197,11 @@ pub fn render(bytes: &[u8]) -> String {
             out.push(c);
         }
     }
+
     if bytes.len() > MAX_STRING {
         out.push('\u{2026}');
     }
+
     out
 }
 
@@ -264,10 +267,12 @@ impl TraceBuilder {
         if let Some(&i) = self.index.get(&pid) {
             return self.summary.processes.get_mut(i);
         }
+
         if self.summary.processes.len() >= MAX_PROCESSES {
             self.summary.processes_omitted += 1;
             return None;
         }
+
         let (ppid, started_ms) = self
             .parents
             .remove(&pid)
@@ -307,11 +312,13 @@ impl TraceBuilder {
     pub fn add(&mut self, event: &TraceEvent) {
         self.summary.received += 1;
         let (pid, ms) = (event.pid, event.ms);
+
         if event.uid == 0
             && let Some(p) = self.process(pid, ms)
         {
             p.became_root = true;
         }
+
         match &event.kind {
             TraceKind::Fork { child } => self.fork(pid, ms, *child),
             TraceKind::Exec { filename, argv } => self.exec(pid, ms, filename, argv),
@@ -337,6 +344,7 @@ impl TraceBuilder {
         if self.index.len() + self.parents.len() < MAX_PROCESSES * 2 {
             self.parents.insert(child, (pid, ms));
         }
+
         let _ = self.process(pid, ms);
     }
 
@@ -363,6 +371,7 @@ impl TraceBuilder {
         if !sensitive && !(writes && !is_build_write(&path)) {
             return;
         }
+
         let _ = self.process(pid, ms);
         let access = FileAccess {
             pid,
@@ -371,6 +380,7 @@ impl TraceBuilder {
             flags,
             ms,
         };
+
         let s = &mut self.summary;
         if sensitive {
             Self::push(&mut s.sensitive_opens, &mut s.omitted, access);
@@ -382,11 +392,13 @@ impl TraceBuilder {
     fn socket(&mut self, pid: u32, ms: u32, how: &str, sock_type: u32, address: &SocketAddress) {
         let address = render_address(address);
         let _ = self.process(pid, ms);
+
         if self.sockets_seen.len() >= MAX_LISTED * 4
             || !self.sockets_seen.insert((pid, address.clone()))
         {
             return;
         }
+
         let used = SocketUse {
             pid,
             exe: self.exe(pid),
@@ -395,6 +407,7 @@ impl TraceBuilder {
             sock_type,
             ms,
         };
+
         let s = &mut self.summary;
         Self::push(&mut s.sockets, &mut s.omitted, used);
     }
@@ -423,21 +436,25 @@ impl TraceSummary {
     #[must_use]
     pub fn find(&self, values: &[&str]) -> Vec<(usize, String)> {
         let mut found = Vec::new();
+
         for (i, value) in values.iter().enumerate() {
             if value.is_empty() {
                 continue;
             }
+
             for p in &self.processes {
                 if p.argv.iter().any(|a| a.contains(value)) {
                     found.push((i, format!("argv of {} ({})", p.pid, p.exe)));
                 }
             }
+
             for f in self.sensitive_opens.iter().chain(&self.writes_outside_work) {
                 if f.path.contains(value) {
                     found.push((i, format!("path {}", f.path)));
                 }
             }
         }
+
         found
     }
 }
@@ -516,6 +533,7 @@ mod tests {
                 flags: O_CREAT | 1,
             },
         ));
+
         for _ in 0..3 {
             b.add(&event(
                 11,
@@ -527,11 +545,14 @@ mod tests {
                 },
             ));
         }
+
         b.add(&event(11, 0, 6, TraceKind::Bpf { cmd: 5 }));
         b.add(&event(11, BUILDER_UID, 7, TraceKind::Exit { code: 0 }));
         b.end(TraceTotals::default());
         let s = b.finish();
+
         assert!(s.complete);
+
         let script = s.processes.iter().find(|p| p.pid == 11).unwrap();
         assert_eq!(script.role, Role::BuildScript);
         assert_eq!(script.ppid, Some(10));
@@ -604,6 +625,7 @@ mod tests {
                 },
             )
         };
+
         let connect = |ms: u32, sock_type: u32, address: SocketAddress| {
             event(
                 2,
@@ -612,9 +634,11 @@ mod tests {
                 TraceKind::Connect { sock_type, address },
             )
         };
+
         let send = |ms: u32, sock_type: u32, address: SocketAddress| {
             event(2, BUILDER_UID, ms, TraceKind::Send { sock_type, address })
         };
+
         let ip = |text: &str| SocketAddress::Ip(text.parse().unwrap());
         let aws = format!("{HOME}/.aws/credentials");
         let events = [
@@ -651,13 +675,16 @@ mod tests {
             event(2, BUILDER_UID, 9, TraceKind::Exit { code: 3 }),
             event(99, BUILDER_UID, 10, TraceKind::Exit { code: 0 }),
         ];
+
         for event in &events {
             b.add(event);
         }
+
         let totals = TraceTotals {
             events: 17,
             ..TraceTotals::default()
         };
+
         b.end(totals);
 
         let mut root = process_entry(1, None, "", &[], Role::Unknown);
@@ -669,6 +696,7 @@ mod tests {
             &["curl", "-d", "x"],
             Role::Other,
         );
+
         curl.exit = Some(3);
         curl.ended_ms = Some(9);
         let mut unknown = process_entry(99, None, "", &[], Role::Unknown);
@@ -697,6 +725,7 @@ mod tests {
             ],
             omitted: 0,
         };
+
         assert_eq!(b.finish(), expected);
     }
 
@@ -708,6 +737,7 @@ mod tests {
             let path = format!("{HOME}/.ssh/key{i}").into_bytes();
             add(TraceKind::Open { path, flags: 0 });
         }
+
         for i in 0..MAX_LISTED + 3 {
             let path = format!("/etc/w{i}").into_bytes();
             add(TraceKind::Open {
@@ -715,9 +745,11 @@ mod tests {
                 flags: O_CREAT,
             });
         }
+
         for _ in 0..MAX_LISTED + 4 {
             add(TraceKind::Bpf { cmd: 1 });
         }
+
         for i in 0..MAX_LISTED * 4 + 100 {
             let address = SocketAddress::Unix(format!("s{i}").into_bytes());
             add(TraceKind::Connect {
@@ -725,12 +757,14 @@ mod tests {
                 address,
             });
         }
+
         let s = b.finish();
         assert_eq!(s.sensitive_opens.len(), MAX_LISTED);
         assert_eq!(s.writes_outside_work.len(), MAX_LISTED);
         assert_eq!(s.tamper.len(), MAX_LISTED);
         assert_eq!(s.sockets.len(), MAX_LISTED);
         assert_eq!(s.opens, (MAX_LISTED * 2 + 5) as u64);
+
         // Sockets are remembered up to four times the listed count.
         assert_eq!(s.omitted, 2 + 3 + 4 + (MAX_LISTED * 3) as u64);
         assert_eq!(s.processes.len(), 1);
@@ -741,7 +775,9 @@ mod tests {
         let mut b = TraceBuilder::default();
         let many = vec!["a"; MAX_ARGS + 5];
         b.add(&exec(3, "/bin/sh", &many));
+
         assert_eq!(b.summary.processes[0].argv.len(), MAX_ARGS);
+
         for child in 0..MAX_PROCESSES as u32 * 2 + 10 {
             b.add(&event(
                 1,
@@ -752,6 +788,7 @@ mod tests {
                 },
             ));
         }
+
         assert_eq!(b.index.len() + b.parents.len(), MAX_PROCESSES * 2);
     }
 
@@ -761,6 +798,7 @@ mod tests {
         for pid in 0..(MAX_PROCESSES as u32 + 50) {
             b.add(&exec(pid, "/bin/sh", &["sh"]));
         }
+
         let s = b.finish();
         assert_eq!(s.processes.len(), MAX_PROCESSES);
         assert_eq!(s.processes_omitted, 50);
@@ -783,6 +821,7 @@ mod tests {
         let mut b = TraceBuilder::default();
         b.add(&exec(5, "/usr/bin/curl", &["curl", "-d", "key=AKIATEST"]));
         let found = b.finish().find(&["AKIATEST", "absent"]);
+
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].0, 0);
     }

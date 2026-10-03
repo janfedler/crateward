@@ -9,6 +9,7 @@ fn main() -> ExitCode {
     if let Some(code) = crateward_static_analysis::sandboxed::dispatch(&args) {
         return code;
     }
+
     crateward_core::app::run_component(
         crateward_static_analysis::COMPONENT,
         crateward_static_analysis::run,

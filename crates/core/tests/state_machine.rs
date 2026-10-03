@@ -33,12 +33,15 @@ fn check_invariants(job: &Job) -> Result<(), TestCaseError> {
     prop_assert!(job.dynamic_runs <= 2);
     prop_assert_eq!(job.state == JobState::Failed, job.failure.is_some());
     prop_assert_eq!(job.state == JobState::Done, job.outcome.is_some());
+
     if let Some(coverage) = job.coverage {
         prop_assert_eq!(coverage == Coverage::DynamicLinux, job.dynamic_runs > 0);
     }
+
     if job.state == JobState::Running {
         prop_assert_eq!(job.triage, Some(Triage::Dynamic));
     }
+
     Ok(())
 }
 
@@ -95,10 +98,12 @@ proptest! {
         let events = representative_events();
         let mut job = Job::new();
         let mut steps = 0;
+
         for choice in choices {
             if job.state.is_terminal() {
                 break;
             }
+
             let valid: Vec<Job> = events
                 .iter()
                 .filter_map(|event| job.apply(*event, &LIMITS).ok())
@@ -108,6 +113,7 @@ proptest! {
             job = valid[choice % valid.len()];
             steps += 1;
         }
+
         prop_assert!(job.state.is_terminal(), "still in {:?} after {} steps", job.state, steps);
         prop_assert!(steps <= MAX_STEPS);
     }
@@ -121,10 +127,12 @@ proptest! {
                 job = transition.job;
             }
         }
+
         for _ in 0..10 {
             let Some(event) = progress_event(&job) else { break };
             job = job.apply(event, &LIMITS).map_err(|e| TestCaseError::fail(e.to_string()))?.job;
         }
+
         prop_assert!(job.state.is_terminal());
     }
 
@@ -138,6 +146,7 @@ proptest! {
                 job = transition.job;
             }
         }
+
         let failure = JobEvent::StageFailed { class: FailureClass::Transient };
         let mut failures = 0;
         while !job.state.is_terminal() {
@@ -158,6 +167,7 @@ fn done_jobs_carry_an_honest_coverage_label() {
         ),
         (Triage::NotApplicableOnLinux, Coverage::NotApplicableOnLinux),
     ];
+
     for (triage, expected) in paths {
         let mut job = Job::new();
         job = job.apply(JobEvent::Fetched, &LIMITS).unwrap().job;
@@ -168,6 +178,7 @@ fn done_jobs_carry_an_honest_coverage_label() {
         while let Some(event) = progress_event(&job) {
             job = job.apply(event, &LIMITS).unwrap().job;
         }
+
         assert_eq!(job.outcome, Some(Outcome::Analyzed(expected)));
     }
 }

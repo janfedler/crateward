@@ -61,11 +61,13 @@ pub fn covered(config: &Config, bin_dir: &Path) -> Result<Vec<PathBuf>, Integrit
         sandbox.rootfs_image.clone(),
         config.fetcher.cargo_bin.clone(),
     ];
+
     for entry in std::fs::read_dir(bin_dir).map_err(io(bin_dir))? {
         let entry = entry.map_err(io(bin_dir))?;
         let path = entry.path();
         let name = entry.file_name();
         let Ok(meta) = entry.metadata() else { continue };
+
         if name.to_string_lossy().starts_with("crateward")
             && meta.is_file()
             && meta.permissions().mode() & 0o111 != 0
@@ -73,6 +75,7 @@ pub fn covered(config: &Config, bin_dir: &Path) -> Result<Vec<PathBuf>, Integrit
             files.push(path);
         }
     }
+
     files.sort();
     files.dedup();
     Ok(files)
@@ -92,8 +95,10 @@ pub fn digest(path: &Path) -> Result<String, IntegrityError> {
         let Some(chunk) = buffer.get(..n).filter(|c| !c.is_empty()) else {
             break;
         };
+
         hasher.update(chunk);
     }
+
     Ok(hasher.finalize().to_hex().to_string())
 }
 
@@ -110,6 +115,7 @@ pub fn record(files: &[PathBuf]) -> Result<String, IntegrityError> {
         out.push_str(&path.to_string_lossy());
         out.push('\n');
     }
+
     Ok(out)
 }
 
@@ -120,16 +126,20 @@ pub fn record(files: &[PathBuf]) -> Result<String, IntegrityError> {
 /// Fails on a malformed line.
 pub fn parse(text: &str) -> Result<BTreeMap<PathBuf, String>, IntegrityError> {
     let mut out = BTreeMap::new();
+
     for (index, line) in text.lines().enumerate() {
         let malformed = IntegrityError::Malformed { line: index + 1 };
         let Some((hash, path)) = line.split_once("  ") else {
             return Err(malformed);
         };
+
         if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) || path.is_empty() {
             return Err(malformed);
         }
+
         out.insert(PathBuf::from(path), hash.to_ascii_lowercase());
     }
+
     Ok(out)
 }
 
@@ -159,6 +169,7 @@ pub fn verify(manifest: &BTreeMap<PathBuf, String>) -> Vec<Mismatch> {
             }),
         }
     }
+
     out
 }
 
@@ -173,23 +184,29 @@ mod tests {
             std::process::id(),
             rand::random::<u32>()
         ));
+
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("a");
         let b = dir.join("b");
         std::fs::write(&a, b"one").unwrap();
         std::fs::write(&b, b"two").unwrap();
         let text = record(&[a.clone(), b.clone()]).unwrap();
+
         assert_eq!(
             text.lines().next().unwrap(),
             format!("{}  {}", blake3::hash(b"one").to_hex(), a.display())
         );
+
         let manifest = parse(&text).unwrap();
         assert!(verify(&manifest).is_empty());
+
         std::fs::write(&b, b"changed").unwrap();
         std::fs::remove_file(&a).unwrap();
         let mismatches = verify(&manifest);
+
         assert_eq!(mismatches.len(), 2);
         assert_eq!(mismatches[1].reason, "digest differs");
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

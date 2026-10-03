@@ -9,5 +9,6 @@ fuzz_target!(|data: &[u8]| {
         max_unpacked_bytes: 8 * 1024 * 1024,
         ..ArchiveLimits::default()
     };
+
     let _ = validate(data, "demo", "1.0.0", &limits);
 });

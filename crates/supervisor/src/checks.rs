@@ -10,6 +10,7 @@ pub fn used_percent(total: u64, free: u64, available: u64) -> u8 {
     if usable == 0 {
         return 0;
     }
+
     let percent = (u128::from(used) * 100).div_ceil(u128::from(usable));
     u8::try_from(percent.min(100)).unwrap_or(100)
 }
@@ -31,6 +32,7 @@ pub fn canary_action(latest: &[(String, bool, i64)]) -> CanaryAction {
     if latest.is_empty() {
         return CanaryAction::Wait;
     }
+
     let failed: Vec<String> = latest
         .iter()
         .filter(|(_, passed, _)| !passed)
@@ -82,6 +84,7 @@ pub fn stray_processes(
         std::collections::HashMap::new();
     let mut sinks: std::collections::HashMap<u32, Vec<i32>> = std::collections::HashMap::new();
     let mut stray = Vec::new();
+
     for p in processes {
         let Some(uid) = slot_uid(p) else { continue };
         let uniform = p.uids.iter().all(|u| *u == uid);
@@ -99,6 +102,7 @@ pub fn stray_processes(
                     let below = parent.is_some_and(|q| {
                         q.name == "firecracker" && q.uids.iter().all(|u| *u == uid)
                     });
+
                     below && {
                         sinks.entry(uid).or_default().push(p.pid);
                         true
@@ -110,11 +114,13 @@ pub fn stray_processes(
             stray.push(p.pid);
         }
     }
+
     for pids in firecrackers.values().chain(sinks.values()) {
         if pids.len() > 1 {
             stray.extend(pids);
         }
     }
+
     stray.sort_unstable();
     stray.dedup();
     stray
@@ -126,10 +132,12 @@ pub fn parse_status(pid: i32, text: &str) -> Option<HostProcess> {
     let mut name = None;
     let mut ppid = None;
     let mut uids = None;
+
     for line in text.lines() {
         let Some((key, value)) = line.split_once(':') else {
             continue;
         };
+
         let value = value.trim();
         match key {
             "Name" => name = Some(value.to_owned()),
@@ -144,6 +152,7 @@ pub fn parse_status(pid: i32, text: &str) -> Option<HostProcess> {
             _ => {}
         }
     }
+
     Some(HostProcess {
         pid,
         ppid: ppid?,
@@ -175,16 +184,21 @@ mod tests {
             process(21, 20, 160_010, "fake-internet"),
             process(30, 10, 160_011, "firecracker"),
         ];
+
         assert!(stray_processes(&procs, slots.clone()).is_empty());
+
         // A shell below Firecracker, a second Firecracker of the same
         // slot, and a Firecracker started from inside a slot.
         procs.push(process(40, 20, 160_010, "sh"));
         procs.push(process(41, 10, 160_011, "firecracker"));
         procs.push(process(42, 21, 160_012, "firecracker"));
+
         assert_eq!(stray_processes(&procs, slots.clone()), vec![30, 40, 41, 42]);
+
         // Mixed UIDs, for example after a setuid binary.
         let mut mixed = process(50, 10, 160_013, "firecracker");
         mixed.uids[1] = 0;
+
         assert_eq!(stray_processes(&[mixed], slots), vec![50]);
     }
 
@@ -202,6 +216,7 @@ mod tests {
     #[test]
     fn disk_usage_counts_reserved_blocks_as_used() {
         assert_eq!(used_percent(1000, 1000, 950), 0);
+
         // 500 used, 450 available to users (50 reserved): 500 / 950.
         assert_eq!(used_percent(1000, 500, 450), 53);
         assert_eq!(used_percent(1000, 0, 0), 100);
@@ -211,8 +226,10 @@ mod tests {
     #[test]
     fn canaries_pause_on_any_failure_and_lift_when_all_pass() {
         assert_eq!(canary_action(&[]), CanaryAction::Wait);
+
         let ok = ("canary-inert".to_owned(), true, 1);
         let bad = ("canary-exfil".to_owned(), false, 2);
+
         assert_eq!(
             canary_action(std::slice::from_ref(&ok)),
             CanaryAction::AllPassed

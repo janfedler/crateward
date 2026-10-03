@@ -12,16 +12,20 @@ fn main() -> ExitCode {
         eprintln!("crateward agent: {error}");
         init::shut_down();
     }
+
     if pid1 {
         init::disable_ipv6();
     }
+
     let result = server::serve(AGENT_PORT);
     if let Err(error) = &result {
         eprintln!("crateward agent: {error}");
     }
+
     if pid1 {
         init::shut_down();
     }
+
     if result.is_ok() {
         ExitCode::SUCCESS
     } else {

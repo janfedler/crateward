@@ -86,6 +86,7 @@ fn sniff_http(data: &[u8]) -> Option<Sniffed> {
     if !METHODS.contains(&method) {
         return None;
     }
+
     let target = printable(parts.next()?);
     let mut host = None;
     let mut user_agent = None;
@@ -95,6 +96,7 @@ fn sniff_http(data: &[u8]) -> Option<Sniffed> {
         let Some(colon) = header.iter().position(|&b| b == b':') else {
             continue;
         };
+
         let (name, value) = header.split_at(colon);
         let value = value.get(1..).unwrap_or_default().trim_ascii();
         if name.eq_ignore_ascii_case(b"host") {
@@ -103,6 +105,7 @@ fn sniff_http(data: &[u8]) -> Option<Sniffed> {
             user_agent = Some(printable(value));
         }
     }
+
     Some(Sniffed::Http {
         method: method.to_owned(),
         target,
@@ -138,10 +141,12 @@ impl<'a> Reader<'a> {
 /// section 3), from the first record only.
 fn sni(data: &[u8]) -> Option<Option<String>> {
     let mut r = Reader { data, at: 0 };
+
     // Record header: handshake, version, length.
     if r.u8()? != 22 {
         return None;
     }
+
     r.take(2)?;
     let record = r.u16()?;
     let body = r.take(record).or_else(|| data.get(5..))?;
@@ -149,6 +154,7 @@ fn sni(data: &[u8]) -> Option<Option<String>> {
     if h.u8()? != 1 {
         return None;
     }
+
     h.take(3)?; // handshake length
     h.take(2 + 32)?; // legacy version, random
     let session = h.u8()?;
@@ -160,15 +166,18 @@ fn sni(data: &[u8]) -> Option<Option<String>> {
     let Some(extensions_len) = h.u16() else {
         return Some(None);
     };
+
     let mut e = Reader {
         data: h.take(extensions_len).unwrap_or_default(),
         at: 0,
     };
+
     while let (Some(kind), Some(len)) = (e.u16(), e.u16()) {
         let ext = e.take(len)?;
         if kind != 0 {
             continue;
         }
+
         let mut s = Reader { data: ext, at: 0 };
         s.u16()?; // list length
         if s.u8()? == 0 {
@@ -176,6 +185,7 @@ fn sni(data: &[u8]) -> Option<Option<String>> {
             return Some(Some(printable(s.take(name_len)?)));
         }
     }
+
     Some(None)
 }
 
@@ -185,6 +195,7 @@ pub fn sniff(data: &[u8]) -> Sniffed {
     if let Some(http) = sniff_http(data) {
         return http;
     }
+
     match sni(data) {
         Some(sni) => Sniffed::Tls { sni },
         None => Sniffed::Unknown,
@@ -198,6 +209,7 @@ mod tests {
     #[test]
     fn http_requests_are_recognized() {
         let req = b"GET /payload.sh HTTP/1.1\r\nHost: evil.example\r\nUser-Agent: curl/8\r\n\r\n";
+
         assert_eq!(
             sniff(req),
             Sniffed::Http {
@@ -236,6 +248,7 @@ mod tests {
         let mut record = vec![22, 3, 1];
         record.extend_from_slice(&u16::try_from(handshake.len()).unwrap().to_be_bytes());
         record.extend_from_slice(&handshake);
+
         assert_eq!(
             sniff(&record),
             Sniffed::Tls {

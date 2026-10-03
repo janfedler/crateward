@@ -111,11 +111,13 @@ impl Authority {
         if let Some(leaf) = leaves.get(name) {
             return Some(Arc::clone(leaf));
         }
+
         let name = if leaves.len() < MAX_NAMES {
             name
         } else {
             FALLBACK_NAME
         };
+
         let leaf = self.issue(name).or_else(|| self.issue(FALLBACK_NAME))?;
         leaves.insert(name.to_owned(), Arc::clone(&leaf));
         Some(leaf)
@@ -151,6 +153,7 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
             _ => return None,
         }))
     };
+
     let clean: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     let trimmed = clean
         .strip_suffix(b"==")
@@ -162,11 +165,13 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
     for &c in trimmed {
         acc = (acc << 6) | value(c)?;
         bits += 6;
+
         if bits >= 8 {
             bits -= 8;
             out.push(u8::try_from((acc >> bits) & 0xFF).ok()?);
         }
     }
+
     Some(out)
 }
 
@@ -200,6 +205,7 @@ pub fn split_pem(text: &str) -> Option<(String, String)> {
             .map_or(rest.len(), |n| end + n + 1);
         rest.get(..close).map(str::to_owned)
     };
+
     Some((
         block("-----BEGIN CERTIFICATE-----")?,
         block("-----BEGIN PRIVATE KEY-----")?,
@@ -222,23 +228,29 @@ mod tests {
         let (cert, key) = generate_ca().unwrap();
         let both = format!("{cert}{key}");
         let (c, k) = split_pem(&both).unwrap();
+
         assert_eq!((c.as_str(), k.as_str()), (cert.as_str(), key.as_str()));
+
         let authority = Authority::from_pem(&cert, &key).unwrap();
         let a = authority.leaf("evil.example").unwrap();
         let b = authority.leaf("evil.example").unwrap();
+
         assert!(Arc::ptr_eq(&a, &b));
         assert_eq!(a.cert.len(), 2);
         assert!(authority.leaf("not a valid name").is_some());
+
         server_config(Arc::new(authority)).unwrap();
     }
 
     #[test]
     fn text_that_is_no_authority_is_refused() {
         let (cert, key) = generate_ca().unwrap();
+
         assert!(matches!(
             Authority::from_pem(&cert, "not a key"),
             Err(AuthorityError::Key(_))
         ));
+
         for text in [
             "not a certificate",
             "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",

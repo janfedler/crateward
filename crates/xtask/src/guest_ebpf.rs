@@ -97,13 +97,16 @@ fn check_license(object: &[u8]) -> Result<(), String> {
             .ok()
             .map(|b| usize::from(u16::from_le_bytes(b)))
     };
+
     let u64_at = |at: usize| -> Option<usize> {
         let b: [u8; 8] = object.get(at..at + 8)?.try_into().ok()?;
         usize::try_from(u64::from_le_bytes(b)).ok()
     };
+
     if object.get(..6) != Some(b"\x7fELF\x02\x01".as_slice()) {
         return Err("not a 64 bit little endian ELF object".into());
     }
+
     let short = || "truncated ELF header".to_owned();
     let sections = u64_at(0x28).ok_or_else(short)?;
     let entry_size = u16_at(0x3a).ok_or_else(short)?;
@@ -140,5 +143,6 @@ fn check_license(object: &[u8]) -> Result<(), String> {
             };
         }
     }
+
     Err("no license section".into())
 }

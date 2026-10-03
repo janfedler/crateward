@@ -318,6 +318,7 @@ impl Launch {
         if jail.tap.is_some() {
             devices.push(PathBuf::from("/dev/net/tun"));
         }
+
         JailSpec {
             id: self.id.clone(),
             root: self.jail_root(),
@@ -368,6 +369,7 @@ impl Vm {
                 (child, Some(launch.jail_root()))
             }
         };
+
         let socket = launch.host_created(API);
         let mut vm = Self {
             child,
@@ -376,12 +378,14 @@ impl Vm {
             root,
             vsock_host: launch.host_created(VSOCK),
         };
+
         vm.wait_for_socket(&socket).await?;
         Ok(vm)
     }
 
     async fn wait_for_socket(&mut self, socket: &Path) -> Result<(), VmError> {
         let deadline = Instant::now() + API_SOCKET_TIMEOUT;
+
         while !socket.exists() {
             if let Some(status) = self
                 .child
@@ -390,11 +394,14 @@ impl Vm {
             {
                 return Err(VmError::Start(format!("exited with {status}")));
             }
+
             if Instant::now() >= deadline {
                 return Err(VmError::Start("no API socket".into()));
             }
+
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
+
         Ok(())
     }
 
@@ -408,14 +415,17 @@ impl Vm {
             Exposed::read_only(&spec.kernel, KERNEL),
             Exposed::read_only(&spec.rootfs, ROOTFS),
         ];
+
         if let Some(drives) = &spec.drives {
             files.extend(Exposed::drives(drives));
         }
+
         let vm = Self::spawn(launch, &files).await?;
         vm.configure(launch, spec).await?;
         let start = InstanceAction {
             action_type: "InstanceStart",
         };
+
         vm.api.put("/actions", &start).await?;
         Ok(vm)
     }
@@ -423,6 +433,7 @@ impl Vm {
     /// Sends everything Firecracker needs before the VM starts.
     async fn configure(&self, launch: &Launch, spec: &BootSpec) -> Result<(), VmError> {
         let api = &self.api;
+
         // The serial console carries guest controlled text into our log.
         // Excess output is dropped: 64 KiB burst, then 4 KiB per second.
         let serial = Serial {
@@ -431,17 +442,20 @@ impl Vm {
                 refill_time: 16_000,
             },
         };
+
         api.put("/serial", &serial).await?;
         let boot_source = BootSource {
             kernel_image_path: launch.fc_path(&spec.kernel, KERNEL),
             boot_args: spec.boot_args.clone(),
         };
+
         api.put("/boot-source", &boot_source).await?;
         let machine = MachineConfig {
             vcpu_count: spec.vcpus,
             mem_size_mib: spec.memory_mib,
             smt: false,
         };
+
         api.put("/machine-config", &machine).await?;
         let rootfs = Drive {
             drive_id: "rootfs".into(),
@@ -450,10 +464,13 @@ impl Vm {
             is_read_only: true,
             rate_limiter: None,
         };
+
         api.put("/drives/rootfs", &rootfs).await?;
+
         if let Some(drives) = &spec.drives {
             self.put_job_drives(launch, drives).await?;
         }
+
         if spec.network {
             let interface = NetworkInterface {
                 iface_id: "eth0".into(),
@@ -462,12 +479,15 @@ impl Vm {
                 rx_rate_limiter: NETWORK_LIMIT,
                 tx_rate_limiter: NETWORK_LIMIT,
             };
+
             api.put("/network-interfaces/eth0", &interface).await?;
         }
+
         let vsock = Vsock {
             guest_cid: GUEST_CID,
             uds_path: launch.fc_created(VSOCK),
         };
+
         api.put("/vsock", &vsock).await?;
         Ok(())
     }
@@ -486,8 +506,10 @@ impl Vm {
                 is_read_only: read_only,
                 rate_limiter: Some(DRIVE_LIMIT),
             };
+
             self.api.put(&format!("/drives/{id}"), &drive).await?;
         }
+
         Ok(())
     }
 
@@ -510,9 +532,11 @@ impl Vm {
             Exposed::read_only(&snapshot.state, STATE),
             Exposed::read_only(&snapshot.memory, MEMORY),
         ];
+
         if let Some(drives) = drives {
             files.extend(Exposed::drives(drives));
         }
+
         let vm = Self::spawn(launch, &files).await?;
         vm.api
             .put(
@@ -547,6 +571,7 @@ impl Vm {
                     .await?;
             }
         }
+
         Ok(vm)
     }
 
@@ -598,6 +623,7 @@ impl Vm {
             memory: out.join(MEMORY),
             rootfs: rootfs.to_path_buf(),
         };
+
         // Copy rather than move: in a jail the files belong to the slot's
         // user, and the copies must belong to the orchestrator so that no
         // slot can ever write a snapshot another VM restores from.
@@ -610,6 +636,7 @@ impl Vm {
                 .await
                 .map_err(io_error(format!("removing {}", from.display())))?;
         }
+
         Ok(snapshot)
     }
 
@@ -676,6 +703,7 @@ impl Vm {
                 .await
                 .map_err(io_error("reaping firecracker"))?;
         }
+
         Ok(())
     }
 

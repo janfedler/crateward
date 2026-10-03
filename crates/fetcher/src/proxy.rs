@@ -63,15 +63,18 @@ impl Index {
         {
             return Ok(body.clone());
         }
+
         let url = format!("{}{path}", self.root);
         let body = match self.client.get(&url, None, MAX_INDEX_FILE_BYTES).await {
             Ok(Fetched::Body { body, .. }) => Some(body),
             Ok(Fetched::Missing) => None,
             Ok(Fetched::NotModified) | Err(_) => return Err(StatusCode::BAD_GATEWAY),
         };
+
         if let Ok(mut cache) = self.cache.lock() {
             cache.insert(path.to_owned(), (Instant::now(), body.clone()));
         }
+
         Ok(body)
     }
 }
@@ -89,18 +92,22 @@ pub struct Target {
 fn unyank(body: &[u8], version: &str) -> Bytes {
     let text = String::from_utf8_lossy(body);
     let mut out = String::with_capacity(text.len());
+
     for line in text.lines() {
         match serde_json::from_str::<serde_json::Value>(line) {
             Ok(mut value) if value.get("vers").and_then(|v| v.as_str()) == Some(version) => {
                 if let Some(yanked) = value.get_mut("yanked") {
                     *yanked = serde_json::Value::Bool(false);
                 }
+
                 out.push_str(&value.to_string());
             }
             _ => out.push_str(line),
         }
+
         out.push('\n');
     }
+
     Bytes::from(out)
 }
 
@@ -126,9 +133,11 @@ async fn handle(
             .body(Full::new(body))
             .unwrap_or_else(|_| Response::new(Full::default()))
     };
+
     let Some(path) = req.uri().path().strip_prefix("/index/") else {
         return Ok(respond(StatusCode::NOT_FOUND, Bytes::new()));
     };
+
     if path == "config.json" {
         let config = r#"{"dl":"http://127.0.0.1:9/crateward-no-downloads"}"#;
         return Ok(respond(
@@ -136,9 +145,11 @@ async fn handle(
             Bytes::from_static(config.as_bytes()),
         ));
     }
+
     if !valid_index_path(path) {
         return Ok(respond(StatusCode::NOT_FOUND, Bytes::new()));
     }
+
     Ok(match index.file(path).await {
         Ok(Some(body)) if path == target.index_path => {
             respond(StatusCode::OK, unyank(&body, &target.version))
@@ -168,6 +179,7 @@ pub fn serve(
                 let service = hyper::service::service_fn(move |req| {
                     handle(req, index.clone(), Arc::clone(&target))
                 });
+
                 let _ = hyper::server::conn::http1::Builder::new()
                     .serve_connection(TokioIo::new(stream), service)
                     .await;
@@ -185,6 +197,7 @@ mod tests {
         let body = b"{\"name\":\"x\",\"vers\":\"1.0.0\",\"yanked\":true}\n{\"name\":\"x\",\"vers\":\"1.0.1\",\"yanked\":true}\n";
         let out = String::from_utf8(unyank(body, "1.0.1").to_vec()).unwrap();
         let lines: Vec<&str> = out.lines().collect();
+
         assert!(lines[0].contains("\"yanked\":true"));
         assert!(lines[1].contains("\"yanked\":false"));
     }

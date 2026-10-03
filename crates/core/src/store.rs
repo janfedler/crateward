@@ -183,6 +183,7 @@ impl Policies {
         for stage in Stage::ALL {
             backoff.insert(stage.name(), stages.get(stage).retry_policy()?);
         }
+
         Ok(Self {
             limits: stages.limits(),
             backoff,
@@ -195,6 +196,7 @@ impl Policies {
             Effect::ReportInfrastructureFailure { stage, retry } => (stage, retry),
             Effect::None | Effect::EnterQuarantine { .. } => return None,
         };
+
         let policy = self.backoff.get(stage.name())?;
         Some(policy.delay(attempt, &mut rand::rng()))
     }
@@ -234,6 +236,7 @@ fn stored(row: &Row) -> Result<StoredJob, StoreError> {
         id,
         reason: "checksum is not 32 bytes".into(),
     })?;
+
     Ok(StoredJob {
         id: JobId(id),
         name: row.try_get("crate_name")?,
@@ -292,8 +295,10 @@ impl Store {
             )
             .await?;
         let mut applied = Vec::new();
+
         for (version, sql) in MIGRATIONS {
             let tx = self.client.transaction().await?;
+
             // Serialize concurrent migrators.
             tx.batch_execute("LOCK TABLE schema_migrations IN EXCLUSIVE MODE")
                 .await?;
@@ -313,8 +318,10 @@ impl Store {
                 .await?;
                 applied.push(*version);
             }
+
             tx.commit().await?;
         }
+
         Ok(applied)
     }
 
@@ -485,6 +492,7 @@ impl Store {
             ],
         )
         .await?;
+
         // A suspected compromise pauses everything and alerts, in the same
         // transaction as the event, so it cannot be recorded without them.
         if let Effect::EnterQuarantine { stage } = transition.effect {
@@ -493,6 +501,7 @@ impl Store {
             let alert = HumanEscalation::SandboxEscapeIndicator { job: Some(id) };
             insert_alert(&tx, &alert).await?;
         }
+
         tx.commit().await?;
         Ok(transition)
     }
@@ -514,6 +523,7 @@ impl Store {
             )
             .await?;
         let mut reaped = 0;
+
         for row in expired {
             let id = JobId(row.try_get("id")?);
             let owner: String = row.try_get("lease_owner")?;
@@ -527,6 +537,7 @@ impl Store {
                 Err(other) => return Err(other),
             }
         }
+
         Ok(reaped)
     }
 
@@ -668,6 +679,7 @@ impl Store {
         stats: &[(String, i64, i64)],
     ) -> Result<u64, StoreError> {
         let mut written = 0;
+
         for chunk in stats.chunks(10_000) {
             let names: Vec<&str> = chunk.iter().map(|s| s.0.as_str()).collect();
             let canonical: Vec<String> = chunk
@@ -688,6 +700,7 @@ impl Store {
                 )
                 .await?;
         }
+
         Ok(written)
     }
 
@@ -758,6 +771,7 @@ impl Store {
                     id: r.get(1),
                     reason: "checksum is not 32 bytes".into(),
                 })?;
+
                 Ok(Sha256Digest::from_bytes(bytes))
             })
             .collect()
@@ -833,6 +847,7 @@ impl Store {
                     id,
                     reason: "checksum is not 32 bytes".into(),
                 })?;
+
                 Ok((
                     JobId(id),
                     r.try_get(1)?,
@@ -1072,6 +1087,7 @@ pub fn heartbeat(
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(every).await;
+
             match store.heartbeat(job, &worker, lease).await {
                 Ok(true) => {}
                 Ok(false) => {

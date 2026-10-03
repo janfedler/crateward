@@ -20,9 +20,11 @@ const CHECKSUMS: &str = "SHA256SUMS";
 pub async fn run(store: Store, data_dir: &Path, job: JobId, dir: &Path) -> Result<(), CliError> {
     let names = write_pack(&store, data_dir, job, dir).await?;
     out!("wrote {} files to {}", names.len(), dir.display());
+
     for name in names {
         out!("  {name}");
     }
+
     Ok(())
 }
 
@@ -51,12 +53,14 @@ async fn write_pack(
     std::fs::create_dir(dir).map_err(io(dir))?;
     let tokens = store.honeytoken_values(job).await?;
     let mut names = Vec::new();
+
     for (name, value) in documents(store, &stored).await? {
         let path = dir.join(name);
         let text = redact(&format!("{value:#}"), &tokens) + "\n";
         std::fs::write(&path, text).map_err(io(&path))?;
         names.push(name.to_owned());
     }
+
     names.extend(copy_original(data_dir, &stored, dir));
     write_checksums(dir, &names)?;
     names.push(CHECKSUMS.to_owned());
@@ -189,6 +193,7 @@ fn write_checksums(dir: &Path, names: &[String]) -> Result<(), CliError> {
         let digest = Sha256::digest(std::fs::read(&path).map_err(io(&path))?);
         lines.push(format!("{digest:x}  {name}"));
     }
+
     let path = dir.join(CHECKSUMS);
     std::fs::write(&path, lines.join("\n") + "\n").map_err(io(&path))
 }
@@ -216,9 +221,11 @@ mod tests {
             new_behavior: Vec::new(),
             analyzer_version: 1,
         };
+
         let pending = attack_document(&verdict, Review::Pending);
         assert_eq!(pending["crate"], Value::Null);
         assert_eq!(pending["evidence"][0]["techniques"][0]["id"], "T1105");
+
         let confirmed = attack_document(&verdict, Review::Confirmed);
         assert_eq!(confirmed["crate"]["id"], "T1195.001");
         assert_eq!(
@@ -230,6 +237,7 @@ mod tests {
     #[test]
     fn honeytokens_are_redacted_everywhere() {
         let tokens = vec!["cioTOKEN123".to_owned(), String::new()];
+
         assert_eq!(
             redact(r#"{"a":"x cioTOKEN123 y","b":["cioTOKEN123"]}"#, &tokens),
             r#"{"a":"x [honeytoken] y","b":["[honeytoken]"]}"#

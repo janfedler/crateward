@@ -126,6 +126,7 @@ struct Overlay<'a> {
 fn overlay_options(options: Option<&str>) -> Result<Overlay<'_>, WorkspaceError> {
     let options = options.ok_or(WorkspaceError::NoOverlayOptions)?;
     let (mut lower, mut upper, mut work) = (None, None, None);
+
     for option in options.split(',') {
         let (key, value) = option
             .split_once('=')
@@ -136,15 +137,19 @@ fn overlay_options(options: Option<&str>) -> Result<Overlay<'_>, WorkspaceError>
             "workdir" => &mut work,
             other => return Err(WorkspaceError::OverlayOption(other.into())),
         };
+
         // One lower layer only: `:` would stack several.
         if value.contains(':') {
             return Err(WorkspaceError::OverlayPath(value.into()));
         }
+
         plain(value)?;
+
         if slot.replace(value).is_some() {
             return Err(WorkspaceError::DuplicateOverlayOption(key.into()));
         }
     }
+
     match (lower, upper, work) {
         (Some(lower), Some(upper), Some(work)) => Ok(Overlay { lower, upper, work }),
         _ => Err(WorkspaceError::IncompleteOverlay),
@@ -160,31 +165,39 @@ fn below(path: &str, mount: &str) -> bool {
 fn check_mount(m: &MountSpec, earlier: &[MountSpec]) -> Result<MountFlags, WorkspaceError> {
     plain(&m.target)?;
     let base = MountFlags::NOSUID | MountFlags::NODEV;
+
     if m.fstype == "overlay" {
         if m.device != "overlay" || m.read_only || m.executable {
             return Err(WorkspaceError::OverlaySettings);
         }
+
         let o = overlay_options(m.options.as_deref())?;
         let on = |path: &str, fstype: &str, writable: bool| {
             earlier
                 .iter()
                 .any(|e| e.fstype == fstype && e.read_only != writable && below(path, &e.target))
         };
+
         if !on(o.lower, "erofs", false) || !on(o.upper, "ext4", true) || !on(o.work, "ext4", true) {
             return Err(WorkspaceError::OverlayLayers);
         }
+
         if !on(&m.target, "ext4", true) {
             return Err(WorkspaceError::OverlayTarget);
         }
+
         return Ok(base);
     }
+
     let letter = m.device.strip_prefix("/dev/vd").unwrap_or_default();
     if !(letter.len() == 1 && letter.bytes().all(|b| (b'b'..=b'z').contains(&b))) {
         return Err(WorkspaceError::Device(m.device.clone()));
     }
+
     if m.options.is_some() {
         return Err(WorkspaceError::Options);
     }
+
     match (m.fstype.as_str(), m.read_only, m.executable) {
         // Crate sources are never executed from where they are mounted.
         ("erofs", _, false) => Ok(base | MountFlags::RDONLY | MountFlags::NOEXEC),
@@ -207,6 +220,7 @@ fn make_dir(spec: &PathSpec) -> Result<(), WorkspaceError> {
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists && path.is_dir() => {}
         Err(e) => return Err(failed("mkdir", path)(e)),
     }
+
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(spec.mode))
         .map_err(failed("chmod", path))?;
     chown(path, spec.owner)
@@ -234,12 +248,15 @@ pub fn validate(workspace: &Workspace) -> Result<(), WorkspaceError> {
     for (i, m) in workspace.mounts.iter().enumerate() {
         check_mount(m, workspace.mounts.get(..i).unwrap_or_default())?;
     }
+
     for d in &workspace.directories {
         plain(&d.path)?;
     }
+
     for f in &workspace.files {
         plain(&f.path.path)?;
     }
+
     Ok(())
 }
 
@@ -249,6 +266,7 @@ fn mount_overlay(m: &MountSpec, flags: MountFlags) -> Result<(), WorkspaceError>
     for dir in [o.upper, o.work, m.target.as_str()] {
         std::fs::create_dir_all(dir).map_err(failed("mkdir", dir))?;
     }
+
     // The merged root takes its owner and mode from the upper directory, so
     // it gets those of the lower one.
     let lower = std::fs::metadata(o.lower).map_err(failed("stat", o.lower))?;
@@ -284,6 +302,7 @@ fn mount_drive(
     {
         std::fs::create_dir_all(&m.target).map_err(failed("mkdir", &m.target))?;
     }
+
     mount(
         m.device.as_str(),
         m.target.as_str(),
@@ -302,6 +321,7 @@ fn mount_drive(
 /// way, so a partial workspace is never reused.
 pub fn prepare(workspace: &Workspace) -> Result<(), WorkspaceError> {
     validate(workspace)?;
+
     for (i, m) in workspace.mounts.iter().enumerate() {
         let earlier = workspace.mounts.get(..i).unwrap_or_default();
         let flags = check_mount(m, earlier)?;
@@ -311,12 +331,15 @@ pub fn prepare(workspace: &Workspace) -> Result<(), WorkspaceError> {
             mount_drive(m, earlier, flags)?;
         }
     }
+
     for d in &workspace.directories {
         make_dir(d)?;
     }
+
     for f in &workspace.files {
         write_file(f)?;
     }
+
     Ok(())
 }
 
@@ -352,10 +375,13 @@ mod tests {
             mount_spec("/dev/vdc", "/work", "ext4"),
             mount_spec("/dev/vdd", "/warm", "erofs"),
         ];
+
         let good = "lowerdir=/warm/target,upperdir=/work/.warm/upper,workdir=/work/.warm/work";
         assert!(check_mount(&overlay(good), &earlier).is_ok());
+
         let refused = |options: &str| check_mount(&overlay(options), &earlier).unwrap_err();
         let layers = |e| matches!(e, WorkspaceError::OverlayLayers);
+
         assert!(layers(refused(
             "lowerdir=/etc,upperdir=/work/u,workdir=/work/w"
         )));
@@ -382,6 +408,7 @@ mod tests {
             refused("lowerdir=/warm/target,lowerdir=/warm/x,upperdir=/work/u,workdir=/work/w"),
             WorkspaceError::DuplicateOverlayOption(key) if key == "lowerdir"
         ));
+
         // Order matters: nothing mounted yet.
         assert!(layers(check_mount(&overlay(good), &[]).unwrap_err()));
     }
@@ -392,21 +419,27 @@ mod tests {
             mount_spec("/dev/vdc", "/work", "ext4"),
             mount_spec("/dev/vdd", "/warm", "erofs"),
         ];
+
         let good = "lowerdir=/warm/target,upperdir=/work/.warm/upper,workdir=/work/.warm/work";
         let mut executable = overlay(good);
         executable.executable = true;
+
         assert!(matches!(
             check_mount(&executable, &earlier),
             Err(WorkspaceError::OverlaySettings)
         ));
+
         let mut bare = overlay(good);
         bare.options = None;
+
         assert!(matches!(
             check_mount(&bare, &earlier),
             Err(WorkspaceError::NoOverlayOptions)
         ));
+
         let mut read_only_target = overlay(good);
         read_only_target.target = "/warm/target/merged".into();
+
         assert!(matches!(
             check_mount(&read_only_target, &earlier),
             Err(WorkspaceError::OverlayTarget)
@@ -446,15 +479,20 @@ mod tests {
     fn drive_mounts_take_no_options_and_ext4_is_never_executable() {
         let mut with_options = mount_spec("/dev/vdb", "/cw", "erofs");
         with_options.options = Some("ro".into());
+
         assert!(matches!(
             check_mount_alone(&with_options),
             Err(WorkspaceError::Options)
         ));
+
         let mut executable = mount_spec("/dev/vdd", "/warm", "erofs");
         executable.executable = true;
+
         assert!(check_mount_alone(&executable).is_ok());
+
         let mut ext4 = mount_spec("/dev/vdc", "/work", "ext4");
         ext4.executable = true;
+
         assert!(matches!(
             check_mount_alone(&ext4),
             Err(WorkspaceError::FileSystem(fs)) if fs == "ext4"
@@ -484,10 +522,13 @@ mod tests {
                 contents: b"secret".to_vec(),
             }],
         };
+
         prepare(&ws).unwrap();
         let meta = std::fs::metadata(dir.join("home/token")).unwrap();
+
         assert_eq!(meta.permissions().mode() & 0o777, 0o600);
         assert_eq!(std::fs::read(dir.join("home/token")).unwrap(), b"secret");
+
         // Files are never overwritten.
         assert!(matches!(
             prepare(&ws),
@@ -496,6 +537,7 @@ mod tests {
                 ..
             })
         ));
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

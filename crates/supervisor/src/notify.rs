@@ -40,11 +40,13 @@ pub fn message(escalation: &HumanEscalation) -> (String, String, u8) {
             "Quarantine is on. Do not reboot, and see the runbook.".to_owned(),
         ),
     };
+
     let priority = match escalation.category() {
         EscalationCategory::Escape => 5,
         EscalationCategory::Canary | EscalationCategory::Verdict => 4,
         EscalationCategory::Operations => 3,
     };
+
     (
         format!("Crateward: {title}"),
         format!("{body} Details on the dashboard (RUNBOOK.md)."),
@@ -91,6 +93,7 @@ impl Notifier {
         let Some(NtfyConfig { server_url, topic }) = ntfy else {
             return Self::Log;
         };
+
         Self::Ntfy {
             client: client.clone(),
             url: format!(
@@ -112,6 +115,7 @@ impl Notifier {
             tracing::warn!(%title, %body, priority, "alert (log only)");
             return Ok(());
         };
+
         let response = client
             .post(url)
             .header("Title", title)
@@ -123,6 +127,7 @@ impl Notifier {
         if !status.is_success() {
             return Err(NotifyError::Refused(status));
         }
+
         Ok(())
     }
 }
@@ -138,14 +143,18 @@ mod tests {
         let escape = message(&HumanEscalation::SandboxEscapeIndicator {
             job: Some(JobId(4711)),
         });
+
         assert_eq!(escape.2, 5);
+
         let verdict = message(&HumanEscalation::HighRiskVerdict { job: JobId(4711) });
         for (title, body, _) in [escape, verdict] {
             assert!(!title.contains("4711") && !body.contains("4711"));
         }
+
         let stage = message(&HumanEscalation::StageFailingAfterRetries {
             stage: Stage::Fetch,
         });
+
         assert!(stage.0.contains("fetch"));
         assert_eq!(stage.2, 3);
     }
@@ -156,6 +165,7 @@ mod tests {
             client: reqwest::Client::new(),
             url: "https://127.0.0.1:1/secret-topic".to_owned(),
         };
+
         let error = notifier.send(&HumanEscalation::KvmError).await.unwrap_err();
         assert!(matches!(error, NotifyError::Request(_)), "{error}");
         assert!(!format!("{error:?} {error}").contains("secret-topic"));

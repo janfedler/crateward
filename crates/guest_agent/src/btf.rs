@@ -112,6 +112,7 @@ fn sections(data: &[u8]) -> Result<(&[u8], &[u8]), BtfError> {
     if !data.starts_with(&MAGIC.to_le_bytes()) {
         return Err(BtfError::NotBtf);
     }
+
     let header_len = usize_of(u32_at(data, 4)?);
     let (type_off, type_len) = (usize_of(u32_at(data, 8)?), usize_of(u32_at(data, 12)?));
     let (str_off, str_len) = (usize_of(u32_at(data, 16)?), usize_of(u32_at(data, 20)?));
@@ -119,6 +120,7 @@ fn sections(data: &[u8]) -> Result<(&[u8], &[u8]), BtfError> {
         let start = header_len.checked_add(off)?;
         data.get(start..start.checked_add(len)?)
     };
+
     let types = section(type_off, type_len).ok_or(BtfError::SectionOutOfBounds)?;
     let strings = section(str_off, str_len).ok_or(BtfError::SectionOutOfBounds)?;
     Ok((types, strings))
@@ -132,6 +134,7 @@ fn read_types(data: &[u8]) -> Result<Vec<Type>, BtfError> {
         target: 0,
         members: Vec::new(),
     };
+
     let mut types = vec![void];
     let mut at = 0;
     while at < data.len() {
@@ -139,9 +142,11 @@ fn read_types(data: &[u8]) -> Result<Vec<Type>, BtfError> {
         types.push(ty);
         at = next;
     }
+
     if at != data.len() {
         return Err(BtfError::RaggedTypes);
     }
+
     Ok(types)
 }
 
@@ -161,12 +166,14 @@ fn read_type(data: &[u8], at: usize) -> Result<(Type, usize), BtfError> {
             members.push(read_member(data, at + i * 12, kind_flag)?);
         }
     }
+
     let ty = Type {
         kind,
         name,
         target,
         members,
     };
+
     Ok((ty, at + extra))
 }
 
@@ -211,6 +218,7 @@ impl Btf {
             strings: strings.to_vec(),
             structs: HashMap::new(),
         };
+
         btf.structs = btf.struct_index();
         Ok(btf)
     }
@@ -219,6 +227,7 @@ impl Btf {
     /// name are left out.
     fn struct_index(&self) -> HashMap<String, u32> {
         let mut structs = HashMap::new();
+
         for (id, ty) in self.types.iter().enumerate() {
             if ty.kind == KIND_STRUCT
                 && let Some(name) = self.name(ty.name)
@@ -228,6 +237,7 @@ impl Btf {
                 structs.entry(name.to_owned()).or_insert(id);
             }
         }
+
         structs
     }
 
@@ -261,6 +271,7 @@ impl Btf {
                 _ => return Some(ty),
             }
         }
+
         None
     }
 
@@ -270,6 +281,7 @@ impl Btf {
         if depth > MAX_DEPTH {
             return None;
         }
+
         for m in &ty.members {
             match self.name(m.name) {
                 Some(name) if name == member => return Some(m.bits),
@@ -284,6 +296,7 @@ impl Btf {
                 _ => {}
             }
         }
+
         None
     }
 
@@ -329,6 +342,7 @@ mod tests {
             len(types),
             len(strings),
         ];
+
         let mut data = words(&header);
         data.extend_from_slice(types);
         data.extend_from_slice(strings);
@@ -359,15 +373,20 @@ mod tests {
                 types.extend_from_slice(&v.to_le_bytes());
             }
         };
+
         // 1: int
         push(&[int, KIND_INT << 24, 4, 32]);
+
         // 2: long
         push(&[long, KIND_INT << 24, 8, 64]);
+
         // 3: `struct { int pad; long b; }`, anonymous
         push(&[0, (KIND_STRUCT << 24) | 2, 16]);
         push(&[pad, 1, 0, b, 2, 64]);
+
         // 4: const of 3, to check that modifiers are followed
         push(&[0, KIND_CONST << 24, 3]);
+
         // 5: struct outer, with a bitfield (kind_flag set)
         push(&[outer, (1 << 31) | (KIND_STRUCT << 24) | 3, 32]);
         push(&[a, 1, 0, 0, 4, 64, c, 1, (4 << 24) | 196]);
@@ -377,6 +396,7 @@ mod tests {
     #[test]
     fn finds_members_inside_anonymous_structs() {
         let btf = Btf::parse(&sample()).unwrap();
+
         assert_eq!(btf.offset("outer", "a").unwrap(), 0);
         assert_eq!(btf.offset("outer", "pad").unwrap(), 8);
         assert_eq!(btf.offset("outer", "b").unwrap(), 16);
@@ -397,6 +417,7 @@ mod tests {
     #[test]
     fn rejects_truncated_or_foreign_data() {
         let data = sample();
+
         assert!(matches!(
             Btf::parse(&data[..data.len() - 30]),
             Err(BtfError::SectionOutOfBounds)
@@ -412,8 +433,10 @@ mod tests {
     #[test]
     fn rejects_a_type_of_an_unknown_kind() {
         let mut data = sample();
+
         // The kind is in the top byte of the info word of the first type.
         data[24 + 7] = 0x1f;
+
         assert!(matches!(
             Btf::parse(&data),
             Err(BtfError::UnknownKind(0x1f))
@@ -444,10 +467,12 @@ mod tests {
             (KIND_TYPE_TAG, 0, 0),
             (KIND_ENUM64, 2, 6),
         ];
+
         let mut types = Vec::new();
         for (kind, count, extra) in kinds {
             types.extend(record((kind << 24) | count, &vec![0; extra]));
         }
+
         // `struct after { int x; }`, found only if every record before it
         // ended where the decoder thinks it does.
         types.extend([1, (KIND_STRUCT << 24) | 1, 8, 7, 1, 32]);
@@ -456,6 +481,7 @@ mod tests {
         let mut expected = vec![0];
         expected.extend(1..=19);
         expected.push(KIND_STRUCT);
+
         assert_eq!(seen, expected);
         assert_eq!(btf.structs["after"], 20);
         assert_eq!(btf.offset("after", "x").unwrap(), 4);
@@ -464,20 +490,26 @@ mod tests {
     #[test]
     fn a_type_cut_off_inside_a_record_is_an_error() {
         let strings = b"\0";
+
         // An int without its extra word: the section ends inside the type.
         let int = words(&record(KIND_INT << 24, &[]));
+
         assert!(matches!(
             Btf::parse(&blob(&int, strings)),
             Err(BtfError::RaggedTypes)
         ));
+
         // A record head that stops after the info word.
         let head = words(&[0, KIND_PTR << 24]);
+
         assert!(matches!(
             Btf::parse(&blob(&head, strings)),
             Err(BtfError::Truncated(8))
         ));
+
         // A struct that has two members according to its info word, and one.
         let cut = words(&[0, (KIND_STRUCT << 24) | 2, 8, 0, 1, 0]);
+
         assert!(matches!(
             Btf::parse(&blob(&cut, strings)),
             Err(BtfError::Truncated(32))
@@ -500,6 +532,7 @@ mod tests {
         let mut data = sample();
         data[24 + 7] = 0x1f;
         data.truncate(data.len() - 10);
+
         assert!(matches!(
             Btf::parse(&data),
             Err(BtfError::SectionOutOfBounds)
@@ -512,6 +545,7 @@ mod tests {
         data[4..8].copy_from_slice(&32_u32.to_le_bytes());
         data.splice(24..24, [0xaa; 8]);
         let btf = Btf::parse(&data).unwrap();
+
         assert_eq!(btf.offset("outer", "b").unwrap(), 16);
     }
 
@@ -532,6 +566,7 @@ mod tests {
             // 6: union un, which is not a struct
             &[15, (KIND_UNION << 24) | 1, 4, 18, 1, 0],
         ]);
+
         let btf = Btf::parse(&blob(&types, strings)).unwrap();
         assert_eq!(btf.structs.len(), 1);
         assert_eq!(btf.structs["dup"], 2);
@@ -562,6 +597,7 @@ mod tests {
                 (3 << 24) | 40,
             ],
         ]);
+
         let btf = Btf::parse(&blob(&types, strings)).unwrap();
         assert_eq!(btf.offset("plain", "m").unwrap(), 2_097_153);
         assert_eq!(btf.offset("flagged", "m").unwrap(), 5);
@@ -578,6 +614,7 @@ mod tests {
             // 3: `struct holder { int pad; <the union>; }`
             &[5, (KIND_STRUCT << 24) | 2, 8, 12, 1, 0, 0, 2, 32],
         ]);
+
         let btf = Btf::parse(&blob(&types, strings)).unwrap();
         assert_eq!(btf.offset("holder", "pad").unwrap(), 0);
         assert_eq!(btf.offset("holder", "a").unwrap(), 4);
@@ -590,6 +627,7 @@ mod tests {
         let junk = (3 << 29) | (0x7f << 16);
         let types = records(&[&[1, junk | (KIND_STRUCT << 24) | 1, 4, 3, 1, 8]]);
         let btf = Btf::parse(&blob(&types, b"\0s\0m\0")).unwrap();
+
         assert_eq!(btf.types[1].kind, KIND_STRUCT);
         assert_eq!(btf.offset("s", "m").unwrap(), 1);
     }
@@ -602,9 +640,11 @@ mod tests {
             eprintln!("skipping: no readable kernel BTF on this host");
             return;
         };
+
         for (name, member) in crate::trace::OFFSETS.iter().map(|o| (o.1, o.2)) {
             btf.offset(name, member).unwrap();
         }
+
         assert_eq!(btf.offset("sockaddr", "sa_family").unwrap(), 0);
     }
 }

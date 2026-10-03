@@ -171,13 +171,16 @@ fn check_path(
     if path.starts_with('/') {
         findings.push(ArchiveFinding::AbsolutePath { path: owned() });
     }
+
     if path.split('/').any(|c| c == "..") {
         findings.push(ArchiveFinding::ParentComponent { path: owned() });
     }
+
     let trimmed = path.trim_end_matches('/');
     if trimmed != prefix.trim_end_matches('/') && !path.starts_with(prefix) {
         findings.push(ArchiveFinding::OutsidePrefix { path: owned() });
     }
+
     if path.len() > limits.max_path_bytes || path.split('/').count() > limits.max_depth {
         findings.push(ArchiveFinding::OversizedPath { path: owned() });
     }
@@ -198,12 +201,15 @@ pub fn validate<R: Read>(
         inner: compressed,
         count: Rc::clone(&count),
     };
+
     let mut report = ArchiveReport::default();
     let result = walk(counting, &count, &prefix, limits, &mut report);
     report.compressed_bytes = count.get();
+
     if let Err(reason) = result {
         report.aborted = Some(reason);
     }
+
     report
 }
 
@@ -222,16 +228,20 @@ fn walk<R: Read>(
     for entry in entries {
         let mut entry = entry.map_err(|e| format!("corrupt archive: {e}"))?;
         report.entries += 1;
+
         if report.entries > limits.max_entries {
             return Err(format!("more than {} entries", limits.max_entries));
         }
+
         let Some(path) = inspect(&entry, prefix, limits, &mut report.findings) else {
             continue;
         };
+
         names.check(&path, &mut report.findings);
         report.files += 1;
         count_content(&mut entry, &path, count, limits, report)?;
     }
+
     Ok(())
 }
 
@@ -247,7 +257,9 @@ fn inspect<R: Read>(
         findings.push(ArchiveFinding::NonUtf8Path);
         return None;
     };
+
     check_path(&path, prefix, limits, findings);
+
     let mode = entry.header().mode().unwrap_or(0);
     if mode & 0o7000 != 0 {
         findings.push(ArchiveFinding::SpecialMode {
@@ -255,6 +267,7 @@ fn inspect<R: Read>(
             mode,
         });
     }
+
     let finding = match entry.header().entry_type() {
         tar::EntryType::Regular | tar::EntryType::Continuous => return Some(path),
         tar::EntryType::Directory => return None,
@@ -271,6 +284,7 @@ fn inspect<R: Read>(
             kind: entry_kind(other),
         },
     };
+
     findings.push(finding);
     None
 }
@@ -288,6 +302,7 @@ fn entry_kind(kind: tar::EntryType) -> String {
         tar::EntryType::XHeader => "XHeader",
         other => return format!("type {:#04x}", other.as_byte()),
     };
+
     name.to_owned()
 }
 
@@ -314,6 +329,7 @@ impl Names {
                 path: path.to_owned(),
             });
         }
+
         if let Some(other) = self.lowercase.insert(path.to_lowercase(), path.to_owned())
             && other != path
         {
@@ -340,19 +356,24 @@ fn count_content<R: Read>(
     if size > limits.max_file_bytes {
         return Err(format!("{path} exceeds {} bytes", limits.max_file_bytes));
     }
+
     report.unpacked_bytes += size;
+
     if report.unpacked_bytes > limits.max_unpacked_bytes {
         return Err(format!(
             "more than {} unpacked bytes",
             limits.max_unpacked_bytes
         ));
     }
+
     let compressed = count.get().max(1);
+
     // The ratio needs some volume to be meaningful: gzip reads ahead.
     if report.unpacked_bytes > 1024 * 1024 && report.unpacked_bytes / compressed > limits.max_ratio
     {
         return Err(format!("compression ratio above {}", limits.max_ratio));
     }
+
     Ok(())
 }
 
@@ -366,20 +387,25 @@ mod tests {
     /// entries a normal builder refuses to write.
     fn archive<P: AsRef<[u8]>>(entries: &[(P, tar::EntryType, &[u8], &str, u32)]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
+
         for (path, kind, data, link, mode) in entries {
             let mut header = tar::Header::new_gnu();
             header.set_entry_type(*kind);
             header.set_size(u64::try_from(data.len()).unwrap());
             header.set_mode(*mode);
+
             // Write the raw name, bypassing the builder's path checks.
             let name = path.as_ref();
             header.as_old_mut().name[..name.len()].copy_from_slice(name);
+
             if !link.is_empty() {
                 header.set_link_name(link).unwrap();
             }
+
             header.set_cksum();
             builder.append(&header, *data).unwrap();
         }
+
         let tar = builder.into_inner().unwrap();
         let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         io::Write::write_all(&mut gz, &tar).unwrap();
@@ -394,6 +420,7 @@ mod tests {
             ("demo-1.0.0/Cargo.toml", R, b"[package]", "", 0o644),
             ("demo-1.0.0/src/lib.rs", R, b"pub fn f() {}", "", 0o644),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &ArchiveLimits::default());
         assert!(report.is_storable(), "{report:?}");
         assert!(report.findings.is_empty(), "{report:?}");
@@ -429,6 +456,7 @@ mod tests {
             ("demo-1.0.0/a.rs", R, b"x", "", 0o644),
             ("demo-1.0.0/A.rs", R, b"x", "", 0o644),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &ArchiveLimits::default());
         assert!(report.is_storable());
         assert_eq!(
@@ -484,6 +512,7 @@ mod tests {
             ("demo-1.0.0/A.rs", R, b"x", "", 0o644),
             ("demo-1.0.0/a.rs", R, b"x", "", 0o644),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &ArchiveLimits::default());
         assert_eq!(
             report.findings,
@@ -517,6 +546,7 @@ mod tests {
             ("elsewhere/", dir, b"", "", 0o755),
             ("demo-1.0.0/src/lib.rs", R, b"x", "", 0o644),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &ArchiveLimits::default());
         assert_eq!(
             report.findings,
@@ -547,6 +577,7 @@ mod tests {
                 0o644,
             ),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &ArchiveLimits::default());
         assert_eq!(
             report.findings,
@@ -574,6 +605,7 @@ mod tests {
             (&b"demo-1.0.0/\xff\xfe"[..], R, b"x", "", 0o4755),
             (&b"demo-1.0.0/ok.rs"[..], R, b"yy", "", 0o644),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &ArchiveLimits::default());
         assert_eq!(report.findings, vec![ArchiveFinding::NonUtf8Path]);
         assert_eq!(
@@ -589,11 +621,13 @@ mod tests {
             max_depth: 3,
             ..ArchiveLimits::default()
         };
+
         let bytes = archive(&[
             ("demo-1.0.0/a/b", R, b"x", "", 0o644),
             ("demo-1.0.0/a/b/c", R, b"x", "", 0o644),
             ("demo-1.0.0/long-file-name.rs", R, b"x", "", 0o644),
         ]);
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &limits);
         assert_eq!(
             report.findings,
@@ -618,6 +652,7 @@ mod tests {
                 .collect();
             archive(&entries)
         };
+
         let check = |bytes: &[u8], limits: ArchiveLimits| {
             let report = validate(bytes, "demo", "1.0.0", &limits);
             (
@@ -625,41 +660,50 @@ mod tests {
                 (report.entries, report.files, report.unpacked_bytes),
             )
         };
+
         let three = build(&[
             small("demo-1.0.0/a", 5),
             small("demo-1.0.0/b", 6),
             small("demo-1.0.0/c", 7),
         ]);
+
         let few = ArchiveLimits {
             max_entries: 2,
             ..ArchiveLimits::default()
         };
+
         assert_eq!(
             check(&three, few),
             (Some("more than 2 entries".to_owned()), (3, 2, 11))
         );
+
         let per_file = ArchiveLimits {
             max_file_bytes: 6,
             ..ArchiveLimits::default()
         };
+
         assert_eq!(
             check(&three, per_file),
             (Some("demo-1.0.0/c exceeds 6 bytes".to_owned()), (3, 3, 11))
         );
+
         let total = ArchiveLimits {
             max_unpacked_bytes: 10,
             ..ArchiveLimits::default()
         };
+
         assert_eq!(
             check(&three, total),
             (Some("more than 10 unpacked bytes".to_owned()), (2, 2, 11))
         );
+
         let zeros = vec![0_u8; 8 * 1024 * 1024];
         let bomb = build(&[("demo-1.0.0/zeros".to_owned(), zeros)]);
         let ratio = ArchiveLimits {
             max_ratio: 50,
             ..ArchiveLimits::default()
         };
+
         let (aborted, counts) = check(&bomb, ratio);
         assert_eq!(aborted, Some("compression ratio above 50".to_owned()));
         assert_eq!(counts, (1, 1, 8 * 1024 * 1024));
@@ -673,12 +717,15 @@ mod tests {
             max_ratio: 50,
             ..ArchiveLimits::default()
         };
+
         let report = validate(bytes.as_slice(), "demo", "1.0.0", &limits);
         assert!(!report.is_storable(), "{report:?}");
+
         let small = ArchiveLimits {
             max_file_bytes: 1024,
             ..ArchiveLimits::default()
         };
+
         assert!(!validate(bytes.as_slice(), "demo", "1.0.0", &small).is_storable());
     }
 
@@ -690,6 +737,7 @@ mod tests {
             "1.0.0",
             &ArchiveLimits::default(),
         );
+
         assert_eq!(
             report.aborted.as_deref(),
             Some("corrupt archive: invalid gzip header")

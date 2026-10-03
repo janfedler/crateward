@@ -115,6 +115,7 @@ pub const ALL: [Canary; 2] = [KNOWN_BAD, KNOWN_GOOD];
 impl Canary {
     fn tar(&self) -> std::io::Result<Vec<u8>> {
         let mut builder = tar::Builder::new(Vec::new());
+
         for (path, data) in [
             ("Cargo.toml", self.manifest),
             ("build.rs", self.build_rs),
@@ -130,6 +131,7 @@ impl Canary {
                 data.as_bytes(),
             )?;
         }
+
         builder.into_inner()
     }
 
@@ -140,6 +142,7 @@ impl Canary {
     /// Fails if the blob store cannot store it.
     pub fn payload(&self, blobs: &BlobStore) -> Result<PayloadSpec, CanaryError> {
         let blob = blobs.put(&self.tar()?)?;
+
         // Any 64 hex digits do: the lockfile and the vendored checksum file
         // only have to agree.
         let checksum = blob.blake3.clone();
@@ -226,12 +229,14 @@ fn bad_trace(trace: &TraceSummary, p: &mut Vec<String>) {
         p.push("the build script is not in the trace".into());
         return;
     };
+
     let opened = |pid: u32, file: &str| {
         trace
             .sensitive_opens
             .iter()
             .any(|f| f.pid == pid && f.path.ends_with(file))
     };
+
     expect(
         p,
         opened(script.pid, "/.cargo/credentials.toml"),
@@ -346,6 +351,7 @@ mod tests {
                 .unwrap()
                 .map(|e| e.unwrap().path().unwrap().to_string_lossy().into_owned())
                 .collect();
+
             assert!(names.contains(&format!("{}-0.1.0/build.rs", canary.name)));
             assert!(canary.manifest.contains(canary.name));
         }
@@ -361,12 +367,15 @@ mod tests {
     #[test]
     fn a_payload_vendors_the_stored_fixture() {
         let (root, blobs) = store("stored");
+
         for canary in ALL {
             let spec = canary.payload(&blobs).unwrap();
+
             assert_eq!(spec.packages[0].name, canary.name);
             assert!(blobs.contains(&spec.packages[0].blake3));
             assert!(spec.lockfile.contains(&spec.packages[0].checksum));
         }
+
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -377,6 +386,7 @@ mod tests {
         std::fs::write(root.join("blobs"), b"in the way").unwrap();
         let error = KNOWN_GOOD.payload(&blobs).unwrap_err();
         std::fs::remove_dir_all(&root).unwrap();
+
         assert!(
             matches!(error, CanaryError::Blob(BlobError::Io { .. })),
             "{error}"
@@ -546,9 +556,11 @@ mod tests {
                 scratch(r).outside_build.clear();
             }),
         ];
+
         for (problem, change) in cases {
             let mut report = caught();
             change(&mut report);
+
             assert_eq!(KNOWN_BAD.check(&report), [problem]);
         }
     }
@@ -556,6 +568,7 @@ mod tests {
     #[test]
     fn the_known_bad_canary_lists_problems_in_order() {
         let nothing = run(BuildOutcome::Failed);
+
         assert_eq!(
             KNOWN_BAD.check(&nothing),
             [
@@ -569,9 +582,11 @@ mod tests {
                 "the autostart file was not found on disk",
             ]
         );
+
         let mut script_only = run(BuildOutcome::Succeeded);
         script_only.trace.complete = true;
         script_only.trace.processes = vec![process(10, 1, SCRIPT, Role::BuildScript)];
+
         assert_eq!(
             KNOWN_BAD.check(&script_only),
             [
@@ -645,15 +660,19 @@ mod tests {
                 scratch(r).planted_changed.push("/work/x".into());
             }),
         ];
+
         for (problem, change) in cases {
             let mut report = clean();
             change(&mut report);
+
             assert_eq!(KNOWN_GOOD.check(&report), [problem]);
         }
+
         let mut report = clean();
         scratch(&mut report)
             .executables_outside_target
             .push(entry("/x"));
+
         assert_eq!(KNOWN_GOOD.check(&report), ["the scratch disk was flagged"]);
         assert_eq!(
             KNOWN_GOOD.check(&run(BuildOutcome::Failed)),
