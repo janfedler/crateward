@@ -82,8 +82,6 @@ again.
 
 * The decoys in `supervisor.decoys` must be excluded from backups and
   indexers.
-* The offsite backup target is not chosen yet. The daily dump lands in
-  `/var/backups/crateward` only.
 * The firewall allowlist follows the configuration. A new external service
   needs its host in the configuration, or for the image builder in
   `crates/cli/src/egress.rs`.
