@@ -31,7 +31,7 @@ const NAME: &str = "analysis child";
 pub const MAX_TAR_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// What one child may use in total. YARA-X runs its rules as WebAssembly,
-/// and the runtime reserves large virtual regions up front; resident memory
+/// and the runtime reserves large virtual regions up front. Resident memory
 /// stays far below the address space.
 const LIMITS: Limits = Limits {
     address_space: 16 << 30,

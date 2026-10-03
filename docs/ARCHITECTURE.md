@@ -1,7 +1,7 @@
 # Architecture
 
 This document describes how Crateward is put together and why. Decisions with
-real alternatives are recorded in [the ADR folder](adr/README.md); this page
+real alternatives are recorded in [the ADR folder](adr/README.md). This page
 links to them instead of repeating them.
 
 ## Goals in one paragraph
@@ -24,7 +24,7 @@ Three properties of the host shape everything below.
   See [ADR 0002](adr/0002-firecracker-rootless-jail.md).
 * **The hot path lives in RAM.** Hard disks cannot serve the random reads
   of snapshot memory files or the writes of scratch disks. Promoted images
-  and per job scratch disks live in tmpfs; the disks hold durable data.
+  and per job scratch disks live in tmpfs. The disks hold durable data.
 * **No ECC, plain ext4.** The memory has no ECC, and the disks are an md
   RAID1 with ext4, unencrypted ([ADR 0003](adr/0003-debian-ansible-ssh.md)).
   Neither checksums data, so Crateward does: content addressed blobs are verified
@@ -42,7 +42,7 @@ and a unit test checks that only the guest executes crate code.
 | Trusted | feed, fetcher, static analysis | never | crates.io hosts only (fetcher) |
 | Untrusted | orchestrator, warmer, fake internet | only inside microVMs | none |
 | Control plane | analyzer, api, supervisor, cli, Postgres | never | the alert service, GitHub (export) |
-| Guest | guest agent, crate under analysis | yes | none; the fake internet only |
+| Guest | guest agent, crate under analysis | yes | none. The fake internet only |
 
 ```mermaid
 flowchart LR
@@ -113,8 +113,8 @@ an event to the state machine. See [ADR 0001](adr/0001-one-server-postgres-queue
    plant fresh honeytokens
    ([ADR 0006](adr/0006-dynamic-runs.md)).
 6. **guest agent** runs `cargo check` as an unprivileged user and streams
-   its output and an eBPF trace (processes, file opens, connections, tamper
-   attempts; [ADR 0007](adr/0007-guest-agent-ebpf.md)) over the
+   its output and an eBPF trace (processes, file opens, connections and tamper
+   attempts, see [ADR 0007](adr/0007-guest-agent-ebpf.md)) over the
    single vsock connection. The fake internet records every network attempt
    as host side ground truth, including frames no proxy sees
    ([ADR 0006](adr/0006-dynamic-runs.md)), and after the
@@ -188,7 +188,7 @@ Notes on the design:
 * A suspected compromise ends the job in `Failed` and puts the pipeline into
   quarantine, in the same transaction. The job is never retried
   automatically, since that would execute the suspicious crate again.
-* Infrastructure failures feed a circuit breaker per stage; an open breaker
+* Infrastructure failures feed a circuit breaker per stage. An open breaker
   or a pause (quarantine, a failed canary, a full scratch filesystem) stops
   claiming in the affected stages only. The supervisor decides from the job
   events and delivers alerts
@@ -198,12 +198,12 @@ Notes on the design:
   supervisor watches decoys on the host, processes with a slot UID and the
   integrity manifest of the binaries and images
   ([ADR 0008](adr/0008-autonomy-and-escape-detection.md)).
-* Each supervisor round trims the raw data of old unflagged run reports;
-  verdicts and evidence stay.
+* Each supervisor round trims the raw data of old unflagged run reports.
+  Verdicts and evidence stay.
 * A crate that fails to build is a result (`BuildOutcome::Failed`), not a
   failure of the pipeline.
 * Escalation to a full build and test happens at most once. Together with
-  bounded retries this makes every path finite; a property test checks it.
+  bounded retries this makes every path finite. A property test checks it.
 
 ## Triage and capacity
 
@@ -211,16 +211,16 @@ Crates.io publishes on the order of 500 versions per hour at busy times (one
 sample from the RSS feed on 2026-09-24: 514 versions in 60 minutes). Three
 vCPUs cannot run all of them, so:
 
-* every version gets static analysis;
-* a version gets a VM run only if it has build time code of its own (a build
+* Every version gets static analysis.
+* A version gets a VM run only if it has build time code of its own (a build
   script, `proc-macro = true`, or `links`), has a high severity finding, or
   locks an unfamiliar dependency with build time code
-  ([ADR 0005](adr/0005-static-analysis-and-triage.md));
-* new crates and updates of popular crates get a higher priority, so they
-  run first;
-* a job that waits longer than `triage.dynamic_deadline_hours` for a slot is
-  scored as static only, and its label says why;
-* the dashboard publishes the share of versions with dynamic results.
+  ([ADR 0005](adr/0005-static-analysis-and-triage.md)).
+* New crates and updates of popular crates get a higher priority, so they
+  run first.
+* A job that waits longer than `triage.dynamic_deadline_hours` for a slot is
+  scored as static only, and its label says why.
+* The dashboard publishes the share of versions with dynamic results.
 
 A version whose own code has no build time component executes nothing of its
 own during `cargo check`, so labeling it "static only, no build time code"
@@ -235,10 +235,10 @@ starts it in a rootless jail ([ADR 0002](adr/0002-firecracker-rootless-jail.md))
 * **No root.** A single threaded launcher, `crateward-vmjail`, joins the
   slot's cgroup, creates a user namespace in which the slot's own
   subordinate UID stands for Firecracker, then mount, network, IPC and UTS
-  namespaces; bind mounts exactly the kernel, the images and `/dev/kvm`;
-  creates the slot's tap device; `pivot_root`s; drops every capability;
-  sets `no_new_privs`; and executes Firecracker, whose own seccomp filter
-  then applies. Namespaces and tap devices die with the process.
+  namespaces. It bind mounts exactly the kernel, the images and
+  `/dev/kvm`, creates the slot's tap device, calls `pivot_root`, drops
+  every capability, sets `no_new_privs` and executes Firecracker, whose own
+  seccomp filter then applies. Namespaces and tap devices die with the process.
 * **Restore, then personalize.** Jobs restore a Full snapshot of a clean boot
   (Diff snapshots are a developer preview). Firecracker's documentation calls
   resuming one snapshot many times insecure for uniqueness, so the job
@@ -248,15 +248,15 @@ starts it in a rootless jail ([ADR 0002](adr/0002-firecracker-rootless-jail.md))
   relative paths the snapshot expects.
 * **Payload.** The host builds a read only EROFS image of the job's vendored
   sources in tmpfs and swaps it in with `PATCH /drives/{id}` after restore.
-  The warm build cache is a third drive, switched the same way; inside the
+  The warm build cache is a third drive, switched the same way. Inside the
   guest, overlayfs stacks its target directory under the job's own
   writable layer.
 * **One channel.** The host initiates the only vsock connection
   (`CONNECT <port>`). It never listens on `<uds_path>_<port>`, so every guest
   initiated vsock connection is refused by Firecracker.
-* **Limits.** cgroup v2 `cpu.max`, `memory.max` and `pids.max`; Firecracker
-  rate limiters on drives and the network device; a fixed size scratch disk;
-  a wall clock limit enforced with `cgroup.kill`.
+* **Limits.** cgroup v2 `cpu.max`, `memory.max` and `pids.max`, Firecracker
+  rate limiters on drives and the network device, a fixed size scratch disk,
+  and a wall clock limit enforced with `cgroup.kill`.
 * **Cleanup.** Every resource is named after its slot. On startup the
   supervisor kills orphan VMs, removes stale tap devices, namespaces, jails
   and scratch files, and verifies free disk space.
@@ -286,7 +286,7 @@ a VM, with each crate under analysis replaced by a stub, and packs the
 resulting target directory into a read only image. Every job then mounts it
 under its own writable layer and compiles only what the image lacks. Only
 versions Crateward has stored for two weeks, seen in several jobs and found
-without high severity static findings enter it; the warm build is analyzed
+without high severity static findings enter it. The warm build is analyzed
 like a job and a promotion check guards its use. In the measurement, run
 time fell by 28 percent. See
 [ADR 0006](adr/0006-dynamic-runs.md).
@@ -302,9 +302,9 @@ time fell by 28 percent. See
 ## Egress
 
 Every allowlist is enforced per service user by nftables sets that are filled
-from DNS (`deploy/nftables/crateward.nft`; `crateward egress` derives the
+from DNS (`deploy/nftables/crateward.nft`). `crateward egress` derives the
 hosts from the configuration, and a root timer loads them every two
-minutes). A packet from a slot UID on the host network is logged and
+minutes. A packet from a slot UID on the host network is logged and
 dropped.
 
 | Service user | Destinations | Purpose |

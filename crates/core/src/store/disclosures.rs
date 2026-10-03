@@ -1,13 +1,13 @@
 //! Disclosure records (DISCLOSURE.md): a confirmed finding is reported,
 //! the recipient acts, and only then is it published. A malicious crate
 //! that crates.io removed before any report is recorded as such, resolved
-//! by the removal. The database enforces the order; the public export
+//! by the removal. The database enforces the order. The public export
 //! reads published rows only.
 
 use super::{Store, StoreError};
 use crate::job::JobId;
 
-/// What kind of problem a finding is; each has its own reporting path.
+/// What kind of problem a finding is. Each has its own reporting path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DisclosureKind {
     /// Intentionally harmful code: reported to the crates.io team.
@@ -39,13 +39,13 @@ impl DisclosureKind {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DisclosureRefusal {
     /// Only a verdict a human confirmed is reported.
-    #[error("the verdict is not confirmed; review it first")]
+    #[error("the verdict is not confirmed: review it first")]
     NotConfirmed,
     /// The step needs a report first.
     #[error("no report is recorded for this job")]
     NotReported,
     /// Publishing waits until the recipient acted.
-    #[error("the report is not resolved yet; the embargo has not passed")]
+    #[error("the report is not resolved yet and the embargo has not passed")]
     NotResolved,
     /// The slug must be lowercase letters, digits and dashes.
     #[error("the page name must be 1 to 64 lowercase letters, digits or dashes")]
@@ -62,7 +62,7 @@ pub struct Disclosure {
     pub job: JobId,
     /// What the finding is.
     pub kind: DisclosureKind,
-    /// Who received the report; `None` when crates.io removed the crate
+    /// Who received the report. `None` when crates.io removed the crate
     /// before a report.
     pub reported_to: Option<String>,
     /// When it was reported.
@@ -102,7 +102,7 @@ pub struct PublishedFinding {
     pub version: String,
     /// What the finding is.
     pub kind: DisclosureKind,
-    /// When it was reported; `None` when crates.io removed the crate first.
+    /// When it was reported. `None` when crates.io removed the crate first.
     pub reported_on: Option<String>,
     /// When it was published.
     pub published_on: String,
@@ -153,7 +153,7 @@ impl Store {
     }
 
     /// Records that crates.io removed a confirmed malicious crate before
-    /// Crateward reported it. No report is needed then; the removal
+    /// Crateward reported it. No report is needed then. The removal
     /// resolves the finding, which may be published.
     ///
     /// # Errors

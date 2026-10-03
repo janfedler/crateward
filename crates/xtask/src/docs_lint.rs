@@ -1,12 +1,12 @@
 //! Enforces the project's writing style mechanically.
 //!
-//! The style asks for short, precise English sentences with no em dashes and
-//! no hyphenated compounds in prose. Reviewers miss these; a check does not.
+//! The style asks for short, precise English sentences with no em dashes, no
+//! hyphenated compounds and no semicolons in prose. Reviewers miss these. A check does not.
 //! The rules apply to prose only: code blocks, inline code, URLs and HTML
 //! comments are skipped. Names that contain hyphens (crates, tools, flags,
 //! targets) belong in inline code, which is good style anyway.
 //!
-//! Checked files: Markdown in the repository root, `docs/` and `deploy/`, Rust doc
+//! Checked files: Markdown in the repository root, `docs/` and `deploy/`, Rust
 //! comments in `crates/`, and comments in `config/*.toml`.
 
 use std::fmt;
@@ -38,7 +38,7 @@ impl fmt::Display for Violation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Markdown,
-    RustDoc,
+    RustComments,
     TomlComments,
 }
 
@@ -88,7 +88,7 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
             .is_some_and(|parent| parent == "config");
         let kind = match path.extension().and_then(|e| e.to_str()) {
             Some("md") => Some(Kind::Markdown),
-            Some("rs") if nested => Some(Kind::RustDoc),
+            Some("rs") if nested => Some(Kind::RustComments),
             Some("toml") if in_config => Some(Kind::TomlComments),
             _ => None,
         };
@@ -140,11 +140,12 @@ fn lint_text(path: &Path, text: &str, kind: Kind) -> Vec<Violation> {
 fn prose_source(line: &str, kind: Kind) -> Option<&str> {
     match kind {
         Kind::Markdown => Some(line),
-        Kind::RustDoc => {
+        Kind::RustComments => {
             let trimmed = line.trim_start();
             trimmed
                 .strip_prefix("//!")
                 .or_else(|| trimmed.strip_prefix("///"))
+                .or_else(|| trimmed.strip_prefix("//"))
         }
         Kind::TomlComments => line.trim_start().strip_prefix('#'),
     }
@@ -261,7 +262,7 @@ fn strip_quotations(line: &str) -> String {
         out.push_str(first);
     }
     let rest: Vec<&str> = parts.collect();
-    // With an odd number of quotes the last one is unmatched; keep its text.
+    // With an odd number of quotes the last one is unmatched. Keep its text.
     let pairs = rest.len() / 2;
     for (index, part) in rest.iter().enumerate() {
         if index % 2 == 1 || index >= pairs * 2 {
@@ -275,7 +276,10 @@ fn strip_quotations(line: &str) -> String {
 fn check_prose(prose: &str) -> Vec<String> {
     let mut messages = Vec::new();
     if prose.contains('\u{2014}') {
-        messages.push("em dash in prose; use a period, comma or colon".to_owned());
+        messages.push("em dash in prose: use a period, comma or colon".to_owned());
+    }
+    if has_semicolon(prose) {
+        messages.push("semicolon in prose: end the sentence with a period".to_owned());
     }
     for word in prose.split_whitespace() {
         let word = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
@@ -285,11 +289,23 @@ fn check_prose(prose: &str) -> Vec<String> {
         }
         if is_hyphenated_compound(word) && !ALLOWED_HYPHENATED.contains(&word) {
             messages.push(format!(
-                "hyphenated compound {word:?}; write it as separate words, as one word, or in inline code if it is a name"
+                "hyphenated compound {word:?}: write it as separate words, as one word, or in inline code if it is a name"
             ));
         }
     }
     messages
+}
+
+/// Whether a semicolon ends a clause. The one of an HTML character reference
+/// such as `&amp;` does not.
+fn has_semicolon(prose: &str) -> bool {
+    prose.match_indices(';').any(|(at, _)| {
+        let name = prose[..at]
+            .rsplit_once('&')
+            .map_or("", |(_, name)| name)
+            .trim_start_matches('#');
+        name.is_empty() || !name.chars().all(char::is_alphanumeric)
+    })
 }
 
 /// A letter, a hyphen and a letter: `read-only`, `pre-warmed`. Hyphens next
@@ -338,9 +354,22 @@ mod tests {
     }
 
     #[test]
-    fn rust_doc_comments_are_checked_and_code_is_not() {
-        let text = "//! A well-known fact.\nlet x = a-b;\n/// Fine text.\n";
-        assert_eq!(lint(text, Kind::RustDoc).len(), 1);
+    fn semicolons_are_flagged_outside_code_and_entities() {
+        assert_eq!(lint("One clause; another.", Kind::Markdown).len(), 1);
+        assert_eq!(
+            lint("A list:\n* first;\n* second.", Kind::Markdown).len(),
+            1
+        );
+        let fine = "Run `a; b`, see <https://x.org/a;b>, \"quoted; text\".\n\
+                    MITRE ATT&amp;CK and &#38; are entities.\n\
+                    ```\nlet x = 1;\n```\n";
+        assert_eq!(lint(fine, Kind::Markdown), Vec::<String>::new());
+    }
+
+    #[test]
+    fn rust_comments_are_checked_and_code_is_not() {
+        let text = "//! A well-known fact.\nlet x = a-b;\n/// Fine text.\n// One; two.\n";
+        assert_eq!(lint(text, Kind::RustComments).len(), 2);
     }
 
     #[test]

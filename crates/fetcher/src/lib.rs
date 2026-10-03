@@ -118,7 +118,7 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
 /// # Errors
 ///
 /// Returns [`ComponentError::Fatal`] if the fetcher cannot start or the
-/// store fails; systemd restarts it.
+/// store fails, and systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {

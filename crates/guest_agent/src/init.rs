@@ -1,7 +1,7 @@
 //! Duties of PID 1: mount the pseudo filesystems and shut the VM down.
 //!
 //! The root filesystem is a read only EROFS image. `/dev` is mounted by the
-//! kernel (`CONFIG_DEVTMPFS_MOUNT`); everything else writable is tmpfs, so
+//! kernel (`CONFIG_DEVTMPFS_MOUNT`). Everything else writable is tmpfs, so
 //! nothing a job writes outlives the VM.
 
 use rustix::mount::{MountFlags, mount};
@@ -79,7 +79,7 @@ pub fn mount_filesystems() -> Result<(), AgentError> {
 }
 
 /// Turns IPv6 off on the network interfaces. The guest has no IPv6 route
-/// anyway; without this its kernel announces itself on the link after every
+/// anyway. Without this its kernel announces itself on the link after every
 /// restore, which would put the same frames into every job's packet log. A
 /// program that tries IPv6 still appears in the trace, and guest root that
 /// turns it back on appears on the host.
@@ -97,7 +97,7 @@ pub fn disable_ipv6() {
 pub fn shut_down() -> ! {
     rustix::fs::sync();
     let _ = rustix::system::reboot(rustix::system::RebootCommand::Restart);
-    // Only reached if reboot failed; returning from PID 1 panics the kernel,
+    // Only reached if reboot failed. Returning from PID 1 panics the kernel,
     // and `panic=1` on the command line turns that into a restart as well.
     loop {
         std::thread::park();

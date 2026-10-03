@@ -350,7 +350,7 @@ fn access_rows(trace: &Value, key: &str) -> Vec<AccessRow> {
 
 /// What the fake internet recognized in a connection.
 /// How a run ended, from the host's view, in words. Reports store the
-/// end's name with an optional reason (`guest_stopped: panic`); older ones
+/// end's name with an optional reason (`guest_stopped: panic`). Older ones
 /// stored Rust's debug form, cut at 64 characters, of which only the
 /// variant's name is kept.
 fn end_text(raw: &str) -> String {
@@ -420,7 +420,7 @@ fn connection_row(c: &Value) -> ConnectionRow {
     if let Some(inner) = c.get("inner") {
         let inside = sniffed(inner);
         if !inside.is_empty() {
-            detail = format!("{detail}; inside TLS: {inside}");
+            detail = format!("{detail}, inside TLS: {inside}");
         }
     }
     ConnectionRow {
@@ -474,7 +474,7 @@ fn network(view: &mut RunView, net: &Value) {
         || net.get("packets_truncated").and_then(Value::as_bool) == Some(true)
     {
         view.network_notes
-            .push("The network log hit its limit; later traffic is missing".to_owned());
+            .push("The network log hit its limit, so later traffic is missing".to_owned());
     }
 }
 
@@ -487,7 +487,7 @@ fn trace(view: &mut RunView, trace: &Value) {
     }
     if trace.get("complete").and_then(Value::as_bool) == Some(false) {
         view.trace_notes
-            .push("The agent did not close the trace; it may be incomplete".to_owned());
+            .push("The agent did not close the trace, so it may be incomplete".to_owned());
     }
     if let Some(n) = u64_of(trace, "processes_omitted").filter(|n| *n > 0) {
         view.trace_notes
@@ -778,7 +778,7 @@ mod tests {
         );
         assert_eq!(
             view.connections[0].detail,
-            "SNI evil.example; inside TLS: POST /up, host evil.example"
+            "SNI evil.example, inside TLS: POST /up, host evil.example"
         );
         assert_eq!(view.connections[0].dst, ":443");
         assert_eq!(view.connections[1].detail, "");
@@ -789,7 +789,7 @@ mod tests {
         assert_eq!(view.sockets[0].4, "stream");
         assert_eq!(
             view.trace_notes,
-            ["The agent did not close the trace; it may be incomplete"]
+            ["The agent did not close the trace, so it may be incomplete"]
         );
         assert_eq!(view.entries[0].mode, "644");
     }

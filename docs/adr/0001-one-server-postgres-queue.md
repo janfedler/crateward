@@ -17,13 +17,13 @@ host.
 1. **One server** runs the whole pipeline. It has no public service except
    SSH (ADR 0003).
 2. **The job row is the queue.** One Postgres row per crate version holds
-   the state; workers claim rows with `SELECT ... FOR UPDATE SKIP LOCKED`,
+   the state. Workers claim rows with `SELECT ... FOR UPDATE SKIP LOCKED`,
    and leases are columns (`lease_owner`, `lease_expires_at`) renewed by
    heartbeats. A state change and the queue movement happen in one
    transaction.
 3. **Two external services, each with one narrow secret.** The public site
    is a static export of counts, pushed to `janfedler/crateward-site` and
-   served by GitHub Pages; the server's deploy key writes to that
+   served by GitHub Pages. The server's deploy key writes to that
    repository only. Alerts go through ntfy.sh, whose topic name is the
    password, so configuration validation requires 32 to 64 random
    characters.
@@ -48,7 +48,7 @@ host.
   category and a short title, never a crate name or a job number.
 * A compromised external service can deface the site or forge or suppress
   alerts. It cannot reach the server or undisclosed findings.
-* Frequent updates bloat the job table; autovacuum keeps up at this load.
+* Frequent updates bloat the job table. Autovacuum keeps up at this load.
 
 ## Sources
 

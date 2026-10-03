@@ -2,7 +2,7 @@
 
 Every alert Crateward can send, what it means, what the automation already
 did, and what to do. The list matches `crateward_core::escalation`
-exactly; an alert that is not listed here is a bug.
+exactly. An alert that is not listed here is a bug.
 
 Alerts arrive through ntfy with minimal text. Details are on the dashboard,
 behind SSH. Milestone markers show when a step becomes available.
@@ -10,10 +10,10 @@ behind SSH. Milestone markers show when a step becomes available.
 ## Stage failing after retries
 
 **Meaning.** A stage's circuit breaker opened: infrastructure failures kept
-happening after retries. Only that stage is paused; the others keep draining
+happening after retries. Only that stage is paused. The others keep draining
 their queues.
 
-**Already done.** Jobs of the stage were put back with backoff; none were
+**Already done.** Jobs of the stage were put back with backoff. None were
 failed for an infrastructure problem.
 
 **What to do.**
@@ -22,8 +22,8 @@ failed for an infrastructure problem.
    are 429 or 5xx. Check the nftables allowlist sets for the fetcher user.
 3. Sandbox stage: check `journalctl -u crateward-orchestrator` and the KVM
    section below.
-4. Fix the cause. The breaker probes again by itself after its cooldown;
-   to resume at once, run `crateward breaker close <stage>`. Queued jobs
+4. Fix the cause. The breaker probes again by itself after its cooldown.
+   To resume at once, run `crateward breaker close <stage>`. Queued jobs
    resume by priority.
 
 ## Disk usage above threshold
@@ -44,12 +44,12 @@ filling, the sandbox stage stops claiming jobs.
 
 **Meaning.** The kernel log or a Firecracker process reported a KVM error.
 
-**Already done.** The sandbox stage breaker opened; no new VMs start.
+**Already done.** The sandbox stage breaker opened. No new VMs start.
 
 **What to do.**
 1. `journalctl -k | grep -i kvm` for the kernel side.
 2. Check `/sys/devices/system/cpu/vulnerabilities/*` and the microcode
-   version (`grep microcode /proc/cpuinfo`); a kernel or microcode update may
+   version (`grep microcode /proc/cpuinfo`). A kernel or microcode update may
    have changed behavior.
 3. Run the soak test (M1) against the current kernel. If it fails, boot the
    previous kernel from GRUB and pin it until a fix exists.
@@ -59,7 +59,7 @@ filling, the sandbox stage stops claiming jobs.
 **Meaning.** The known good canary was flagged, or the known bad canary was
 not. Verdicts cannot be trusted.
 
-**Already done.** The sandbox, analysis and finalize stages paused; fetch
+**Already done.** The sandbox, analysis and finalize stages paused. Fetch
 and static analysis continue. The pause lifts by itself once both canaries
 pass again (they run every `sandbox.canary_interval_minutes`).
 
@@ -78,14 +78,14 @@ pass again (they run every `sandbox.canary_interval_minutes`).
 ## High risk verdict
 
 **Meaning.** A verdict needs human review. It is in the "needs you" inbox.
-The job page links each piece of static evidence to its line on crates.io;
+The job page links each piece of static evidence to its line on crates.io.
 `crateward evidence <job> --out <dir>` writes its evidence pack.
 
 **Already done.** Nothing was published. The verdict stays private.
 
 **What to do.** Follow [DISCLOSURE.md](DISCLOSURE.md). A confirmed verdict
 stays in the inbox, under "Confirmed, not reported", until
-`crateward disclosure report` records its report; the job list filters for
+`crateward disclosure report` records its report. The job list filters for
 it too.
 
 ## Sandbox escape indicator
@@ -97,28 +97,28 @@ compromise), something opened a decoy on the host, a process runs with a
 slot UID that the jail did not start, or a file of the integrity manifest
 changed ([ADR 0008](adr/0008-autonomy-and-escape-detection.md)). The
 pause detail in `crateward status` lists the findings. A guest that merely
-stopped itself is not an escape indicator; it is recorded as a result.
+stopped itself is not an escape indicator. It is recorded as a result.
 
 **Already done.** Quarantine: the whole pipeline paused. The job that was
 running is failed and will not be retried automatically.
 
 **What to do.**
-1. Do not reboot yet; volatile evidence lives in tmpfs.
+1. Do not reboot yet. Volatile evidence lives in tmpfs.
 2. Copy the jail directory of the slot, the tap capture and the job's
    evidence pack to the disk archive.
 3. Check the host for persistence: new users, systemd units, cron entries,
    changed binaries (`crateward integrity --config <file> check`), unknown
    processes (`ps -eo pid,ppid,uid,comm` for the slot UIDs).
    An integrity finding right after a deploy usually means the manifest was
-   not recorded again; confirm the deploy changed exactly those files.
+   not recorded again. Confirm the deploy changed exactly those files.
 4. If anything is confirmed, treat the host as compromised: rotate the
    SSH keys, the deploy key and the ntfy topic,
    then reinstall from the Ansible playbooks and restore data from backup.
 5. Report a Firecracker or KVM escape to the respective project's security
    contact.
 6. Before lifting, run `crateward integrity --config <file> record` if the
-   manifest was the cause and the new files are the deployed ones;
-   otherwise the next check quarantines the pipeline again.
+   manifest was the cause and the new files are the deployed ones.
+   Otherwise the next check quarantines the pipeline again.
 7. Lift quarantine only after the cause is understood:
    `crateward quarantine lift`. `crateward status` shows what is paused.
 

@@ -18,9 +18,9 @@ dominates the run time.
    with its own headers: the consumer probe and lockfile from the fetch
    stage, a `.cargo/config.toml` that points crates.io at `/cw/vendor`
    offline, and every locked crate. A sandboxed `mkfs.erofs --tar` turns it
-   into an image; nothing is extracted on the host.
+   into an image. Nothing is extracted on the host.
 2. **Drives by fixed path.** The base snapshot boots with placeholder
-   drives; each restore binds the job's payload and scratch images there
+   drives. Each restore binds the job's payload and scratch images there
    and sends `PATCH /drives`, so nothing job specific is in the snapshot.
 3. **Honeytokens.** Every job gets fresh values where stealers look: cargo
    credentials, an SSH key, AWS credentials, git credentials and
@@ -45,7 +45,7 @@ dominates the run time.
    a promotion check must pass first. No job runs yet, so the warm build's
    VM gets the vCPUs of every slot and as much memory as the slots would
    use, from its own base snapshot that is deleted afterwards. Each replay
-   may take as long as a job's `cargo check`; one that takes longer is
+   may take as long as a job's `cargo check`. One that takes longer is
    ended and named in the log, and the others continue.
 
 ## Alternatives
@@ -60,18 +60,18 @@ dominates the run time.
 
 * The canary (`cargo xtask canary`) runs a fixture crate whose build script
   posts the cargo token over HTTP and has `curl` post AWS credentials over
-  HTTPS; both must be caught end to end.
+  HTTPS. Both must be caught end to end.
 * Clients with their own root list (`webpki-roots`) or pinned certificates
-  refuse the fake certificates; their server names are still logged.
+  refuse the fake certificates. Their server names are still logged.
 * The TLS authority differs per installation and is part of the release
   bundle, so bundles must not be published.
 * The warm cache cut total run time by 28 percent on 125 live jobs (median
   run from 53 s to 29 s). A compromised version inside it would affect
-  later jobs; the gates reduce that risk, they do not remove it.
+  later jobs. The gates reduce that risk, they do not remove it.
 
 ## Sources
 
 * Firecracker v1.17.0 `docs/api_requests/patch-block.md`
 * `mkfs.erofs(1)` (`--tar=f`), `nft(8)`, `packet(7)`
 * `ext4-view` 1.0 `README.md`, `https://github.com/nicholasbishop/ext4-view-rs`
-* sccache `docs/Rust.md`; Cargo `fingerprint/mod.rs` module documentation
+* sccache `docs/Rust.md` and Cargo `fingerprint/mod.rs` module documentation

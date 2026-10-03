@@ -10,11 +10,11 @@
 //! which starts it in a systemd user scope with `Delegate=yes`. It checks,
 //! against a baseline taken before the first job:
 //!
-//! * no Firecracker or launcher process is left;
-//! * no slot cgroup and no slot directory is left;
-//! * no tap device appeared in the host's network namespace;
-//! * the test process holds the same number of file descriptors;
-//! * the test process's resident memory grew by less than 16 MiB.
+//! * No Firecracker or launcher process is left.
+//! * No slot cgroup and no slot directory is left.
+//! * No tap device appeared in the host's network namespace.
+//! * The test process holds the same number of file descriptors.
+//! * The test process's resident memory grew by less than 16 MiB.
 //!
 //! It also ends one job through the host side wall clock and checks that
 //! reconciliation removes a slot left behind by a simulated crash.

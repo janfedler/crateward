@@ -4,14 +4,14 @@
 //! the cargo token and posts it over HTTP, copies it into its build output,
 //! drops an autostart file, tries IPv6, and has `curl` post the AWS
 //! credentials over HTTPS. Every one of these must be caught. The known good
-//! canary has a build script that only prints a cargo instruction; nothing
+//! canary has a build script that only prints a cargo instruction. Nothing
 //! may be flagged. If either expectation fails, verdicts cannot be trusted
 //! and the supervisor pauses the stages that produce them.
 //!
 //! Their sources exist only as strings here. They are packed into the blob
 //! store and vendored into a payload like any crate, and compiled and run
 //! **only inside a microVM** (docs/TESTING.md). The orchestrator runs them
-//! on a schedule and after every warm build; `cargo xtask canary` runs them
+//! on a schedule and after every warm build. `cargo xtask canary` runs them
 //! as a test.
 
 use crateward_core::blobs::{BlobError, BlobStore};
@@ -25,7 +25,7 @@ use crate::worker::RunReport;
 /// A fixture crate and what its run must show.
 #[derive(Debug, Clone, Copy)]
 pub struct Canary {
-    /// Name used for records; also the crate name.
+    /// Name used for records. Also the crate name.
     pub name: &'static str,
     manifest: &'static str,
     build_rs: &'static str,
@@ -168,7 +168,7 @@ impl Canary {
         })
     }
 
-    /// What the run failed to show; empty when the canary passed.
+    /// What the run failed to show. Empty when the canary passed.
     #[must_use]
     pub fn check(&self, report: &RunReport) -> Vec<String> {
         (self.check)(report)

@@ -35,7 +35,7 @@ fn plant_at(path: &Path) -> std::io::Result<()> {
     )
 }
 
-/// Plants the decoy in a fresh jail root; readable by the slot's UID
+/// Plants the decoy in a fresh jail root. Readable by the slot's UID
 /// through the root's ACL.
 ///
 /// # Errors

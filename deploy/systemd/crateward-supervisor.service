@@ -15,7 +15,7 @@ Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
 ExecStart=/usr/local/lib/crateward/bin/crateward_supervisor
 Restart=on-failure
 RestartSec=10
-# Jobs are drained after SIGTERM; a sandbox run may take its full timeout.
+# Jobs are drained after SIGTERM. A sandbox run may take its full timeout.
 TimeoutStopSec=15min
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -38,7 +38,7 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-# Decoys are planted here; the integrity manifest and /proc are read.
+# Decoys are planted here. The integrity manifest and /proc are read.
 ReadWritePaths=/home/crateward /var/lib/crateward/decoys
 ReadOnlyPaths=/var/lib/crateward /run/crateward
 

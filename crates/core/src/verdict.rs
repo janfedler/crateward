@@ -35,7 +35,7 @@ pub enum StaticOnlyReason {
     /// configured deadline for a free VM slot.
     CapacityDeadline,
     /// The archive failed validation and was never unpacked, so there is
-    /// nothing to parse or build; the archive findings are the evidence.
+    /// nothing to parse or build. The archive findings are the evidence.
     ArchiveRejected,
     /// Cargo could not resolve the dependencies, so the version cannot be
     /// built anywhere and none of its code runs at build time.

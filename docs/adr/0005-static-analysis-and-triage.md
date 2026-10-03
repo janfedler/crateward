@@ -9,7 +9,7 @@ Every new version gets static analysis. It must find behavior that matters
 on any platform, point at the code that caused each finding, and decide
 whether a microVM run can add evidence. The input is hostile: sources,
 manifests and arbitrary binary files. Measured on the server: `syn` parses
-about 10 MB of Rust per second; the largest crate seen (`windows` 0.59.0,
+about 10 MB of Rust per second. The largest crate seen (`windows` 0.59.0,
 111 MB unpacked) takes 13 s, of which YARA-X needs 0.16 s.
 
 ## Decision
@@ -62,7 +62,7 @@ about 10 MB of Rust per second; the largest crate seen (`windows` 0.59.0,
 * A report from an older analyzer is written again when a job needs it, and
   in idle time for scored jobs, verdicts waiting for review first.
 * About half of the sampled jobs are dynamic, more than three VM slots can
-  take at busy times; the dynamic deadline turns the rest into static only
+  take at busy times. The dynamic deadline turns the rest into static only
   verdicts, labeled with the reason.
 * Detectors are heuristics. A false positive costs a VM run and a report
   line, not a verdict: the analyzer weighs findings together (ADR 0009).

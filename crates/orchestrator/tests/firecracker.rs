@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Only our own guest agent and standard programs of the guest image run
-//! here; no crate under analysis is involved.
+//! here. No crate under analysis is involved.
 
 // Test helpers outside `#[test]` functions are still test code.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
@@ -61,7 +61,7 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
-/// A launch in the given mode; `slot` picks the subordinate ID.
+/// A launch in the given mode. `slot` picks the subordinate ID.
 fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
     let isolation = if jailed {
         Isolation::Jail(JailConfig {
@@ -148,7 +148,7 @@ async fn boot_run_shutdown(jailed: bool) {
     assert!(!id.contains("groups=0"), "job kept root's groups: {id}");
 
     // Snapshot uniqueness relies on the VM generation ID driver reseeding the
-    // guest RNG on restore; a device must be bound to it.
+    // guest RNG on restore. A device must be bound to it.
     let outcome = agent
         .run(job(&[
             "/bin/sh",

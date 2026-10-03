@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Runs as root because it loads nftables; the tool only resolves names and
+# Runs as root because it loads nftables. The tool only resolves names and
 # prints the elements.
 Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
 ExecStart=/bin/sh -c '/usr/local/bin/crateward egress | /usr/sbin/nft -f -'

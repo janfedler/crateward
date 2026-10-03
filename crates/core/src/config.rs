@@ -10,7 +10,7 @@
 //!
 //! Secrets (database URL, ntfy topic) are [`SecretString`]s.
 //! Their `Debug` output is redacted, so logging a configuration never leaks
-//! them. They are only needed on the host; nothing here is ever sent to a
+//! them. They are only needed on the host. Nothing here is ever sent to a
 //! guest.
 
 use std::fmt;
@@ -142,7 +142,7 @@ pub struct CratesIoConfig {
     /// Daily database dump.
     pub db_dump_url: Url,
     /// Request rate towards `static.crates.io` (feeds, crate files).
-    /// crates.io sets no limit there; this is our own courtesy.
+    /// crates.io sets no limit there. This is our own courtesy.
     pub static_requests_per_second: f64,
     /// Request rate towards the sparse index. crates.io sets no limit there
     /// either.
@@ -184,7 +184,7 @@ impl StageConfig {
     ///
     /// # Errors
     ///
-    /// Fails for a zero base or a cap below the base; [`Config::validate`]
+    /// Fails for a zero base or a cap below the base. [`Config::validate`]
     /// reports both.
     pub fn retry_policy(&self) -> Result<RetryPolicy, crate::retry::RetryPolicyError> {
         RetryPolicy::new(
@@ -284,12 +284,12 @@ pub struct SandboxConfig {
     /// Directory holding one subdirectory per slot. Must be private to the
     /// orchestrator user.
     pub slots_dir: PathBuf,
-    /// First subordinate UID for slots; slot `n` runs as `slot_uid_base + n`.
+    /// First subordinate UID for slots. Slot `n` runs as `slot_uid_base + n`.
     /// The range must be in the orchestrator user's `/etc/subuid` entry.
     pub slot_uid_base: u32,
     /// First subordinate GID for slots, from `/etc/subgid`.
     pub slot_gid_base: u32,
-    /// Minutes between two canary runs (ADR 0008); 0 turns them off.
+    /// Minutes between two canary runs (ADR 0008). 0 turns them off.
     pub canary_interval_minutes: u64,
     /// The warm build cache (ADR 0006). Without this table, jobs build
     /// cold.
@@ -313,7 +313,7 @@ pub struct WarmConfig {
     pub min_age_hours: u64,
     /// Guest side wall clock limit of the warm build.
     pub timeout_secs: u64,
-    /// Largest warm image; a larger one is discarded.
+    /// Largest warm image. A larger one is discarded.
     pub max_image_mib: u64,
 }
 
@@ -491,7 +491,7 @@ impl Issues {
         self.check(min <= value && value <= max, key, message);
     }
 
-    // Subordinate IDs start at 65536; a lower value is a real user or group.
+    // Subordinate IDs start at 65536. A lower value is a real user or group.
     fn subordinate_ids(&mut self, base: u32, slots: u32, key: &str, kind: &str) {
         self.check(
             base >= 65_536 && base.checked_add(slots).is_some(),
@@ -702,7 +702,7 @@ impl Config {
         v.check(
             self.web.listen.ip().is_loopback(),
             "web.listen",
-            "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0009)",
+            "must be a loopback address, because the dashboard is reached through an SSH tunnel (ADR 0009)",
         );
     }
 
@@ -865,7 +865,7 @@ mod tests {
         assert!(issues.is_empty(), "{issues:?}");
     }
 
-    /// Every value of `ok` passes; every value of `bad` breaks this rule and no other.
+    /// Every value of `ok` passes. Every value of `bad` breaks this rule and no other.
     fn limits<T: Copy + fmt::Debug>(
         set: impl Fn(&mut Config, T),
         ok: &[T],
@@ -1310,7 +1310,7 @@ mod tests {
             accepted(|c| c.web.listen = listen.parse().unwrap());
         }
         for listen in ["0.0.0.0:8080", "10.77.0.1:8080", "[::]:8080"] {
-            let message = "must be a loopback address; the dashboard is reached through an SSH tunnel (ADR 0009)";
+            let message = "must be a loopback address, because the dashboard is reached through an SSH tunnel (ADR 0009)";
             rule(
                 |c| c.web.listen = listen.parse().unwrap(),
                 "web.listen",

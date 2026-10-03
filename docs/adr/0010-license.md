@@ -27,10 +27,10 @@ The workspace is `MIT OR Apache-2.0`. `crateward_guest_ebpf` is
 
 ## Consequences
 
-* The workspace `Cargo.toml` sets `license` once; `crates/guest_ebpf` and
+* The workspace `Cargo.toml` sets `license` once. `crates/guest_ebpf` and
   `fuzz` set theirs. Release bundles carry all three license texts.
 * Contributions come under the same terms (Apache-2.0, section 5).
-* The eBPF object must stay separate; linking it into the agent would mix
+* The eBPF object must stay separate. Linking it into the agent would mix
   the licenses. Packages remain `publish = false`.
 
 ## Sources

@@ -1,7 +1,7 @@
 //! cgroup v2 limits for VM slots, inside the orchestrator's own delegated
 //! subtree.
 //!
-//! systemd delegates a cgroup subtree to a unit with `Delegate=yes`; the
+//! systemd delegates a cgroup subtree to a unit with `Delegate=yes`. The
 //! unit's user may then create child cgroups and set their limits without
 //! privileges. The orchestrator uses it like this:
 //!
@@ -38,7 +38,7 @@ pub enum CgroupError {
         source: std::io::Error,
     },
     /// The orchestrator's cgroup is not delegated to it.
-    #[error("cgroup {0} is not delegated to this user; run under systemd with Delegate=yes")]
+    #[error("cgroup {0} is not delegated to this user: run under systemd with Delegate=yes")]
     NotDelegated(PathBuf),
     /// A controller the slots need is not available.
     #[error("controller {0} is not available in the delegated cgroup")]
@@ -168,7 +168,7 @@ impl CgroupTree {
         )?;
         slot.set("memory.max", &(limits.memory_mib * 1024 * 1024).to_string())?;
         // Guest memory must never be written to disk (Firecracker production
-        // host guide); the host has no swap, and this makes sure of it.
+        // host guide). The host has no swap, and this makes sure of it.
         if slot.path.join("memory.swap.max").exists() {
             slot.set("memory.swap.max", "0")?;
         }

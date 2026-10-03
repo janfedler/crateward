@@ -7,7 +7,7 @@
 
 The host must be reproducible, minimal, updated without a human and set up
 as code. Its disks are md RAID1 arrays with ext4. Firecracker 1.17 validates the host kernels
-5.10, 6.1 and 6.18; others "might work".
+5.10, 6.1 and 6.18. Others "might work".
 
 ## Decision
 
@@ -15,7 +15,7 @@ as code. Its disks are md RAID1 arrays with ext4. Firecracker 1.17 validates the
    playbooks in `deploy/` and installed from a release bundle with
    `install.sh`. Unattended upgrades install security fixes.
 2. **SSH with keys only is the only inbound service.** Passwords and
-   keyboard interactive logins are off; the dashboard is reached through an
+   keyboard interactive logins are off. The dashboard is reached through an
    SSH tunnel.
 3. **ext4 on md RAID1, unencrypted.** Integrity is checked end to end
    instead: blobs are named by their BLAKE3 digest and verified on every

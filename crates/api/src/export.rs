@@ -2,10 +2,10 @@
 //!
 //! The server never serves the public. It renders a few static files and,
 //! when `[export]` is configured, pushes them to the site repository with a
-//! deploy key that can write to that repository only; GitHub Pages serves
+//! deploy key that can write to that repository only. GitHub Pages serves
 //! them. The export contains counts, and the crate names of findings only
 //! once the maintainer published them after disclosure (`crateward
-//! disclosure publish`, DISCLOSURE.md); no evidence, no undisclosed
+//! disclosure publish`, DISCLOSURE.md). No evidence, no undisclosed
 //! findings. The finding pages themselves are written by hand.
 
 use std::path::{Path, PathBuf};
@@ -80,7 +80,7 @@ struct FindingLine {
     slug: String,
 }
 
-/// What Crateward is and does; the user agent of every request to
+/// What Crateward is and does. The user agent of every request to
 /// crates.io points here.
 #[derive(Template)]
 #[template(path = "about.html")]
@@ -112,7 +112,7 @@ pub fn render(
     } else if canaries.iter().all(|(_, passed, _)| *passed) {
         "The latest canary runs (a known bad and a known good test crate) gave the expected results.".to_owned()
     } else {
-        "A canary gave an unexpected result; analysis that depends on it is paused until it passes again.".to_owned()
+        "A canary gave an unexpected result. Analysis that depends on it is paused until it passes again.".to_owned()
     };
     let page = SitePage {
         versions: stats.versions,

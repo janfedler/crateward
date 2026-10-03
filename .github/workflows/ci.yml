@@ -132,7 +132,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/ansible"
           "$RUNNER_TEMP/ansible/bin/pip" install --require-hashes -r deploy/ansible/requirements.txt
           echo "$RUNNER_TEMP/ansible/bin" >> "$GITHUB_PATH"
-          # Ubuntu restricts unprivileged user namespaces with AppArmor; the
+          # Ubuntu restricts unprivileged user namespaces with AppArmor. The
           # firewall check loads the rules in one.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: cargo xtask deploy-check

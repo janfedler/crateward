@@ -1,5 +1,5 @@
 #!/bin/sh
-# mmdebstrap customize hook. Runs inside mmdebstrap's user namespace; $1 is
+# mmdebstrap customize hook. Runs inside mmdebstrap's user namespace. $1 is
 # the root directory of the new image.
 set -eu
 root="$1"

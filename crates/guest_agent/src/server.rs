@@ -130,7 +130,7 @@ pub fn serve(port: u32) -> Result<(), AgentError> {
         match converse(&mut stream, options, &mut tracer) {
             Ok(Next::Accept) => {}
             Ok(Next::ShutDown) => return Ok(()),
-            // A broken conversation ends only that connection; the host
+            // A broken conversation ends only that connection. The host
             // decides what happens next.
             Err(error) => eprintln!("crateward agent: {error}"),
         }

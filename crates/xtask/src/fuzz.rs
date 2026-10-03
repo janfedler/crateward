@@ -2,7 +2,7 @@
 //!
 //! The package has its own workspace and toolchain file (a pinned nightly,
 //! which the sanitizer flags of `cargo fuzz` need). CI runs each target
-//! briefly from an empty corpus as a smoke test; before a release every
+//! briefly from an empty corpus as a smoke test. Before a release every
 //! target runs for at least 150 seconds from the seed corpus (TESTING.md).
 
 use std::path::Path;
@@ -47,8 +47,8 @@ pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
             "-max_len=1048576",
         ];
         eprintln!("xtask: running cargo {} in fuzz", args.join(" "));
-        // The outer cargo exports its toolchain; removing it lets the
-        // package's own rust-toolchain.toml choose.
+        // The outer cargo exports its toolchain. Removing it lets the
+        // package's own `rust-toolchain.toml` choose.
         let status = Command::new("cargo")
             .args(args)
             .current_dir(&fuzz)

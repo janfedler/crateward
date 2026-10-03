@@ -3,7 +3,7 @@
 //! Zone: control plane. It checks the configuration and the host's
 //! integrity, shows the pipeline's status, controls quarantine and circuit
 //! breakers, and writes evidence packs and disclosure records.
-//! Everything it can do is also visible on the dashboard; the tool exists so
+//! Everything it can do is also visible on the dashboard. The tool exists so
 //! that recovery works over SSH when the web interface does not.
 
 #![forbid(unsafe_code)]

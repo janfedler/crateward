@@ -3,8 +3,8 @@
 //! nftables hands every IPv4 TCP and UDP packet of the guest to the sinks.
 //! Everything else the guest sends (IPv6, ICMP, other IP protocols, raw
 //! Ethernet) reaches no socket, so without this module it would leave no
-//! trace on the host. A packet socket on the tap device reads every frame;
-//! frames the host itself sent (source MAC [`HOST_MAC`]), ARP, and IPv4 TCP
+//! trace on the host. A packet socket on the tap device reads every frame.
+//! Frames the host itself sent (source MAC [`HOST_MAC`]), ARP, and IPv4 TCP
 //! and UDP are skipped, the rest is logged with its first bytes.
 //!
 //! Nothing captured here can go anywhere: the namespace has no uplink. The
@@ -19,7 +19,7 @@ use rustix::net::{AddressFamily, RecvFlags, SocketFlags, SocketType, eth, recv, 
 /// frames the host sent can be told apart from the guest's.
 pub const HOST_MAC: [u8; 6] = [0x02, 0x63, 0x77, 0x00, 0x00, 0x01];
 
-/// Packets logged per run; later ones are only counted.
+/// Packets logged per run. Later ones are only counted.
 pub const MAX_PACKETS: u32 = 1_000;
 
 /// Bytes of each frame kept in the log.

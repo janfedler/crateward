@@ -16,7 +16,7 @@ host or other jobs are especially welcome.
 
 Crateward is maintained by one person. Expect an acknowledgement within 7
 days and a first assessment within 14 days. Fixes are released as soon as
-they are ready; the report is published with credit (unless you prefer
+they are ready. The report is published with credit (unless you prefer
 otherwise) once a fix is deployed.
 
 ### Scope
@@ -38,7 +38,7 @@ will not be pursued.
 ## Findings about crates
 
 Crateward never publishes a finding about a crate before it has been
-reported and handled. Malicious crates go to the crates.io team; ordinary
+reported and handled. Malicious crates go to the crates.io team. Ordinary
 vulnerabilities go to the crate's maintainers first. The full workflow is in
 [DISCLOSURE.md](DISCLOSURE.md).
 

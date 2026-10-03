@@ -4,25 +4,25 @@
 //!
 //! Why it looks the way it does: autonomy means every failure class has an
 //! automated response before anyone is paged. Workers already retry with
-//! backoff; the state machine records every infrastructure failure and every
+//! backoff. The state machine records every infrastructure failure and every
 //! suspected compromise. The supervisor turns those records into decisions,
 //! in one round every `supervisor.interval_secs`:
 //!
-//! * it reaps expired leases of every stage;
-//! * it evaluates each stage's circuit breaker from the job events, so
-//!   persistent infrastructure trouble pauses only the affected stage;
-//! * it scores jobs that waited too long for a VM slot as static only;
-//! * it checks disk usage, and pauses the sandbox stage while the scratch
-//!   filesystem is too full;
-//! * it trims the raw data (process lists, output tails) of unflagged runs
-//!   older than `storage.raw_log_retention_days`;
-//! * it looks for signs of a host escape (ADR 0008): files that differ
+//! * It reaps expired leases of every stage.
+//! * It evaluates each stage's circuit breaker from the job events, so
+//!   persistent infrastructure trouble pauses only the affected stage.
+//! * It scores jobs that waited too long for a VM slot as static only.
+//! * It checks disk usage, and pauses the sandbox stage while the scratch
+//!   filesystem is too full.
+//! * It trims the raw data (process lists, output tails) of unflagged runs
+//!   older than `storage.raw_log_retention_days`.
+//! * It looks for signs of a host escape (ADR 0008): files that differ
 //!   from the integrity manifest, any access to a decoy file, and
-//!   processes running as a slot UID that the jail did not start; any of
-//!   them quarantines the pipeline;
-//! * it reads the canary results the orchestrator records and pauses the
-//!   producing stages while a canary gives the wrong result;
-//! * it delivers alerts from the closed list in `crateward_core::escalation`
+//!   processes running as a slot UID that the jail did not start. Any of
+//!   them quarantines the pipeline.
+//! * It reads the canary results the orchestrator records and pauses the
+//!   producing stages while a canary gives the wrong result.
+//! * It delivers alerts from the closed list in `crateward_core::escalation`
 //!   through the notifier, repeating the same alert at most every
 //!   `supervisor.alert_repeat_hours`.
 //!
@@ -191,13 +191,13 @@ impl Supervisor<'_> {
             CanaryAction::Wait => {}
             CanaryAction::AllPassed => {
                 if self.store.lift_pause(PauseReason::Canary).await? {
-                    tracing::info!("canaries pass again; producing stages resumed");
+                    tracing::info!("canaries pass again, producing stages resumed");
                 }
             }
             CanaryAction::Failed(names) => {
                 let detail = format!("wrong result from {}", names.join(", "));
                 if self.store.pause(PauseReason::Canary, None, &detail).await? {
-                    tracing::error!(%detail, "canary failed; producing stages paused");
+                    tracing::error!(%detail, "canary failed, producing stages paused");
                     self.store
                         .raise_alert(&HumanEscalation::CanaryFailure)
                         .await?;
@@ -224,7 +224,7 @@ impl Supervisor<'_> {
             };
             self.store.mark_alert(alert.id, &outcome).await?;
             if matches!(outcome, AlertOutcome::Failed(_)) {
-                // Keep the order; try again next round.
+                // Keep the order. Try again next round.
                 break;
             }
         }

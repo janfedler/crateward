@@ -2,9 +2,9 @@
 //! threaded, and ends by executing Firecracker.
 //!
 //! Control protocol with the orchestrator, one line each over stdin and
-//! stdout: the orchestrator sends the [`JailSpec`] as JSON; the launcher
-//! answers `unshared` once it is in its new user namespace; the orchestrator
-//! writes the ID maps and answers `mapped`; the launcher answers `exec` right
+//! stdout: the orchestrator sends the [`JailSpec`] as JSON. The launcher
+//! answers `unshared` once it is in its new user namespace. The orchestrator
+//! writes the ID maps and answers `mapped`. The launcher answers `exec` right
 //! before it replaces itself with Firecracker, or `error: <reason>` if a
 //! step fails. From then on Firecracker's stdout and stderr go to the log.
 
@@ -31,7 +31,7 @@ const NFT: &str = "/usr/sbin/nft";
 
 /// Redirects everything the guest sends to the fake internet's ports
 /// (`crateward_fake_internet::server::SlotConfig::default`). The namespace
-/// has no other interface and no route, so nothing leaves it anyway; the
+/// has no other interface and no route, so nothing leaves it anyway. The
 /// redirect makes every attempt visible.
 fn ruleset(tap: &str) -> String {
     format!(
@@ -320,11 +320,11 @@ fn start_sinks(
     null: &File,
     authority: Option<Vec<u8>>,
 ) -> Result<(), LaunchError> {
-    // Also covers the launcher itself from here on; nothing it still
+    // Also covers the launcher itself from here on. Nothing it still
     // executes needs new privileges.
     rustix::thread::set_no_new_privs(true).map_err(step("setting no_new_privs"))?;
     let errors = log.try_clone().map_err(step("duplicating the log"))?;
-    // The jail has no /dev/null to open; reuse the one opened before. With
+    // The jail has no /dev/null to open. Reuse the one opened before. With
     // an authority, stdin is a pipe that carries it and is then closed.
     let stdin = match authority {
         Some(_) => std::process::Stdio::piped(),
@@ -334,7 +334,7 @@ fn start_sinks(
             .into(),
     };
     // Started with the namespace's privileges so that it can open its
-    // packet socket; it switches to the slot's user itself before it reads
+    // packet socket. It switches to the slot's user itself before it reads
     // anything from the guest.
     let mut child = Command::new(FAKE_INTERNET_IN_JAIL)
         .arg("slot")
@@ -390,7 +390,7 @@ pub fn run() -> LaunchError {
         let (log, null) = build_jail(&spec)?;
         drop(input);
         // Sockets and snapshot files Firecracker creates must be usable by
-        // the orchestrator; the jail root itself is closed to everybody else.
+        // the orchestrator. The jail root itself is closed to everybody else.
         rustix::process::umask(rustix::fs::Mode::empty());
         drop_privileges()?;
         say("exec")?;
@@ -413,7 +413,7 @@ pub fn run() -> LaunchError {
     match result {
         Ok(never) => match never {},
         Err(error) => {
-            // Before `exec` stdout is the control channel; after the
+            // Before `exec` stdout is the control channel. After the
             // redirection this line lands in the log.
             let _ = say(&format!("error: {error}"));
             error

@@ -234,7 +234,7 @@ impl Feed {
     ) -> Result<(), FeedError> {
         let now = Instant::now();
         for item in items {
-            // New crate items carry no version; their first version arrives
+            // New crate items carry no version. Their first version arrives
             // through `updates.xml`.
             let Some(version) = item.version else {
                 continue;
@@ -249,7 +249,7 @@ impl Feed {
                 continue;
             }
             if self.pending.len() >= MAX_PENDING {
-                tracing::warn!("pending versions at the limit; the dump will reconcile the rest");
+                tracing::warn!("pending versions at the limit, the dump will reconcile the rest");
                 break;
             }
             let new_crate = new_crates.contains(&key.0);

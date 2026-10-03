@@ -3,7 +3,7 @@
 //! A slot's root directory is owned by the orchestrator, so the orchestrator
 //! can always clean it up, even when Firecracker (running as the slot's
 //! subordinate UID) created files inside. An ACL entry grants that one UID
-//! access; no other user, and no group, gets any. The owner of a file may
+//! access. No other user, and no group, gets any. The owner of a file may
 //! set its ACL without privileges.
 //!
 //! The format is `struct posix_acl_xattr_header` followed by sorted
@@ -25,7 +25,7 @@ const UNDEFINED_ID: u32 = u32::MAX;
 /// Read, write and search permission.
 const RWX: u16 = 0o7;
 
-/// Encodes an access ACL: the owner and `uid` get full access; the owning
+/// Encodes an access ACL: the owner and `uid` get full access. The owning
 /// group and everybody else get none.
 #[must_use]
 pub fn owner_and_user_only(uid: u32) -> Vec<u8> {

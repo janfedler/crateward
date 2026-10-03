@@ -22,7 +22,7 @@
 #   allowed_signers   the release signing key, for `ssh-keygen -Y verify`
 #   ansible/          ansible-core, from the hash pinned requirements
 #
-# The work itself is done by deploy/ansible/site.yml and uninstall.yml; this
+# The work itself is done by deploy/ansible/site.yml and uninstall.yml. This
 # script only prepares their inputs. A script cannot vouch for itself: for a
 # bundle that came from another machine, check the signature by hand before
 # running it (docs/OPERATIONS.md, "Deploying a new build").

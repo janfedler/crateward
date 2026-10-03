@@ -94,7 +94,7 @@ pub fn allowances(config: &Config) -> Vec<Allowance> {
     ]
 }
 
-/// Resolves every host; a host that does not resolve is reported and left
+/// Resolves every host. A host that does not resolve is reported and left
 /// out, so one failing name does not empty the other sets.
 pub fn resolve(allowances: &[Allowance]) -> (Vec<(&'static str, BTreeSet<IpAddr>)>, Vec<String>) {
     let mut errors = Vec::new();
@@ -128,7 +128,7 @@ pub fn render(sets: &[(&'static str, BTreeSet<IpAddr>)]) -> String {
                 continue;
             }
             // `add` leaves the timeout of an existing element alone, so each
-            // element is destroyed (a no-op when absent) and added again
+            // element is destroyed (nothing happens when it is absent) and added again
             // (checked with nftables 1.1.3).
             let plain: Vec<String> = found.iter().map(ToString::to_string).collect();
             let timed: Vec<String> = found

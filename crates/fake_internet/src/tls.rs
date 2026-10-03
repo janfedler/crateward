@@ -4,11 +4,11 @@
 //! a guest asks for, the fake internet issues a leaf certificate on the fly,
 //! completes the handshake and reads what the guest sends in plain text.
 //! Tools that pin certificates or carry their own root list (for example
-//! `webpki-roots`) refuse the handshake; the server name is logged either
+//! `webpki-roots`) refuse the handshake. The server name is logged either
 //! way.
 //!
 //! The authority's parameters are fixed in this module, so the issuer can
-//! be rebuilt from its private key alone; no certificate parser is needed.
+//! be rebuilt from its private key alone. No certificate parser is needed.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -22,7 +22,7 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 
-/// Server names issued per run; later names get the fallback certificate.
+/// Server names issued per run. Later names get the fallback certificate.
 const MAX_NAMES: usize = 256;
 
 /// Name used when a client sends no server name, or an invalid one.

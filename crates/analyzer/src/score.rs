@@ -3,18 +3,18 @@
 //! The score is a sum of points from independent signals, capped per group
 //! so that one noisy source cannot dominate, and capped at 100 in total.
 //! The point values are a starting calibration, documented in the ADR and
-//! meant to be tuned on live traffic; they are ordered by how strongly
+//! meant to be tuned on live traffic. They are ordered by how strongly
 //! each signal indicates intent:
 //!
-//! * a honeytoken that left the VM is theft, and alone makes a verdict
-//!   critical;
-//! * a honeytoken copied inside the VM, a process that became root, an
-//!   attempt to tamper with tracing, or a guest that stopped itself are high;
-//! * reading credentials, writing to persistence locations, contacting the
+//! * A honeytoken that left the VM is theft, and alone makes a verdict
+//!   critical.
+//! * A honeytoken copied inside the VM, a process that became root, an
+//!   attempt to tamper with tracing, or a guest that stopped itself are high.
+//! * Reading credentials, writing to persistence locations, contacting the
 //!   network, or running shells and downloaders during a build are
 //!   suspicious on their own and common in legitimate `-sys` crates, so they
-//!   add up rather than decide;
-//! * static findings count by severity, more when the code runs at build
+//!   add up rather than decide.
+//! * Static findings count by severity, more when the code runs at build
 //!   time, and new findings against the previous version count again.
 //!
 //! Dynamic evidence names the package responsible when the process tree
@@ -88,7 +88,7 @@ impl Groups {
         // The same signal at the same place counts once, whichever run saw
         // it. Cargo puts a unit's outputs in a directory named with a hash
         // of its settings, which differs between `cargo check` and `cargo
-        // build`; the place is compared without it.
+        // build`. The place is compared without it.
         let place = evidence.location.as_deref().map(without_unit_hash);
         if self.items.iter().any(|(_, e)| {
             e.signal == evidence.signal

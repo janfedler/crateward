@@ -10,7 +10,7 @@
 repository = "https://github.com/amazonlinux/linux"
 branch = "amazon-6.18.y/mainline"
 commit = "b1cf23d11cb763c096c5f252e7fbebd1edd745c5"
-# `make kernelversion` of the pinned commit; the build fails on a mismatch.
+# `make kernelversion` of the pinned commit. The build fails on a mismatch.
 version = "6.18.51"
 
 [config]

@@ -1,7 +1,7 @@
 //! MITRE ATT&CK techniques that evidence is consistent with.
 //!
 //! A shared vocabulary for reviewers and for reports to crates.io, RustSec
-//! or OSV. The tags label evidence; they never add points. Most signals
+//! or OSV. The tags label evidence. They never add points. Most signals
 //! are harmless in most builds (a build script that runs a shell), so a
 //! tag reads "consistent with", and only a confirmed verdict claims
 //! [`SUPPLY_CHAIN`] for the crate itself.
@@ -115,7 +115,7 @@ fn program(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Persistence by the path written; the tactic when the path names none.
+/// Persistence by the path written. The tactic when the path names none.
 fn persistence(path: &str) -> Technique {
     if [".bashrc", ".profile", ".zshrc", ".bash_profile"]
         .iter()

@@ -1,6 +1,6 @@
 //! Breakers, pauses, alerts and canary results (ADR 0008).
 //!
-//! The supervisor decides; these functions only store and read. Claiming
+//! The supervisor decides. These functions only store and read. Claiming
 //! (see [`Store::claim`]) consults the breakers and pauses, so a paused
 //! stage stops taking work without any worker knowing why.
 
@@ -65,7 +65,7 @@ pub struct Pause {
     pub since: i64,
     /// The job that caused it, if one did.
     pub job: Option<JobId>,
-    /// Details for the dashboard and the command line; never sent out.
+    /// Details for the dashboard and the command line. Never sent out.
     pub detail: String,
 }
 
@@ -87,7 +87,7 @@ pub enum AlertOutcome {
     Sent,
     /// Not sent: the same alert went out recently.
     Suppressed,
-    /// Delivery failed; it is tried again.
+    /// Delivery failed. It is tried again.
     Failed(String),
 }
 
@@ -164,7 +164,7 @@ impl Store {
         Ok(row.try_get(0)?)
     }
 
-    /// Every stage's breaker; stages without a row are closed.
+    /// Every stage's breaker. Stages without a row are closed.
     ///
     /// # Errors
     ///

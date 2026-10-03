@@ -52,7 +52,7 @@ flowchart LR
 ```
 
 Each crate version is one job row in Postgres that moves through an explicit
-state machine; every service claims work with a lease, so a crashed service
+state machine. Every service claims work with a lease, so a crashed service
 loses nothing. The details, including the state diagram and the network
 design, are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -79,7 +79,7 @@ design, are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ### Requirements
 
 * Linux on `x86_64`. The toolchain is pinned in
-  [`rust-toolchain.toml`](rust-toolchain.toml); `rustup` installs it with the
+  [`rust-toolchain.toml`](rust-toolchain.toml). `rustup` installs it with the
   `x86_64-unknown-linux-musl` target.
 * PostgreSQL 17 for the database tests. Without it they are skipped.
 * For real microVMs only: `/dev/kvm`, subordinate user and group IDs, a
@@ -140,7 +140,7 @@ reporting, not in a public issue. Details are in
 ## Contributing
 
 Issues and pull requests are welcome. Before a pull request, run
-`cargo xtask ci`; it includes `rustfmt`, `clippy` with the workspace lints,
+`cargo xtask ci`. It includes `rustfmt`, `clippy` with the workspace lints,
 the tests, the documentation style check and the supply chain checks.
 Larger design changes start with an
 [architecture decision record](docs/adr/README.md).

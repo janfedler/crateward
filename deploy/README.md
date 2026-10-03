@@ -1,14 +1,14 @@
 # Deployment
 
 Everything a fresh Debian 13 server needs to run Crateward. The maintainer
-applies it as root; nothing here runs automatically.
+applies it as root. Nothing here runs automatically.
 
 | Path | What |
 |------|------|
 | `install.sh` | Installs, updates or removes Crateward from an unpacked release bundle. It verifies the bundle, writes the configuration on the first run, installs `ansible-core` and runs the playbooks below on the server itself |
 | `ansible/components.yml` | The service users, services and timers, shared by the playbooks |
 | `ansible/rollback.yml` | Switches the guest files back to the previous version and restarts the orchestrator ([ADR 0002](../docs/adr/0002-firecracker-rootless-jail.md)) |
-| `ansible/uninstall.yml` | Removes the software and keeps the state; with `purge=true` it removes the state too |
+| `ansible/uninstall.yml` | Removes the software and keeps the state. With `purge=true` it removes the state too |
 | `ansible/site.yml` | The whole host: kernel command line, swap and KSM, packages, users, directories, the sandbox tmpfs, PostgreSQL with data checksums, the release bundle, the configuration, SSH, the firewall, the units, the integrity manifest |
 | `ansible/vars.example.yml` | Every variable of the playbook |
 | `systemd/` | One hardened unit per component, the egress refresh and the daily database dump |
@@ -23,7 +23,7 @@ applies it as root; nothing here runs automatically.
    bundle directory, then `cargo xtask pack <bundle directory>` to pack the
    signature into the tarball.
 3. As root on the server, prepare `/root/crateward` (mode 0700):
-   * `allowed_signers` with one line, `crateward-release <release public key>`;
+   * `allowed_signers` with one line, `crateward-release <release public key>`.
    * `site-deploy-key`, the site repository's deploy key, if it exists yet.
 4. Unpack the tarball anywhere and run `./install.sh` from it. The first
    run asks for your website and email address (crates.io wants them in the
@@ -49,7 +49,7 @@ ssh-keygen -Y verify -f /root/crateward/allowed_signers -I crateward-release \
 
 Unpack the new bundle and run `./install.sh` from it. It keeps the
 configuration and the variables in `/root/crateward` and restarts the
-services whose binaries or configuration changed; `systemctl restart`
+services whose binaries or configuration changed. `systemctl restart`
 waits until the orchestrator has drained its jobs. The playbook records the
 integrity manifest after installing, so the supervisor does not quarantine
 the pipeline for the new binaries.
@@ -74,7 +74,7 @@ settings for the sandbox (kernel command line, swap, KSM) as they are.
 The guest kernel, root filesystem and authority are installed per version
 under `/usr/local/lib/crateward/guest/`, with `current` and `previous`
 links. After a deploy, the orchestrator runs the canaries before any job.
-If they fail, the pipeline pauses and the alert says so; then run
+If they fail, the pipeline pauses and the alert says so. Then run
 `./install.sh rollback` from the bundle. Running it again switches forward
 again.
 
@@ -82,7 +82,7 @@ again.
 
 * The decoys in `supervisor.decoys` must be excluded from backups and
   indexers.
-* The offsite backup target is not chosen yet; the daily dump lands in
+* The offsite backup target is not chosen yet. The daily dump lands in
   `/var/backups/crateward` only.
 * The firewall allowlist follows the configuration. A new external service
   needs its host in the configuration, or for the image builder in

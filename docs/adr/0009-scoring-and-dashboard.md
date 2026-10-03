@@ -20,11 +20,11 @@ the one person who can act on it.
 
    | Group | Cap | Signals and points |
    |-------|-----|--------------------|
-   | Theft | 100 | honeytoken left the VM 100; copied inside the VM 60 |
-   | Integrity | 100 | became root 80; tamper attempt 60; guest stopped 50; set ID file 40 |
+   | Theft | 100 | honeytoken left the VM 100, copied inside the VM 60 |
+   | Integrity | 100 | became root 80, tamper attempt 60, guest stopped 50, set ID file 40 |
    | Credentials | 60 | a non cargo process read credentials 50, another process's memory or environment 30 |
-   | Persistence | 60 | write to a persistence location 40, elsewhere outside the build 15; left on disk: persistence 40, executable 20, other 10 |
-   | Network | 40 | name looked up 10; connection without lookup 20; raw frame 30 |
+   | Persistence | 60 | write to a persistence location 40, elsewhere outside the build 15, left on disk (persistence 40, executable 20, other 10) |
+   | Network | 40 | name looked up 10, connection without lookup 20, raw frame 30 |
    | Static | 30 | per finding kind, its strongest instance: high at build time 30, high elsewhere or medium at build time 10, medium elsewhere 2, low at build time 1 |
    | Execution | 20 | a build script ran a network or privilege tool 15, an encoder 8, a downloader 5, a shell 3 |
    | Change | 20 | build script added 10, new high finding 10, proc macro added 5, each new dynamic behavior 5 |
@@ -33,7 +33,7 @@ the one person who can act on it.
    through the process tree (a build script's directory, or `rustc`
    compiling a crate whose proc macros run inside it).
 3. **Behavior profiles** (`exec:downloader`, `read:cargo-credentials`, ...)
-   per verdict; behavior the previous version did not have counts in the
+   per verdict. Behavior the previous version did not have counts in the
    change group.
 4. **Review inbox.** High and critical verdicts wait for a human, who marks
    them confirmed or a false positive. A high verdict from `cargo check`
@@ -41,14 +41,14 @@ the one person who can act on it.
 5. **Dashboard:** server rendered HTML (askama, escaping at compile time)
    with vendored htmx and server sent events, on loopback only, reached
    through an SSH tunnel. A `Host` check, same origin checks for writes, a
-   strict Content Security Policy and read only page queries; the only
+   strict Content Security Policy and read only page queries. The only
    write is a review decision.
 6. **Public site:** a static export of counts only. Findings reach it by
    hand, after disclosure.
 7. **MITRE ATT&CK tags.** A fixed table in `crates/core/src/attack.rs`
    maps each signal, and its path or program where that decides, to the
    techniques it is consistent with, checked against the named ATT&CK
-   release. The job page and the evidence pack show them; they add no
+   release. The job page and the evidence pack show them. They add no
    points, since the score already weighs the same signals. T1195.001 is
    claimed for the crate only after a human confirmed the verdict.
 
@@ -74,7 +74,7 @@ the one person who can act on it.
 
 ## Sources
 
-* askama `https://askama.rs/`; htmx `www/content/docs.md` ("Security",
+* askama `https://askama.rs/` and htmx `www/content/docs.md` ("Security",
   "Configuring htmx"), `https://github.com/bigskysoftware/htmx`
 * W3C Web Authentication Level 2, "Relying Party Identifier"
 * DISCLOSURE.md, steps 1 to 3

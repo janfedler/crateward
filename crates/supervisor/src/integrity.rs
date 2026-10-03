@@ -1,6 +1,6 @@
 //! Host escape detection (ADR 0008): the integrity manifest, decoy files
 //! watched with inotify, and processes running as a slot UID that the jail
-//! did not start. Each check returns findings; the supervisor quarantines
+//! did not start. Each check returns findings. The supervisor quarantines
 //! the pipeline and raises a sandbox escape alert on any.
 
 use std::collections::{HashMap, HashSet};
@@ -63,7 +63,7 @@ impl Integrity {
                 if !self.warned_no_manifest {
                     tracing::warn!(
                         path = %self.manifest.display(),
-                        "no integrity manifest; run `crateward integrity record`"
+                        "no integrity manifest: run `crateward integrity record`"
                     );
                     self.warned_no_manifest = true;
                 }

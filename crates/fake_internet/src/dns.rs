@@ -87,7 +87,7 @@ pub fn answer(query: &[u8], question: &Question, address: Ipv4Addr) -> Option<Ve
     let answers: u16 = u16::from(question.qtype == TYPE_A && question.qclass == 1);
     let mut out = Vec::with_capacity(asked.len() + 32);
     out.extend_from_slice(id);
-    // QR, AA and RD copied from the query; RA; NOERROR.
+    // QR, AA and RD copied from the query, RA set, NOERROR.
     let rd = query.get(2).map_or(0, |b| b & 0x01);
     out.extend_from_slice(&[0x84 | rd, 0x80]);
     out.extend_from_slice(&1_u16.to_be_bytes());

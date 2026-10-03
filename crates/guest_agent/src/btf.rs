@@ -170,7 +170,7 @@ fn read_type(data: &[u8], at: usize) -> Result<(Type, usize), BtfError> {
     Ok((ty, at + extra))
 }
 
-/// The bytes a record of this kind has after its 12 byte head; `count` is
+/// The bytes a record of this kind has after its 12 byte head. `count` is
 /// the member or value count of the info word.
 fn extra_len(kind: u32, count: usize) -> Result<usize, BtfError> {
     Ok(match kind {
@@ -363,7 +363,7 @@ mod tests {
         push(&[int, KIND_INT << 24, 4, 32]);
         // 2: long
         push(&[long, KIND_INT << 24, 8, 64]);
-        // 3: anonymous struct { int pad; long b; }
+        // 3: `struct { int pad; long b; }`, anonymous
         push(&[0, (KIND_STRUCT << 24) | 2, 16]);
         push(&[pad, 1, 0, b, 2, 64]);
         // 4: const of 3, to check that modifiers are followed
@@ -448,7 +448,7 @@ mod tests {
         for (kind, count, extra) in kinds {
             types.extend(record((kind << 24) | count, &vec![0; extra]));
         }
-        // struct after { int x; }, found only if every record before it
+        // `struct after { int x; }`, found only if every record before it
         // ended where the decoder thinks it does.
         types.extend([1, (KIND_STRUCT << 24) | 1, 8, 7, 1, 32]);
         let btf = Btf::parse(&blob(&words(&types), b"\0after\0x\0")).unwrap();
@@ -573,9 +573,9 @@ mod tests {
         let strings = b"\0int\0holder\0pad\0a\0b\0";
         let types = records(&[
             &[1, KIND_INT << 24, 4, 32],
-            // 2: union { int a; int b; }
+            // 2: `union { int a; int b; }`
             &[0, (KIND_UNION << 24) | 2, 4, 16, 1, 0, 18, 1, 0],
-            // 3: struct holder { int pad; <the union>; }
+            // 3: `struct holder { int pad; <the union>; }`
             &[5, (KIND_STRUCT << 24) | 2, 8, 12, 1, 0, 0, 2, 32],
         ]);
         let btf = Btf::parse(&blob(&types, strings)).unwrap();

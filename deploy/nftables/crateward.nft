@@ -1,7 +1,7 @@
 #!/usr/sbin/nft -f
 # Crateward host firewall: SSH is the only inbound service, and every
 # service user reaches only its allowlisted hosts (ARCHITECTURE.md,
-# "Egress"; THREAT_MODEL.md). The address sets are filled by
+# "Egress", and THREAT_MODEL.md). The address sets are filled by
 # `crateward egress | nft -f -`, run by crateward-egress.timer as root.
 #
 # The variables file defines SSH_PORT, SLOT_UIDS (a range) and one numeric
@@ -39,7 +39,7 @@ table inet crateward {
 
 	chain output {
 		type filter hook output priority filter; policy accept;
-		# A slot UID never uses the host's network; its VM lives in its own
+		# A slot UID never uses the host's network. Its VM lives in its own
 		# namespace. A packet from one here means an escaped process.
 		meta skuid $SLOT_UIDS log prefix "crateward slot egress: " level warn drop
 		meta skuid { $FEED_UID, $FETCHER_UID, $STATIC_UID, $ORCHESTRATOR_UID, $ANALYZER_UID, $API_UID, $SUPERVISOR_UID, $BUILDER_UID } jump service
@@ -47,7 +47,7 @@ table inet crateward {
 
 	chain service {
 		ct state established,related accept
-		# The untrusted zone has no network at all; Postgres is a socket.
+		# The untrusted zone has no network at all. Postgres is a socket.
 		meta skuid $ORCHESTRATOR_UID goto denied
 		# Loopback: the local resolver and the dashboard.
 		oif lo accept

@@ -219,7 +219,7 @@ fn check_host(sandbox: &SandboxConfig) -> Result<(), ComponentError> {
     let elf = std::fs::read(bin).map_err(|e| fatal(format!("{}: {e}", bin.display())))?;
     if !crateward_core::elf::is_static(&elf).map_err(fatal)? {
         return Err(fatal(format!(
-            "{} is dynamically linked; build it for x86_64-unknown-linux-musl",
+            "{} is dynamically linked: build it for x86_64-unknown-linux-musl",
             bin.display()
         )));
     }
@@ -399,7 +399,7 @@ async fn spawn_slots(
 }
 
 /// Runs the jobs of one slot until `stop`. The slot with `canaries` also
-/// runs them, first and then on their schedule, between jobs; the others
+/// runs them, first and then on their schedule, between jobs. The others
 /// wait for the first run.
 async fn slot_loop(
     mut worker: SandboxWorker,

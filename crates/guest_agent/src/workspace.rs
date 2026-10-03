@@ -277,7 +277,7 @@ fn mount_drive(
     flags: MountFlags,
 ) -> Result<(), WorkspaceError> {
     // A mount point on the writable disk is created, for example for the
-    // warm image; elsewhere it must exist in the image.
+    // warm image. Elsewhere it must exist in the image.
     if earlier
         .iter()
         .any(|e| e.fstype == "ext4" && !e.read_only && below(&m.target, &e.target))

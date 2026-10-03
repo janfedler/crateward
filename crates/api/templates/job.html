@@ -31,7 +31,7 @@
 <h2>Evidence</h2>
 {% if !techniques.is_empty() %}
 <div class="attack">
-<p class="muted">Consistent with these MITRE ATT&amp;CK {{ attack_version }} techniques. Many are common in harmless builds; they label the evidence and add no points.</p>
+<p class="muted">Consistent with these MITRE ATT&amp;CK {{ attack_version }} techniques. Many are common in harmless builds. They label the evidence and add no points.</p>
 <ul>{% for t in techniques %}<li><a class="tag" href="{{ t.url() }}" rel="noreferrer noopener" target="_blank">{{ t.id }}</a> {{ t.name }}</li>{% endfor %}</ul>
 </div>
 {% endif -%}

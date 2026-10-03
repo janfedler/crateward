@@ -17,7 +17,7 @@ so overhead matters.
    trait, so host side introspection can be added later.
 2. **eBPF programs, loaded with aya**, in their own package
    (`crateward_guest_ebpf`) with a pinned nightly and `bpf-linker`:
-   * tracepoints for fork, exec (path and argument vector) and exit;
+   * Tracepoints for fork, exec (path and argument vector) and exit.
    * LSM hooks `file_open`, `socket_connect` and `socket_sendmsg`, plus
      `bpf`, `ptrace_access_check` and `sb_mount` as tamper attempts. Every
      hook returns 0: tracing never changes a decision.
@@ -30,7 +30,7 @@ so overhead matters.
 5. **Loaded before the snapshot.** The orchestrator refuses to take a base
    snapshot without working tracing, so no dynamic run goes untraced.
 6. **Hostile bytes.** The agent decodes ring buffer records byte by byte,
-   never trusting a length beyond its record; the host treats the whole
+   never trusting a length beyond its record. The host treats the whole
    stream as hostile and keeps a bounded summary: processes with their
    roles, sensitive opens, writes outside the build, sockets, tamper
    attempts and honeytokens seen in arguments or paths.
@@ -38,7 +38,7 @@ so overhead matters.
 ## Alternatives
 
 * **Agentless introspection** from the hypervisor: Firecracker has no API
-  for guest memory or vCPU state; it would mean patching the VMM.
+  for guest memory or vCPU state. It would mean patching the VMM.
 * **ptrace:** follows only descendants, is visible to the tracee
   (`TracerPid`), races with threads that change arguments after the read,
   and stops the tracee on every event.

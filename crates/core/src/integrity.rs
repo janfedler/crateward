@@ -9,7 +9,7 @@
 //! verifies a manifest by hand.
 //!
 //! An attacker with the service user's rights could rewrite the manifest
-//! too; the check catches changes made without that care, and every change
+//! too. The check catches changes made without that care, and every change
 //! made by a deploy is recorded on purpose.
 
 use std::collections::BTreeMap;

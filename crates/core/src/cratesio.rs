@@ -7,7 +7,7 @@
 //! * The RSS feeds `updates.xml` and `crates.xml`, which list the last 60
 //!   minutes of publishes (crates.io data access policy).
 //!
-//! Everything here is pure; fetching lives in the feed and fetcher. Input is
+//! Everything here is pure. Fetching lives in the feed and fetcher. Input is
 //! bounded before parsing, and every name, version and checksum is
 //! validated into its typed form, so the rest of the pipeline never handles
 //! raw strings from the network.
@@ -21,7 +21,7 @@ use crate::digest::Sha256Digest;
 use crate::name::CrateName;
 
 /// Largest index file accepted. The biggest crates have a few thousand
-/// versions; this leaves a wide margin while bounding memory.
+/// versions. This leaves a wide margin while bounding memory.
 pub const MAX_INDEX_FILE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Largest RSS document accepted.
@@ -87,10 +87,10 @@ pub struct IndexDependency {
     /// Platform restriction such as `cfg(windows)`.
     #[serde(default)]
     pub target: Option<String>,
-    /// Dependency kind; `null` means normal.
+    /// Dependency kind. `null` means normal.
     #[serde(default)]
     pub kind: Option<DependencyKind>,
-    /// Registry of the dependency; `null` means crates.io itself.
+    /// Registry of the dependency. `null` means crates.io itself.
     #[serde(default)]
     pub registry: Option<String>,
     /// The real package name if the dependency is renamed.
@@ -313,7 +313,7 @@ pub fn find_version(
 
 /// The download URL of a version, from the `dl` value of the index's
 /// `config.json`. crates.io's value has no markers, so Cargo appends
-/// `/{crate}/{version}/download`; the name must keep its published casing.
+/// `/{crate}/{version}/download`. The name must keep its published casing.
 #[must_use]
 pub fn download_url(dl: &str, name: &CrateName, version: &semver::Version) -> String {
     let lower = name.as_str().to_ascii_lowercase();
@@ -356,7 +356,7 @@ pub fn download_url(dl: &str, name: &CrateName, version: &semver::Version) -> St
 pub struct FeedItem {
     /// The crate, as named in the feed.
     pub name: CrateName,
-    /// The version. `updates.xml` always has one; `crates.xml` (new
+    /// The version. `updates.xml` always has one. `crates.xml` (new
     /// crates) has none, as observed on 2026-09-24.
     pub version: Option<semver::Version>,
 }
@@ -410,7 +410,7 @@ pub fn parse_feed(xml: &str) -> Result<Feed, ParseError> {
             Event::Text(text) => {
                 if let Some(which) = field {
                     // Entity references arrive as separate events in
-                    // quick-xml 0.42, so the raw text is the text itself.
+                    // `quick-xml` 0.42, so the raw text is the text itself.
                     // Crate names and versions never contain any.
                     let value = text.into_inner().trim().to_owned();
                     match which {

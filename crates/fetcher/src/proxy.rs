@@ -4,7 +4,7 @@
 //! relay to this proxy's Unix socket. The proxy serves:
 //!
 //! * `/index/config.json`, pointing downloads nowhere: resolution never
-//!   downloads crates, and the fetcher fetches locked crates itself;
+//!   downloads crates, and the fetcher fetches locked crates itself.
 //! * `/index/<path>`, the crates.io sparse index file, passed through
 //!   unchanged except that the version under analysis is marked as not
 //!   yanked, so that cargo resolves versions that were yanked after

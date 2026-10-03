@@ -6,7 +6,7 @@
 //! only configuration Crateward wrote: the crate's own `.cargo/config.toml`
 //! is never consulted, because the crate is a registry dependency, not the
 //! workspace. The lockfile lists every package for every target, with
-//! checksums; the fetcher then fetches those crates itself.
+//! checksums. The fetcher then fetches those crates itself.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -24,7 +24,7 @@ use crate::sandboxed::{RESOLVE, ResolveOutcome};
 const CHILD: &str = "resolution child";
 
 /// Why resolution could not be attempted. A crate whose dependencies do
-/// not resolve is not an error; see [`Resolution::Failed`].
+/// not resolve is not an error. See [`Resolution::Failed`].
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
     /// Preparing the work directory or reading the lockfile failed.
@@ -49,7 +49,7 @@ fn io(context: &'static str) -> impl FnOnce(std::io::Error) -> ResolveError {
 pub enum Resolution {
     /// The lockfile text.
     Locked(String),
-    /// Cargo could not resolve the dependencies; the message says why.
+    /// Cargo could not resolve the dependencies. The message says why.
     Failed(String),
 }
 
@@ -98,7 +98,7 @@ pub enum LockfileError {
 }
 
 /// The registry packages of a lockfile. Packages without a source (the
-/// probe itself) are skipped; a package from anywhere but the crates.io
+/// probe itself) are skipped. A package from anywhere but the crates.io
 /// registry is returned as an error, since crates.io does not allow them.
 ///
 /// # Errors
@@ -124,7 +124,7 @@ pub fn locked_packages(lockfile: &str) -> Result<Vec<LockedPackage>, LockfileErr
 }
 
 /// Resolves one version in a sandboxed child. `work` must be empty or
-/// missing; it is removed afterwards.
+/// missing. It is removed afterwards.
 ///
 /// # Errors
 ///

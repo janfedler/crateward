@@ -29,7 +29,7 @@ pub fn message(escalation: &HumanEscalation) -> (String, String, u8) {
         ),
         HumanEscalation::CanaryFailure => (
             "Canary failed".to_owned(),
-            "Verdicts cannot be trusted; producing stages are paused.".to_owned(),
+            "Verdicts cannot be trusted. Producing stages are paused.".to_owned(),
         ),
         HumanEscalation::HighRiskVerdict { .. } => (
             "High risk verdict".to_owned(),
@@ -37,7 +37,7 @@ pub fn message(escalation: &HumanEscalation) -> (String, String, u8) {
         ),
         HumanEscalation::SandboxEscapeIndicator { .. } => (
             "Sandbox escape indicator".to_owned(),
-            "Quarantine is on. Do not reboot; see the runbook.".to_owned(),
+            "Quarantine is on. Do not reboot, and see the runbook.".to_owned(),
         ),
     };
     let priority = match escalation.category() {

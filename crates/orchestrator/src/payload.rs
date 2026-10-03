@@ -48,7 +48,7 @@ const MKFS_EROFS: &str = "/usr/bin/mkfs.erofs";
 const LIMITS: Limits = Limits {
     address_space: 4 << 30,
     cpu_seconds: 600,
-    // No file size limit: erofs-utils 1.8.6 writes past 1 TiB (sparse) while
+    // No file size limit: `erofs-utils` 1.8.6 writes past 1 TiB (sparse) while
     // it builds even a one file image, measured on 2026-09-25. The image is
     // bounded by the tar this process's parent writes, and by the tmpfs it
     // lands on.
@@ -274,7 +274,7 @@ impl<W: Write> TarWriter<W> {
             let entry = entry.map_err(io(format!("reading {dir}")))?;
             self.entry(entry, &dir, stub)?;
         }
-        // Directory sources need a checksum file; `package` must match the
+        // Directory sources need a checksum file. `package` must match the
         // lockfile. File hashes are left out: the payload is read only.
         let checksum = format!("{{\"files\":{{}},\"package\":\"{}\"}}", package.checksum);
         let path = format!("vendor/{dir}/.cargo-checksum.json");
@@ -298,7 +298,7 @@ impl<W: Write> TarWriter<W> {
         let Some(rest) = path.strip_prefix(dir).and_then(|r| r.strip_prefix('/')) else {
             return Err(PayloadError::Mismatch(dir.to_owned()));
         };
-        // Cargo trusts this file for vendored sources; only ours counts.
+        // Cargo trusts this file for vendored sources. Only ours counts.
         if rest == ".cargo-checksum.json" || (stub && rest != "Cargo.toml") {
             return Ok(());
         }

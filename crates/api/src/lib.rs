@@ -1,8 +1,8 @@
 //! Dashboard.
 //!
 //! Zone: control plane. The admin view listens on loopback and is reached
-//! through an SSH tunnel (ADR 0009);
-//! the public view is a static export (`crate::export`), never served here.
+//! through an SSH tunnel (ADR 0009).
+//! The public view is a static export (`crate::export`), never served here.
 //!
 //! Why it looks the way it does:
 //!
@@ -12,7 +12,7 @@
 //!   and pinned by SHA-256.
 //! * Templates escape by default at compile time (askama), and crate
 //!   supplied text is never rendered as HTML.
-//! * Page queries run on a read only session; one second connection makes
+//! * Page queries run on a read only session. One second connection makes
 //!   the only write, the review decision.
 //! * Every request passes the protections in [`security`]: a Host check
 //!   against DNS rebinding, same origin checks for writes, strict headers.
@@ -144,7 +144,7 @@ pub struct AppState {
     pub stop: Stop,
 }
 
-/// Errors shown as a plain 500; details go to the log only.
+/// Errors shown as a plain 500. Details go to the log only.
 #[derive(Debug)]
 pub struct AppError(String);
 

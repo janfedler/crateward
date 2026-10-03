@@ -16,7 +16,7 @@ pub enum Severity {
     Info,
     /// Common in legitimate code, worth noting.
     Low,
-    /// Unusual; relevant in combination.
+    /// Unusual. Relevant in combination.
     Medium,
     /// Rarely legitimate.
     High,

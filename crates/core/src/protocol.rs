@@ -12,7 +12,7 @@
 //!   buffered, so a hostile length prefix cannot make the host allocate.
 //! * A [`Decoder`] enforces a budget of frames and bytes per connection, so a
 //!   flood of small valid frames ends the connection instead of the host.
-//! * A payload must be consumed exactly; trailing bytes are an error.
+//! * A payload must be consumed exactly. Trailing bytes are an error.
 //! * Both sides start with a `Hello` carrying [`PROTOCOL_VERSION`]. A
 //!   mismatch ends the connection.
 //!
@@ -79,7 +79,7 @@ pub struct JobSpec {
 }
 
 /// What a job's workspace consists of. All paths are absolute guest paths
-/// without `..`; the agent refuses anything else.
+/// without `..`. The agent refuses anything else.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workspace {
     /// Block devices to mount, in order.
@@ -95,14 +95,14 @@ pub struct Workspace {
 pub struct MountSpec {
     /// Device, `/dev/vd` followed by one letter from `b` on, or `overlay`.
     pub device: String,
-    /// Mount point. Must exist for block devices; created for overlays.
+    /// Mount point. Must exist for block devices. Created for overlays.
     pub target: String,
     /// `erofs`, `ext4` or `overlay`.
     pub fstype: String,
     /// Mount read only.
     pub read_only: bool,
-    /// Programs may run from an `erofs` mount. Crate sources never do;
-    /// the warm build cache does (ADR 0006).
+    /// Programs may run from an `erofs` mount. Crate sources never do.
+    /// The warm build cache does (ADR 0006).
     pub executable: bool,
     /// For `overlay` only: `lowerdir=…,upperdir=…,workdir=…`.
     pub options: Option<String>,
@@ -308,7 +308,7 @@ pub enum TraceKind {
 pub enum SocketAddress {
     /// IPv4 or IPv6.
     Ip(std::net::SocketAddr),
-    /// A Unix socket path; abstract names start with a NUL byte.
+    /// A Unix socket path. Abstract names start with a NUL byte.
     Unix(Vec<u8>),
     /// Another address family.
     Other(u16),

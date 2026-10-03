@@ -133,7 +133,7 @@ pub struct Child {
 
 impl Child {
     /// Starts `command`, called `name` in error messages. Stdin and stdout
-    /// are the caller's choice; stderr is captured.
+    /// are the caller's choice. Standard error is captured.
     ///
     /// The command is consumed: its own copies of the child's pipe ends
     /// close at once. Kept open, they would stop the process at the other

@@ -51,7 +51,7 @@ const WARM: &str = "warm.img";
 pub const TAP: &str = "tap0";
 
 /// Guest side addresses. Every slot uses the same ones in its own network
-/// namespace; the fake internet answers at [`HOST_ADDRESS`].
+/// namespace. The fake internet answers at [`HOST_ADDRESS`].
 pub const GUEST_ADDRESS: &str = "10.0.2.2";
 /// Host side address of the tap device, the guest's gateway and resolver.
 pub const HOST_ADDRESS: &str = "10.0.2.1";
@@ -59,7 +59,7 @@ pub const HOST_ADDRESS: &str = "10.0.2.1";
 pub const PREFIX_LEN: u8 = 30;
 const GUEST_MAC: &str = "06:00:0a:00:02:02";
 
-/// Limits of the job drives. Both live in host memory; the limits keep one
+/// Limits of the job drives. Both live in host memory. The limits keep one
 /// guest from monopolizing memory bandwidth and the host's I/O threads.
 /// Compiling reads and writes far less than this.
 const DRIVE_LIMIT: RateLimiter = RateLimiter {
@@ -472,7 +472,7 @@ impl Vm {
         Ok(())
     }
 
-    /// Attaches the job drives; a restore points them at the job's files.
+    /// Attaches the job drives. A restore points them at the job's files.
     async fn put_job_drives(&self, launch: &Launch, drives: &JobDrives) -> Result<(), VmError> {
         for (id, host, name, read_only) in [
             ("payload", &drives.payload, PAYLOAD, true),
@@ -679,7 +679,7 @@ impl Vm {
         Ok(())
     }
 
-    /// Removes the VM directory; call after [`Vm::kill`].
+    /// Removes the VM directory. Call after [`Vm::kill`].
     ///
     /// # Errors
     ///

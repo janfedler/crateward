@@ -96,7 +96,7 @@ impl Component {
     }
 
     /// Whether this component may ever execute code from a crate under
-    /// analysis. Only the guest does; the host side only observes.
+    /// analysis. Only the guest does. The host side only observes.
     #[must_use]
     pub const fn executes_crate_code(self) -> bool {
         matches!(self.zone(), Zone::Guest)

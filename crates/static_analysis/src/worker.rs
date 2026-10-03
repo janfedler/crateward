@@ -24,7 +24,7 @@ use crate::findings::Severity;
 use crate::sandboxed::{MAX_TAR_BYTES, Outcome, analyze_in_sandbox};
 use crate::triage::{Decision, Dependency, decide};
 
-/// Tar bytes handed to one child at most; more start another child.
+/// Tar bytes handed to one child at most. More start another child.
 const BATCH_BYTES: usize = 512 * 1024 * 1024;
 
 /// Reports by the SHA-256 of their crate file.
@@ -93,7 +93,7 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    /// An analyzer. `exe` is the binary that runs the sandboxed child;
+    /// An analyzer. `exe` is the binary that runs the sandboxed child.
     /// `popular` holds the reverse dependency and download thresholds.
     #[must_use]
     pub fn new(

@@ -213,7 +213,7 @@ fn ci() -> Result<(), TaskError> {
     docs_lint()?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;
-    // The eBPF package has its own lockfile; the root deny.toml applies.
+    // The eBPF package has its own lockfile. The root deny.toml applies.
     run(
         "cargo",
         &[
@@ -241,7 +241,7 @@ fn docs_lint() -> Result<(), TaskError> {
         eprintln!("{violation}");
     }
     Err(TaskError::Check(format!(
-        "{} writing style violation(s); see the writing style section of docs/TESTING.md",
+        "{} writing style violation(s), see the writing style section of docs/TESTING.md",
         violations.len()
     )))
 }
@@ -334,7 +334,7 @@ fn canary() -> Result<(), TaskError> {
             "crateward_fake_internet",
         ],
         // ring compiles a little C and assembly. Without `musl-tools` there
-        // is no musl C compiler; the host gcc works for ring's freestanding
+        // is no musl C compiler. The host gcc works for ring's freestanding
         // code. Installing `musl-tools` is the proper fix.
         &[("CC_x86_64_unknown_linux_musl", musl_cc())],
     )?;

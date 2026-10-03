@@ -1,5 +1,5 @@
 //! Checks of `deploy/`: the playbooks parse, the units verify, and the
-//! firewall loads (`cargo xtask deploy-check`, run in CI); and unit tests
+//! firewall loads (`cargo xtask deploy-check`, run in CI). Unit tests
 //! that keep the playbook consistent with the rest of the repository.
 
 use std::path::Path;
@@ -73,7 +73,7 @@ fn check_playbooks(ansible: &Path) -> Result<(), TaskError> {
     Ok(())
 }
 
-/// shellcheck is on the CI runners; a development machine may lack it.
+/// shellcheck is on the CI runners. A development machine may lack it.
 fn check_install_script(script: &Path) -> Result<(), TaskError> {
     match Command::new("shellcheck").arg(script).output() {
         Ok(out) if out.status.success() => eprintln!("xtask: install.sh passes shellcheck"),
@@ -86,7 +86,7 @@ fn check_install_script(script: &Path) -> Result<(), TaskError> {
         Err(_) if std::env::var_os("CI").is_some() => {
             return Err(TaskError::Command("shellcheck is missing".into()));
         }
-        Err(_) => eprintln!("xtask: no shellcheck here; CI runs it on install.sh"),
+        Err(_) => eprintln!("xtask: no shellcheck here, CI runs it on install.sh"),
     }
     Ok(())
 }
@@ -122,7 +122,7 @@ fn verify_unit(units: &Path, name: &str) -> Result<(), TaskError> {
     )))
 }
 
-/// The binaries exist only on the server; every other complaint counts.
+/// The binaries exist only on the server. Every other complaint counts.
 fn unit_problems(stderr: &str) -> Vec<&str> {
     stderr
         .lines()
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(named, path);
     }
 
-    /// The dry run swaps the variables file for a sample; that only works
+    /// The dry run swaps the variables file for a sample. That only works
     /// while the rules include the path it replaces.
     #[test]
     fn the_firewall_includes_the_variables_file() {

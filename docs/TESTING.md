@@ -124,14 +124,14 @@ programs (format, clippy and build with the pinned nightly and
 
 ## Writing style
 
-Documentation, rustdoc comments and configuration comments are English, in
-short and precise sentences, with no em dashes and no hyphenated compounds.
-`cargo xtask docs-lint` enforces the last two rules:
+Documentation, code comments and configuration comments are English, in
+short and precise sentences, with no em dashes, no hyphenated compounds and
+no semicolons. `cargo xtask docs-lint` enforces the last three rules in the
+Markdown files, the Rust comments and `config/*.toml`:
 
 * Write "read only", "content addressed", "build time" instead of joining
   words with hyphens.
-* Put names that contain hyphens (crates, tools, flags, targets) in inline
-  code, for example `cargo-deny`.
+* Put names that contain hyphens (crates, tools, flags, targets) and code
+  in inline code, for example `cargo-deny`.
+* End a sentence with a full stop where a semicolon would join two.
 * Text inside double quotes is a quotation of a source and is not checked.
-
-Sentences end with a full stop, not a semicolon.

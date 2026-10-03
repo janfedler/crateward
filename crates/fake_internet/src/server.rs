@@ -21,7 +21,7 @@ use crate::sniff::{Sniffed, content_length, http_header_end, sniff};
 
 /// Bytes of a connection or datagram kept in the log.
 pub const MAX_CAPTURE: usize = 64 * 1024;
-/// Events logged per run; later ones are counted, not logged.
+/// Events logged per run. Later ones are counted, not logged.
 pub const MAX_EVENTS: u32 = 5_000;
 /// Concurrent TCP connections.
 const MAX_CONNECTIONS: usize = 32;
@@ -135,7 +135,7 @@ pub fn hex(data: &[u8]) -> String {
     out
 }
 
-/// Decodes [`hex`] output; invalid input gives `None`.
+/// Decodes [`hex`] output. Invalid input gives `None`.
 #[must_use]
 pub fn unhex(text: &str) -> Option<Vec<u8>> {
     let (pairs, rest) = text.as_bytes().as_chunks::<2>();

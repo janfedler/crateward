@@ -19,13 +19,13 @@ affected by L1TF and MDS, and its memory has no ECC.
    console, nothing hot pluggable.
 2. **A rootless jail** (`crateward-vmjail`) does the jailer's job without
    root, one jail per VM:
-   * the slot's own subordinate UID through `newuidmap`; switching every
-     UID away from 0 clears the capabilities, and `no_new_privs` is set;
-   * a new mount namespace with bind mounts of exactly the kernel, the
-     images and the device nodes, then `pivot_root`, no `/proc`;
-   * the slot's cgroup in the orchestrator's delegated subtree;
-   * a network namespace owned by the jail, with the tap device inside;
-   * resource limits and an empty environment; Firecracker's own seccomp
+   * The slot's own subordinate UID through `newuidmap`. Switching every
+     UID away from 0 clears the capabilities, and `no_new_privs` is set.
+   * A new mount namespace with bind mounts of exactly the kernel, the
+     images and the device nodes, then `pivot_root`, no `/proc`.
+   * The slot's cgroup in the orchestrator's delegated subtree.
+   * A network namespace owned by the jail, with the tap device inside.
+   * Resource limits and an empty environment. Firecracker's own seccomp
      filter stays.
    Tests check from the host on every run: the slot's UID, `CapEff` and
    `CapPrm` zero, `NoNewPrivs` 1, `Seccomp` 2, and no tap device in the
@@ -42,14 +42,14 @@ affected by L1TF and MDS, and its memory has no ECC.
 5. **Guest versions.** Each release installs its kernel, root filesystem
    and TLS authority under `/usr/local/lib/crateward/guest/<digest>/`, with
    `current` and `previous` links. The orchestrator resolves them once at
-   start and runs the canaries before any job; `./install.sh rollback`
+   start and runs the canaries before any job. `./install.sh rollback`
    swaps the links. The image is refreshed weekly by routine
    (`cargo xtask bump-debian-snapshot`, rebuild, canary, release).
 
 ## Alternatives
 
 * **Cloud Hypervisor:** a larger device model (hotplug, VFIO, vhost user)
-  that Crateward does not need; every device is attack surface.
+  that Crateward does not need. Every device is attack surface.
 * **cratera:** guests have no network device, and its coordinator runs as
   root.
 * **Containers or gVisor:** a shared host kernel is exactly what a hostile
@@ -66,17 +66,17 @@ affected by L1TF and MDS, and its memory has no ECC.
 ## Consequences
 
 * No process runs as root for the sandbox. Namespaces and tap devices die
-  with the Firecracker process; only the slot directory and cgroup need
+  with the Firecracker process. Only the slot directory and cgroup need
   cleanup.
 * Unprivileged user namespaces must stay enabled, so every other service
   runs with `RestrictNamespaces=yes`. `crateward_core::sandbox` holds the
   project's only `unsafe` code.
 * Leaving the documented jailer path makes the checks above the contract.
   Revisit it if Firecracker gains a rootless mode.
-* SMT off halves throughput; most versions end up static only, with the
+* SMT off halves throughput. Most versions end up static only, with the
   reason on their label. A power loss empties the tmpfs, which is rebuilt
   from the verified copies.
-* Measured: boot to a ready agent in about 430 ms; restore into a new jail
+* Measured: boot to a ready agent in about 430 ms. Restore into a new jail
   in 60 to 68 ms at the median.
 
 ## Sources
@@ -84,7 +84,7 @@ affected by L1TF and MDS, and its memory has no ECC.
 * Firecracker v1.17.0: `docs/design.md`, `docs/jailer.md`,
   `docs/prod-host-setup.md`, `docs/kernel-policy.md`,
   `docs/snapshotting/snapshot-support.md`
-* Cloud Hypervisor `README.md`; cratera `README.md`
+* Cloud Hypervisor `README.md` and cratera `README.md`
 * `user_namespaces(7)`, `newuidmap(1)`, `capabilities(7)`, `pivot_root(2)`
 * Linux `Documentation/admin-guide/hw-vuln/l1tf.rst` and `mds.rst`
 * Tags and branches of `https://github.com/amazonlinux/linux`

@@ -109,7 +109,7 @@ async fn write_map(tool: &'static str, pid: u32, setup: u32, vm: u32) -> Result<
 }
 
 /// Starts a jailed Firecracker. When this returns, the process has executed
-/// Firecracker inside the jail; its API socket appears in the jail root.
+/// Firecracker inside the jail. Its API socket appears in the jail root.
 ///
 /// # Errors
 ///

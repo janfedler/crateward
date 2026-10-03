@@ -7,7 +7,7 @@ in order, or start with the four that shape the security of the system:
 and escape detection).
 
 Records describe the decision as it stands. When it changes, the record is
-updated and says so in its date line; git keeps the earlier text. Small
+updated and says so in its date line. Git keeps the earlier text. Small
 changes go in the commit message, not in a record. New records use
 [the template](0000-template.md).
 

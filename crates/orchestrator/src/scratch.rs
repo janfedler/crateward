@@ -1,6 +1,6 @@
 //! What a job left on its scratch disk.
 //!
-//! The scratch disk is the only writable disk a job has; everything else in
+//! The scratch disk is the only writable disk a job has. Everything else in
 //! the guest is a read only image or memory that ends with the VM. After
 //! the run, the host reads the ext4 image. It was formatted empty, and the
 //! agent created only the target directory and the honeytoken files, so
@@ -39,7 +39,7 @@ pub const EXPORT: &str = "sandbox-scratch-export";
 const MAX_EXPORT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES: u64 = 1_000_000;
 
-/// Where the guest mounts the scratch disk; paths are reported below it.
+/// Where the guest mounts the scratch disk. Paths are reported below it.
 const MOUNT_POINT: &str = "/work";
 
 const MAX_ENTRIES: u64 = 200_000;
@@ -85,8 +85,8 @@ const CARGO_STATE_PATHS: [&str; 2] = [
 pub struct ScanSpec {
     /// Honeytoken values to look for in file contents.
     pub tokens: Vec<String>,
-    /// Files the agent planted, as the guest sees them (under `/work`);
-    /// they hold the tokens by design and are not searched.
+    /// Files the agent planted, as the guest sees them (under `/work`).
+    /// They hold the tokens by design and are not searched.
     pub planted: Vec<String>,
     /// Directories the agent created, as the guest sees them.
     pub created: Vec<String>,
@@ -361,7 +361,7 @@ impl Scanner<'_> {
     }
 }
 
-/// Scans a loaded filesystem. Errors end the walk and are reported; what
+/// Scans a loaded filesystem. Errors end the walk and are reported. What
 /// was found until then is kept.
 #[must_use]
 pub fn scan(fs: &Ext4, spec: &ScanSpec) -> ScratchReport {

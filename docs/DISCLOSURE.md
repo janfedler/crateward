@@ -27,13 +27,13 @@ asks not to be the first recipient.
    that write outside `OUT_DIR`.
 3. **Confirmation.** A high or critical verdict from `cargo check` has
    already been confirmed automatically by a full build in a fresh VM
-   (ADR 0009), unless the finding came from a sandbox escape indicator;
-   such crates are never executed again without a deliberate decision.
+   (ADR 0009), unless the finding came from a sandbox escape indicator.
+   Such crates are never executed again without a deliberate decision.
    After the review, mark the verdict confirmed on the dashboard, then
    write the evidence pack: `crateward evidence <job> --out <dir>`. It
    holds the job and its events, the verdict with its evidence, the static
    report, every VM run (trace, network log, scratch disk scan), the
-   resolution, the original `.crate` file, and `SHA256SUMS`; honeytokens
+   resolution, the original `.crate` file, and `SHA256SUMS`. Honeytokens
    are redacted. `verdict.json` also names the MITRE ATT&CK techniques
    the evidence is consistent with, and T1195.001 for the crate once the
    verdict is confirmed.
@@ -41,7 +41,7 @@ asks not to be the first recipient.
    * Malicious: email `help@crates.io` with the crate name, affected
      versions, the behavior observed with its ATT&CK technique IDs, and
      the evidence pack.
-   * Vulnerability: contact the owners through their security policy; after
+   * Vulnerability: contact the owners through their security policy. After
      they confirm, file a RustSec advisory by pull request to
      `RustSec/advisory-db`.
 
@@ -54,15 +54,15 @@ asks not to be the first recipient.
    report is sent: they have acted, which is what a report asks for.
    Record that instead with
    `crateward disclosure removed <job> --note "removed on YYYY-MM-DD"`.
-   The finding is then resolved and may be published; its record, the job
+   The finding is then resolved and may be published. Its record, the job
    page and the public list say it was not reported because crates.io
    removed it first. This applies to malicious crates only: a
    vulnerability is always reported to the owners.
 5. **Wait.** Default embargo proposals, to be confirmed by the maintainer
    before M8:
-   * malicious crates: publish after crates.io has acted, or 14 days after an
-     acknowledged report;
-   * vulnerabilities: follow the owners' timeline, at most 90 days.
+   * Malicious crates: publish after crates.io has acted, or 14 days after an
+     acknowledged report.
+   * Vulnerabilities: follow the owners' timeline, at most 90 days.
 
    When the recipient acted, or the embargo passed, record it:
    `crateward disclosure resolved <job>`.

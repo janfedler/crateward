@@ -143,7 +143,7 @@ pub struct RateLimiter {
 /// `PUT /serial`
 #[derive(Debug, Clone, Serialize)]
 pub struct Serial {
-    /// Limits console output bytes; excess output is dropped.
+    /// Limits console output bytes. Excess output is dropped.
     pub rate_limiter: TokenBucket,
 }
 
@@ -164,7 +164,7 @@ pub struct VmState {
 /// `PUT /snapshot/create`
 #[derive(Debug, Clone, Serialize)]
 pub struct SnapshotCreate {
-    /// Always `Full`; diff snapshots are a developer preview.
+    /// Always `Full`. Diff snapshots are a developer preview.
     pub snapshot_type: &'static str,
     /// Device and vCPU state file.
     pub snapshot_path: PathBuf,

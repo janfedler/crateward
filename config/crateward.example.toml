@@ -1,7 +1,7 @@
 # Crateward configuration.
 #
 # Every service reads this file. Unknown keys are rejected and every value is
-# validated at startup; `crateward config check` runs the same validation.
+# validated at startup. `crateward config check` runs the same validation.
 #
 # Secrets (database.url, ntfy.topic) belong in the deployed copy only,
 # which Ansible installs readable by the service users.
@@ -34,7 +34,7 @@ rss_updates_url = "https://static.crates.io/rss/updates.xml"
 rss_new_crates_url = "https://static.crates.io/rss/crates.xml"
 db_dump_url = "https://static.crates.io/db-dump.tar.gz"
 # Request rates towards the CDN and the sparse index. crates.io publishes no
-# limit for either; these are our own courtesy.
+# limit for either. These are our own courtesy.
 static_requests_per_second = 5.0
 index_requests_per_second = 20.0
 # The feeds cover the last 60 minutes, so polling every 2 minutes never
@@ -43,7 +43,7 @@ rss_poll_interval_secs = 120
 # The dump is refreshed every 24 hours.
 db_dump_refresh_hours = 24
 
-# Per stage worker settings. A lease is renewed by heartbeats; a worker that
+# Per stage worker settings. A lease is renewed by heartbeats. A worker that
 # stops heartbeating loses its claim, and the job consumes one attempt.
 # Backoff uses full jitter between 0 and a ceiling that doubles per attempt
 # from backoff_base_secs up to backoff_cap_secs.
@@ -87,7 +87,7 @@ backoff_cap_secs = 600
 # A job waiting longer than this for a VM slot is scored as static only and
 # labeled with that reason.
 dynamic_deadline_hours = 12
-# Reverse dependencies from which a crate counts as popular; updates to
+# Reverse dependencies from which a crate counts as popular. Updates to
 # popular crates get dynamic analysis first.
 popular_min_reverse_dependencies = 100
 # All time downloads from which a crate counts as popular. A dependency with
@@ -111,7 +111,7 @@ fake_internet_bin = "/usr/local/lib/crateward/crateward_fake_internet"
 # also makes the guest image trust the certificate. Mode 0600.
 fake_internet_authority = "/usr/local/lib/crateward/guest/current/authority.pem"
 # Guest images, from `cargo xtask guest-kernel` and `cargo xtask rootfs`.
-# `current` is a link that a deploy or a rollback moves (ADR 0002); the
+# `current` is a link that a deploy or a rollback moves (ADR 0002). The
 # orchestrator resolves it once at startup.
 kernel_image = "/usr/local/lib/crateward/guest/current/kernel.bzImage"
 rootfs_image = "/usr/local/lib/crateward/guest/current/rootfs.erofs"

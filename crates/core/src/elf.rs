@@ -2,7 +2,7 @@
 //!
 //! A binary that names a program interpreter (`PT_INTERP`) needs a dynamic
 //! loader. The guest agent must not have one, because a crate under
-//! analysis could replace the guest's loader; binaries started inside a
+//! analysis could replace the guest's loader. Binaries started inside a
 //! jail must not either, because a jail has no loader at all. Reading two
 //! header fields is simpler and more precise than parsing `file` output.
 
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn the_running_test_binary_is_classified_without_error() {
-        // The test binary itself is a valid ELF file on Linux; whether it is
+        // The test binary itself is a valid ELF file on Linux. Whether it is
         // static depends on the host target, so only the parse is checked.
         let me = std::env::current_exe().unwrap();
         let bytes = std::fs::read(me).unwrap();

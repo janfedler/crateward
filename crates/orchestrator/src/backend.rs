@@ -2,7 +2,7 @@
 //!
 //! [`VmBackend`] is what the sandbox stage talks to: run one job in one slot,
 //! and reconcile leftovers at startup. [`FirecrackerBackend`] implements it
-//! with jailed Firecracker VMs restored from a snapshot; [`FakeBackend`]
+//! with jailed Firecracker VMs restored from a snapshot. [`FakeBackend`]
 //! returns scripted results, so CI can test everything above this layer
 //! without KVM (ADR 0002 names the trait as the seam for another VMM).
 //!
@@ -40,7 +40,7 @@ const AGENT_READY_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum JobEnd {
     /// The agent reported the job's end (including guest side timeouts).
     Finished(RunOutcome),
-    /// The host's wall clock expired; the slot was killed.
+    /// The host's wall clock expired. The slot was killed.
     HostTimeout,
     /// The VM hit its cgroup memory or process limit and was killed, or
     /// Firecracker hit its file size or CPU time limit.
@@ -106,7 +106,7 @@ impl std::fmt::Display for JobEnd {
 /// The result of a run once its slot is stopped and cleaned up.
 ///
 /// A touched decoy outranks everything, then an escape indicator the run
-/// itself produced; cleanup errors never hide either, since whatever got out
+/// itself produced. Cleanup errors never hide either, since whatever got out
 /// may also have broken the cleanup. A jail root that disappeared is a host
 /// fault (another process removed it), never a finding. Otherwise the run's
 /// own error comes first, then the first cleanup error.
@@ -193,7 +193,7 @@ pub struct Reconciled {
 }
 
 /// Why the backend could not run a job at all. These are infrastructure
-/// failures; the job itself is not at fault.
+/// failures. The job itself is not at fault.
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     /// The VM could not be started or reached.
@@ -424,15 +424,15 @@ async fn broken_agent(
         return Ok(JobEnd::ResourceLimit);
     }
     let status = vm.wait_exit(EXIT_GRACE).await.ok().flatten();
-    // The console's last lines usually say why; the guest wrote them, so
+    // The console's last lines usually say why. The guest wrote them, so
     // they are escaped.
     let tail = console_tail(&launch.dir.join("firecracker.log"));
     Ok(classify_exit(status, &format!("{error}; console: {tail}")))
 }
 
 /// Stops every process of the slot (Firecracker and the fake internet)
-/// before looking at the decoy, so no read can follow the check unseen;
-/// then removes the evidence. Returns the decoy's state and the errors.
+/// before looking at the decoy, so no read can follow the check unseen.
+/// Then removes the evidence. Returns the decoy's state and the errors.
 async fn stop_slot(
     cgroup: &SlotCgroup,
     mut vm: Vm,

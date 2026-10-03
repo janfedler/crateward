@@ -18,9 +18,9 @@
 //!   analyzer crash never forces an expensive and non deterministic VM rerun.
 //! * Leases, heartbeats, priorities and backoff timestamps are columns next to
 //!   the state, not states. A transient failure keeps the stage and consumes
-//!   one attempt; attempts reset only when a stage completes.
+//!   one attempt. Attempts reset only when a stage completes.
 //! * A lease that expires counts as a failed attempt, because a hostile crate
-//!   can crash a worker on purpose; otherwise it could loop forever.
+//!   can crash a worker on purpose. Otherwise it could loop forever.
 //! * Escalation from `cargo check` to a full build and test happens at most
 //!   once per job, which keeps every path finite.
 
@@ -116,7 +116,7 @@ pub enum JobState {
     Scored,
     /// Terminal: the pipeline is finished with this version.
     Done,
-    /// Terminal: the pipeline gave up; see [`Job::failure`].
+    /// Terminal: the pipeline gave up. See [`Job::failure`].
     Failed,
 }
 
@@ -216,7 +216,7 @@ impl RunKind {
 pub enum Triage {
     /// Run the job in a microVM.
     Dynamic,
-    /// Do not run it; the verdict is based on static analysis only.
+    /// Do not run it. The verdict is based on static analysis only.
     StaticOnly(StaticOnlyReason),
     /// No code compiles on Linux, so a Linux run cannot observe anything.
     NotApplicableOnLinux,
@@ -294,7 +294,7 @@ pub enum FailureReason {
     },
 }
 
-/// Something that happened to a job. Workers report events; the state
+/// Something that happened to a job. Workers report events. The state
 /// machine decides the next state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -310,7 +310,7 @@ pub enum JobEvent {
     },
     /// The orchestrator started a VM for the job.
     SandboxStarted,
-    /// The VM run finished; the raw results are stored.
+    /// The VM run finished. The raw results are stored.
     SandboxCompleted {
         /// How the build ended.
         outcome: BuildOutcome,
@@ -458,7 +458,7 @@ pub struct Transition {
 /// Why an event cannot be applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TransitionError {
-    /// The job is finished; no event applies.
+    /// The job is finished. No event applies.
     #[error("job is in terminal state {state}")]
     Terminal {
         /// The terminal state.
@@ -543,7 +543,7 @@ impl Job {
             }
             (JobState::ReadyForSandbox, JobEvent::CapacityDeadlineExpired) => {
                 // Escalated jobs already have dynamic results and outrank
-                // everything in the queue; they keep waiting.
+                // everything in the queue. They keep waiting.
                 if self.dynamic_runs > 0 {
                     return Err(not_allowed);
                 }
@@ -604,8 +604,8 @@ impl Job {
         match self.triage {
             Some(Triage::StaticOnly(reason)) => Coverage::StaticOnly(reason),
             Some(Triage::NotApplicableOnLinux) => Coverage::NotApplicableOnLinux,
-            // A dynamic triage without a completed run cannot reach scoring;
-            // the deadline rewrites the triage first. Label it conservatively.
+            // A dynamic triage without a completed run cannot reach scoring.
+            // The deadline rewrites the triage first. Label it conservatively.
             Some(Triage::Dynamic) | None => {
                 Coverage::StaticOnly(StaticOnlyReason::CapacityDeadline)
             }

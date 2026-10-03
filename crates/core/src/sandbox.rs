@@ -3,13 +3,13 @@
 //! A worker that parses crate archives or runs `cargo` on untrusted
 //! metadata enters a sandbox before touching the input:
 //!
-//! * a new user namespace mapping only the caller's own user, and a new
-//!   network namespace with only loopback, so it cannot reach the network;
-//! * resource limits on memory, CPU time, file size and open files;
-//! * a Landlock ruleset that allows only the listed paths;
+//! * A new user namespace mapping only the caller's own user, and a new
+//!   network namespace with only loopback, so it cannot reach the network.
+//! * Resource limits on memory, CPU time, file size and open files.
+//! * A Landlock ruleset that allows only the listed paths.
 //! * `no_new_privs`.
 //!
-//! [`enter`] runs the whole sequence; [`crate::child`] starts the children
+//! [`enter`] runs the whole sequence, and [`crate::child`] starts the children
 //! that call it. The rootless jail of the orchestrator uses the same
 //! `unshare` wrapper. This module holds the project's only `unsafe` block,
 //! documented below.
@@ -215,7 +215,7 @@ pub fn unavailable(error: &impl std::fmt::Display) -> bool {
 /// Enters the sandbox of a worker child: no network, then `limits`, then
 /// Landlock with `access`. The order matters, because Landlock comes last and
 /// takes away the `/proc` writes of [`isolate_network`]. Call it before the
-/// child reads any input; nothing hostile may be parsed outside the sandbox.
+/// child reads any input. Nothing hostile may be parsed outside the sandbox.
 ///
 /// # Errors
 ///

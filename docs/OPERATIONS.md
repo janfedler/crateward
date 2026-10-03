@@ -22,7 +22,7 @@ KSM disabled, no swap.
 | Mount | Medium | Contents |
 |-------|--------|----------|
 | `/boot` | md RAID1 | kernel and initramfs |
-| `/` | ext4 on md RAID1, unencrypted; monthly `mdcheck` scrub | system, Postgres, content addressed store, evidence, logs, image archive |
+| `/` | ext4 on md RAID1, unencrypted. Monthly `mdcheck` scrub | system, Postgres, content addressed store, evidence, logs, image archive |
 | `/run/crateward` | tmpfs, capped at the images, the scratch disks and the snapshot together | the base snapshot, the warm image, per job payload and scratch images, the slot jails, the fetcher's and the export's work directories |
 
 PostgreSQL clusters are created with data checksums enabled.
@@ -46,7 +46,7 @@ versions).
 
 | Item | Measured | Per 1000 versions |
 |------|----------|-------------------|
-| Content addressed store (zstd), crate files and their dependencies | 1.7 GB | about 540 MB; falls as dependencies repeat |
+| Content addressed store (zstd), crate files and their dependencies | 1.7 GB | about 540 MB. Falls as dependencies repeat |
 | Original `.crate` files | 616 MB | about 300 MB |
 | Postgres, all tables | 190 MB | about 85 MB |
 | of which fetch records (lockfile and resolution) | 70 MB | 31 MB |
@@ -61,13 +61,13 @@ and the output tails, 87 percent of the stored reports) after
 `storage.raw_log_retention_days`. The blob store and the originals have no
 retention yet: at the first day's rate they grow by about 0.85 GB per 1000
 versions, which reaches the target within months. Deduplication will lower
-the rate; how far is measured again after a week. Pruning originals that
+the rate. How far is measured again after a week. Pruning originals that
 the blob store already holds is a decision for the maintainer.
 
 ## Capacity
 
-Three VM slots of one vCPU each. Static analysis runs on every version;
-dynamic analysis runs by priority, and jobs that wait longer than
+Three VM slots of one vCPU each. Static analysis runs on every version.
+Dynamic analysis runs by priority, and jobs that wait longer than
 `triage.dynamic_deadline_hours` are scored as static only. The dashboard
 publishes the share of versions with dynamic results.
 
@@ -80,7 +80,7 @@ publishes the share of versions with dynamic results.
 | Egress allowlist refresh (`crateward-egress.timer`) | every 2 minutes |
 | Canaries | hourly |
 | Image refresh: `cargo xtask bump-debian-snapshot`, rootfs build, canary, release, deploy ([ADR 0002](adr/0002-firecracker-rootless-jail.md)) | weekly, by the maintainer |
-| Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs; jobs wait meanwhile); stop and start the orchestrator to refresh it |
+| Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs. Jobs wait meanwhile). Stop and start the orchestrator to refresh it |
 | Guest kernel rebuild | only when its version or configuration changes |
 | Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every supervisor round |
 | Integrity manifest check | every `supervisor.integrity_interval_minutes` (60) |
@@ -89,15 +89,15 @@ publishes the share of versions with dynamic results.
 
 These steps were applied to the production server by hand on 2026-09-24.
 `deploy/ansible/site.yml` now encodes them, with everything else a fresh
-server needs; see [deploy/README.md](../deploy/README.md).
+server needs. See [deploy/README.md](../deploy/README.md).
 
 * Kernel command line: `nosmt mds=full,nosmt l1tf=full,force` in
   `GRUB_CMDLINE_LINUX_DEFAULT`. Verified: SMT `forceoff`, L1TF "VMX: cache
   flushes, SMT disabled", `kvm_intel.vmentry_l1d_flush=always`.
-* Swap disabled and removed from `/etc/fstab`; KSM off.
+* Swap disabled and removed from `/etc/fstab`. KSM off.
 * Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap`.
   Still to install: `musl-tools`, the proper C compiler for the fake
-  internet's static build (ring compiles a little C); until then the build
+  internet's static build (ring compiles a little C). Until then the build
   falls back to the host `gcc`.
 * Development user `claude`: groups `kvm` and `systemd-journal`, lingering
   enabled, subordinate IDs `100000:65536`, and
@@ -123,24 +123,24 @@ ssh -N -L 8080:127.0.0.1:8080 <server>
 Each component runs as its own system user (`crateward-feed`,
 `crateward-fetcher` and so on, all in the group `crateward`) under systemd
 with `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, no
-capabilities and `UMask=0027`. The units are in `deploy/systemd`; all
+capabilities and `UMask=0027`. The units are in `deploy/systemd`. All
 score "OK" in `systemd-analyze security`. All users reach PostgreSQL over
 the socket as the one role `crateward`, through a peer map.
 
 The orchestrator user has requirements of its own (ADR 0002):
 
-* its only supplementary group is `kvm`, because every jailed Firecracker
-  keeps the orchestrator's supplementary groups;
-* a subordinate UID and GID range in `/etc/subuid` and `/etc/subgid` that
+* Its only supplementary group is `kvm`, because every jailed Firecracker
+  keeps the orchestrator's supplementary groups.
+* A subordinate UID and GID range in `/etc/subuid` and `/etc/subgid` that
   covers `sandbox.slot_uid_base` plus the number of slots, and that no
-  other user shares;
-* its unit runs with `Delegate=yes`, so it owns a cgroup subtree for the
-  slot limits;
-* it keeps `NoNewPrivileges` off, because `newuidmap` and `newgidmap` are
+  other user shares.
+* Its unit runs with `Delegate=yes`, so it owns a cgroup subtree for the
+  slot limits.
+* It keeps `NoNewPrivileges` off, because `newuidmap` and `newgidmap` are
   setuid programs.
 
 The fetcher and the static analysis create user and network namespaces for
-their sandboxed children, so their units allow exactly those two; every
+their sandboxed children, so their units allow exactly those two. Every
 other unit sets `RestrictNamespaces=yes`.
 
 ## External services
@@ -152,7 +152,7 @@ other unit sets `RestrictNamespaces=yes`.
 
 ## Deploying a new build
 
-1. `cargo xtask release` builds the release bundle and its tarball; sign
+1. `cargo xtask release` builds the release bundle and its tarball. Sign
    `SHA256SUMS` and run `cargo xtask pack` ([deploy/README.md](../deploy/README.md)).
 2. `./install.sh` in the unpacked bundle verifies it, runs
    `deploy/ansible/site.yml` on the server, records the integrity manifest
@@ -164,7 +164,7 @@ restart the services, and record the manifest with
 `crateward integrity --config /etc/crateward/crateward.toml record`.
 Without the manifest the supervisor quarantines the pipeline within
 `supervisor.integrity_interval_minutes`, since the binaries changed. The
-orchestrator finishes its running jobs after SIGTERM; `systemctl restart`
+orchestrator finishes its running jobs after SIGTERM. `systemctl restart`
 waits for it, and a second orchestrator refuses to start while the first
 holds `orchestrator.lock` in `sandbox.slots_dir`.
 
@@ -175,5 +175,5 @@ they raise a sandbox escape indicator.
 ## Backups
 
 Encrypted offsite backups with tested restores are required. The offsite
-target is not chosen yet; it waits for the maintainer's decision. Backups
+target is not chosen yet. It waits for the maintainer's decision. Backups
 must exclude the decoys listed in `supervisor.decoys`.

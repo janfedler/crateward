@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*"]
 # Builds for the BPF target with its own nightly toolchain and lockfile
-# (ADR 0007); `cargo xtask guest-ebpf` builds it.
+# (ADR 0007). `cargo xtask guest-ebpf` builds it.
 exclude = ["crates/guest_ebpf"]
 
 [workspace.package]
@@ -64,7 +64,7 @@ zstd = "0.13"
 
 [workspace.lints.rust]
 # Unsafe code is denied everywhere. Packages without any unsafe code
-# additionally `#![forbid]` it at the crate root; the few packages that will
+# additionally `#![forbid]` it at the crate root. The few packages that will
 # need it (guest agent, orchestrator) confine it to documented modules.
 unsafe_code = "deny"
 missing_docs = "deny"

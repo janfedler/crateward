@@ -371,7 +371,7 @@ async fn connect(config: &str) -> tokio_postgres::Client {
     client
 }
 
-/// A migrated private schema. `store` seeds it; `url` is what the tool
+/// A migrated private schema. `store` seeds it. `url` is what the tool
 /// connects with.
 struct Db {
     admin: tokio_postgres::Client,
@@ -626,7 +626,7 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
         &format!("job {id} has no disclosure record\n"),
         "",
     );
-    report("malicious").expect(1, "", "the verdict is not confirmed; review it first\n");
+    report("malicious").expect(1, "", "the verdict is not confirmed: review it first\n");
     db.confirmed(job).await;
     report("bogus").expect(1, "", "kind must be malicious or vulnerability\n");
     report("malicious").expect(
@@ -658,12 +658,12 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
     publish("evil-0-1-0").expect(
         1,
         "",
-        "the report is not resolved yet; the embargo has not passed\n",
+        "the report is not resolved yet and the embargo has not passed\n",
     );
     site.run(&["disclosure", "resolved", id, "--reference", "T-2"])
         .expect(
             0,
-            &format!("job {id} is resolved; it may be published\n"),
+            &format!("job {id} is resolved and may be published\n"),
             "",
         );
     publish("Bad/Slug").expect(
@@ -705,7 +705,7 @@ async fn a_disclosure_goes_through_its_steps_in_order() {
     );
     site.run(&["disclosure", "resolved", &other]).expect(
         0,
-        &format!("job {other} is resolved; it may be published\n"),
+        &format!("job {other} is resolved and may be published\n"),
         "",
     );
     site.run(&["disclosure", "publish", &other, "--slug", "evil-0-1-0"])
@@ -890,7 +890,11 @@ async fn evidence_of_a_bare_job_and_the_ways_it_fails() {
         "{}",
         ran.err
     );
-    assert!(ran.err.ends_with("); the pack has none\n"), "{}", ran.err);
+    assert!(
+        ran.err.ends_with("), so the pack has none\n"),
+        "{}",
+        ran.err
+    );
     let listing = [
         "job.json",
         "verdict.json",

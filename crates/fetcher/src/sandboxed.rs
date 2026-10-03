@@ -185,7 +185,7 @@ fn run_resolve(workdir: &Path, socket: &Path, cargo: &Path) -> Result<(), Box<dy
 }
 
 /// Runs `cargo generate-lockfile`. A cargo that fails or takes too long is a
-/// failed resolution; a cargo that cannot run at all is an error.
+/// failed resolution. A cargo that cannot run at all is an error.
 fn run_cargo(workdir: &Path, cargo: &Path) -> Result<ResolveOutcome, ChildError> {
     let mut command = child::command(cargo);
     command
@@ -238,7 +238,7 @@ pub fn validate_in_sandbox(
     let mut child = Child::spawn(VALIDATE_NAME, command)?;
     let mut stdin = child.stdin()?;
     let report = std::thread::scope(|scope| {
-        // The child may stop reading early (an aborted archive); a broken
+        // The child may stop reading early (an aborted archive). A broken
         // pipe is expected then.
         scope.spawn(move || {
             let _ = stdin.write_all(crate_file);

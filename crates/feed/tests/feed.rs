@@ -243,7 +243,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
     assert_eq!(first.rejected, 1, "{first:?}");
     assert_eq!(first.waiting, 1, "{first:?}");
 
-    // The lagging version appears in the index; the feeds did not change.
+    // The lagging version appears in the index. The feeds did not change.
     state.lock().unwrap().files.insert(
         "/index/la/gg/lagging".into(),
         format!(
@@ -274,7 +274,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
     assert_eq!(third.enqueued, 0, "{third:?}");
     assert_eq!(third.already_known, 2, "{third:?}");
 
-    // The new crate with a native link comes first; the name keeps its
+    // The new crate with a native link comes first. The name keeps its
     // published casing from the index, not the feed's.
     let check = connect(&schema).await;
     let first_claim = check
@@ -376,7 +376,7 @@ async fn deleted_crates_are_dropped_and_lagging_versions_wait_for_their_turn() {
     assert_eq!(first.waiting, 1, "{first:?}");
     assert_eq!(first.enqueued, 0, "{first:?}");
 
-    // The lagging version is not due again for an hour; the deleted crate
+    // The lagging version is not due again for an hour. The deleted crate
     // is not looked up again at all.
     let second = world.feed.poll_once().await.unwrap();
     assert_eq!(second.feed_items, 0, "{second:?}");

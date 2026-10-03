@@ -479,7 +479,7 @@ impl SandboxWorker {
     }
 
     /// Raises the alert a failure asks for. A KVM error also stops the stage
-    /// at once; the supervisor probes again after the cooldown.
+    /// at once. The supervisor probes again after the cooldown.
     async fn escalate(&mut self, failure: &Failure) -> Result<(), StoreError> {
         let Some(escalation) = &failure.escalation else {
             return Ok(());
@@ -616,7 +616,7 @@ impl JobFiles {
     }
 
     /// Removes the payload, the scratch disk and the network log. A missing
-    /// file is fine; any other failure is logged.
+    /// file is fine. Any other failure is logged.
     pub fn remove(&self) {
         for file in [&self.payload, &self.scratch, &self.network] {
             if let Err(error) = remove_file(file) {
@@ -731,7 +731,7 @@ impl Sandbox {
 
     /// Builds the payload and the scratch disk, and clears the network log.
     async fn prepare(&self, spec: PayloadSpec, files: &JobFiles) -> Result<PayloadStats, Failure> {
-        // The fake internet appends to its log; one left from an earlier run
+        // The fake internet appends to its log. One left from an earlier run
         // would mix that run's traffic into this one's.
         remove_file(&files.network).map_err(Failure::infrastructure)?;
         let stats = build_payload(&self.setup, &self.blobs, spec, &files.payload).await?;
@@ -886,7 +886,7 @@ pub const TARGET_DIR: &str = "/work/target";
 
 /// The mounts of a job, and the directories to create before it runs. With
 /// `warm`, the warm image's target directory lies under the job's own
-/// writable layer at [`TARGET_DIR`] (ADR 0006); without it, the target
+/// writable layer at [`TARGET_DIR`] (ADR 0006). Without it, the target
 /// directory is a plain directory on the scratch disk.
 #[must_use]
 pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
@@ -941,7 +941,7 @@ pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
 }
 
 /// Reads the scratch disk in the sandboxed scanner. A failure of the
-/// scanner is logged and leaves the report without a scratch section; the
+/// scanner is logged and leaves the report without a scratch section. The
 /// job is not failed for it.
 async fn scan_scratch(
     setup: &WorkerSetup,
@@ -987,7 +987,7 @@ async fn build_payload(
         .map_err(Failure::infrastructure)
 }
 
-/// Creates an empty ext4 image. The file is sparse; tmpfs holds only the
+/// Creates an empty ext4 image. The file is sparse. The tmpfs holds only the
 /// blocks the job writes.
 async fn make_scratch(mib: u64, path: &Path) -> Result<(), Failure> {
     let file = std::fs::File::create(path).map_err(Failure::infrastructure)?;

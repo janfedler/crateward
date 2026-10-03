@@ -2,7 +2,7 @@
 //!
 //! Firecracker exposes the guest's vsock ports through one Unix socket per
 //! VM. The host connects, writes `CONNECT <port>\n` and reads `OK <port>\n`
-//! (Firecracker `docs/vsock.md`); after that the stream carries the frames of
+//! (Firecracker `docs/vsock.md`). After that the stream carries the frames of
 //! `crateward_core::protocol`. Every byte from the guest goes through the
 //! bounded [`Decoder`], and the host keeps its own copy of the output limit
 //! instead of trusting the agent to honor it.

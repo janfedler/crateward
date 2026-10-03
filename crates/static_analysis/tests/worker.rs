@@ -6,7 +6,7 @@
 //! cases record the static reports up front, so they need no child. The
 //! cases that fill in missing reports run the sandboxed child and skip on
 //! kernels that refuse the sandbox, unless `CRATEWARD_REQUIRE_SANDBOX` is
-//! set. The database comes from `CRATEWARD_TEST_DATABASE_URL`; without it the
+//! set. The database comes from `CRATEWARD_TEST_DATABASE_URL`. Without it the
 //! tests skip, unless `CRATEWARD_REQUIRE_DB=1`, which CI sets so that a
 //! missing database fails instead of passing silently.
 

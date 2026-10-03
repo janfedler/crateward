@@ -1,7 +1,7 @@
 //! Keeps the state diagram in `docs/ARCHITECTURE.md` generated from code.
 //!
 //! The diagram is derived from `crateward_core::job::edges`, which explores
-//! the real transition function. A hand drawn diagram would drift; this one
+//! the real transition function. A hand drawn diagram would drift. This one
 //! cannot, because CI and `cargo test` compare it with the code.
 
 use std::path::Path;
@@ -59,7 +59,7 @@ pub fn run(root: &Path, write: bool) -> Result<(), TaskError> {
         Ok(())
     } else {
         Err(TaskError::Check(
-            "the state diagram in docs/ARCHITECTURE.md is out of date; run `cargo xtask state-diagram --write`".to_owned(),
+            "the state diagram in docs/ARCHITECTURE.md is out of date: run `cargo xtask state-diagram --write`".to_owned(),
         ))
     }
 }

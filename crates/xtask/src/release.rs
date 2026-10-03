@@ -8,11 +8,11 @@
 //! materials, the vendored sources of every dependency, and `SHA256SUMS`
 //! over all of it. The bundle directory is packed into a tarball next to
 //! it. Signing the sums file needs the maintainer's key, so this task stops
-//! before that and prints the commands; `cargo xtask pack` packs the
+//! before that and prints the commands. `cargo xtask pack` packs the
 //! bundle again once the signature is in it.
 //!
 //! The guest kernel, the root filesystem and Firecracker take long to build
-//! or download; the task expects them from `cargo xtask guest-kernel`,
+//! or download. The task expects them from `cargo xtask guest-kernel`,
 //! `cargo xtask rootfs` and `cargo xtask firecracker` and says which is
 //! missing.
 
@@ -138,7 +138,7 @@ fn bundle_name(root: &Path, version: &str) -> Result<String, TaskError> {
     let commit = output(root, "git", &["rev-parse", "--short=12", "HEAD"])?;
     let dirty = !output(root, "git", &["status", "--porcelain"])?.is_empty();
     if dirty {
-        eprintln!("xtask: the working tree has changes; the bundle is marked dirty");
+        eprintln!("xtask: the working tree has changes, so the bundle is marked dirty");
     }
     Ok(format!(
         "crateward-{version}-{commit}{}",
@@ -197,7 +197,7 @@ fn stage_binaries(target: &Path, out: &Path) -> Result<(), TaskError> {
     let firecracker = target.join("guest/bin/firecracker");
     if !firecracker.is_file() {
         return Err(TaskError::Check(
-            "no Firecracker; run `cargo xtask firecracker`".into(),
+            "no Firecracker: run `cargo xtask firecracker`".into(),
         ));
     }
     copy(&firecracker, &out.join("sandbox/firecracker"), 0o755)
@@ -230,7 +230,7 @@ fn stage_guest(target: &Path, out: &Path) -> Result<(), TaskError> {
     let rootfs = guest.join("rootfs.erofs");
     if !rootfs.is_file() {
         return Err(TaskError::Check(
-            "no root filesystem; run `cargo xtask rootfs`".into(),
+            "no root filesystem: run `cargo xtask rootfs`".into(),
         ));
     }
     copy(&rootfs, &out.join("guest/rootfs.erofs"), 0o644)?;
@@ -320,7 +320,7 @@ pub fn pack(bundle: &Path) -> Result<PathBuf, TaskError> {
             "--owner=0",
             "--group=0",
             "--numeric-owner",
-            // Root unpacks it as is; nothing in it is writable by others.
+            // Root unpacks it as is. Nothing in it is writable by others.
             "--mode=go-w",
             "-C",
             &parent_arg,
@@ -660,7 +660,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("no Firecracker; run `cargo xtask firecracker`")
+                .contains("no Firecracker: run `cargo xtask firecracker`")
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -693,7 +693,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("no root filesystem; run `cargo xtask rootfs`")
+                .contains("no root filesystem: run `cargo xtask rootfs`")
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -3,7 +3,7 @@
 //! The built in rules (`rules/crateward.yar`) complement the syn based
 //! analysis: they see bytes in any file, including data files and binaries
 //! that no Rust parser looks at. Each rule's `severity` metadata becomes the
-//! finding's severity; code that runs at build time raises it one level.
+//! finding's severity. Code that runs at build time raises it one level.
 
 use yara_x::errors::CompileError;
 
@@ -56,7 +56,7 @@ impl Rules {
     ///
     /// # Errors
     ///
-    /// Fails if the rules do not compile; a unit test guarantees they do.
+    /// Fails if the rules do not compile. A unit test guarantees they do.
     pub fn builtin() -> Result<Self, CompileError> {
         yara_x::compile(BUILTIN_RULES).map(Self)
     }

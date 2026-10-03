@@ -99,7 +99,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
                     "dump statistics refreshed"
                 ),
                 Err(error) => {
-                    tracing::warn!(%error, "dump refresh failed; retrying at the next interval");
+                    tracing::warn!(%error, "dump refresh failed, retrying at the next interval");
                 }
             }
             tokio::time::sleep(every).await;
@@ -113,7 +113,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
 /// # Errors
 ///
 /// Returns [`ComponentError::Fatal`] if the feed cannot start or hits a
-/// permanent error; systemd restarts it.
+/// permanent error, and systemd restarts it.
 pub fn run(config: &Config) -> Result<(), ComponentError> {
     let runtime = app::runtime().map_err(fatal)?;
     runtime.block_on(async {
@@ -125,7 +125,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             match feed.poll_once().await {
                 Ok(report) => tracing::info!(?report, "poll finished"),
                 Err(error) if error.is_transient() => {
-                    tracing::warn!(%error, "poll failed; retrying at the next interval");
+                    tracing::warn!(%error, "poll failed, retrying at the next interval");
                 }
                 Err(error) => return Err(fatal(error)),
             }

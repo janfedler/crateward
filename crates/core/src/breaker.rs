@@ -4,7 +4,7 @@
 //! so a broken dependency of one stage (crates.io unreachable, KVM failing)
 //! would otherwise keep every job of the stage cycling. The breaker counts
 //! the stage's infrastructure failures and completions in a sliding window.
-//! When failures dominate, it opens and the stage stops claiming jobs; the
+//! When failures dominate, it opens and the stage stops claiming jobs. The
 //! other stages keep draining their queues. After a cooldown it lets jobs
 //! through again (half open): the first completion closes it, the first
 //! failure opens it again with a longer cooldown.
@@ -46,7 +46,7 @@ pub enum BreakerState {
         /// How often it reopened after a failed probe.
         reopened: u32,
     },
-    /// Jobs flow again; the next result decides.
+    /// Jobs flow again. The next result decides.
     HalfOpen {
         /// When it became half open.
         since: i64,
@@ -87,11 +87,11 @@ pub struct Counts {
 pub enum Change {
     /// The breaker opened from closed: raise the alert.
     Opened,
-    /// A probe failed; the breaker opened again.
+    /// A probe failed. The breaker opened again.
     Reopened,
-    /// The cooldown passed; jobs flow again on probation.
+    /// The cooldown passed. Jobs flow again on probation.
     Probing,
-    /// A probe succeeded; the breaker closed.
+    /// A probe succeeded. The breaker closed.
     Closed,
 }
 
@@ -106,7 +106,7 @@ impl BreakerPolicy {
             .min(self.max_cooldown)
     }
 
-    /// The next state. `window` counts over the sliding window ending now;
+    /// The next state. `window` counts over the sliding window ending now.
     /// `since_change` counts since the state's `since` (used while half
     /// open).
     #[must_use]

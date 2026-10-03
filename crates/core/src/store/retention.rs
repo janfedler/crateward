@@ -1,11 +1,11 @@
 //! Retention of raw run data.
 //!
 //! A run report keeps two kinds of data: evidence (what the job read,
-//! wrote, reached or left behind; honeytokens; the network summary) and raw
+//! wrote, reached or left behind, honeytokens, the network summary) and raw
 //! material (every process with its arguments, the tails of cargo's
 //! output). The raw part is most of the size. Once a run is older than
 //! `storage.raw_log_retention_days` and its job finished with a verdict of
-//! none or low that no human touched, the raw part goes; the evidence, the
+//! none or low that no human touched, the raw part goes. The evidence, the
 //! verdict and its behavior profile stay.
 //!
 //! A trimmed job keeps its verdict when the analyzer version changes, since

@@ -742,7 +742,7 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
         [html.find("<h2>Evidence</h2>").unwrap()..html.find("<h2>Static findings</h2>").unwrap()];
     let viewer = "https://crates.io/crates/evil/0.1.0/code/build.rs";
     assert!(evidence.contains(&format!("<a href=\"{viewer}#L3\"")));
-    // The old verdict names only the file; the finding knows the line.
+    // The old verdict names only the file. The finding knows the line.
     assert!(evidence.contains(&format!("<a href=\"{viewer}#L9\"")));
     let findings = &html[html.find("<h2>Static findings</h2>").unwrap()..];
     assert!(

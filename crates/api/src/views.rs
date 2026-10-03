@@ -1,5 +1,5 @@
-//! Page templates. askama escapes every value at compile time (ADR 0009);
-//! nothing here marks text as safe HTML.
+//! Page templates. askama escapes every value at compile time (ADR 0009).
+//! Nothing here marks text as safe HTML.
 
 use askama::Template;
 use crateward_core::attack::Technique;

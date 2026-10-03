@@ -1,7 +1,7 @@
 # Finding: `<crate>` `<versions>`
 
 <!-- Write the finding from this outline as findings/<slug>/index.html in
-the site repository; the site is served without Jekyll, so Markdown is not
+the site repository. The site is served without Jekyll, so Markdown is not
 rendered. Publish only after the disclosure workflow in DISCLOSURE.md is
 complete, with `crateward disclosure publish <job> --slug <slug>`. -->
 
@@ -9,7 +9,7 @@ complete, with `crateward disclosure publish <job> --slug <slug>`. -->
 * **Affected versions:** `<versions>`
 * **Classification:** malicious, or vulnerability
 * **Coverage:** dynamic on Linux, or static only (reason)
-* **Reported to:** crates.io (`help@crates.io`) or the crate owners, on `YYYY-MM-DD`;
+* **Reported to:** crates.io (`help@crates.io`) or the crate owners, on `YYYY-MM-DD`,
   or "not reported: crates.io removed the crate on `YYYY-MM-DD`, before a
   report". Crateward's copy is the `.crate` file it stored when it fetched
   the version, with the checksum crates.io published.

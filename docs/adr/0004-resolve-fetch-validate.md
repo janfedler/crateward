@@ -9,7 +9,7 @@ The fetch stage must hand later stages a crate's sources and every
 dependency for every target, without running crate code and without
 letting a hostile archive or manifest touch the host. Verified on the
 server: `cargo generate-lockfile` succeeds with `RUSTC` pointing at a path
-that does not exist, so resolution runs no compiler and no crate code; the
+that does not exist, so resolution runs no compiler and no crate code. The
 lockfile lists every package for every target with its SHA-256.
 
 ## Decision
@@ -42,7 +42,7 @@ lockfile lists every package for every target with its SHA-256.
 ## Consequences
 
 * Static analysis parses entries straight from the tar stream, and the VM
-  payload is built with `mkfs.erofs --tar`; no crate file is ever written
+  payload is built with `mkfs.erofs --tar`. No crate file is ever written
   to the host as a file.
 * Dependencies are stored once and shared. First live run: 73 jobs, median
   113 locked packages each, 1,768 distinct crate files in 249 MB, about 2

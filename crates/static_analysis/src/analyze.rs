@@ -17,7 +17,7 @@ use crate::rust::{self, Include};
 use crate::yara::Rules;
 
 /// Version of the analysis. A stored report from an older version is
-/// recomputed; bump it whenever detectors or rules change.
+/// recomputed. Bump it whenever detectors or rules change.
 pub const ANALYZER_VERSION: i32 = 5;
 
 /// Bounds on the work done for one archive.
@@ -540,7 +540,7 @@ mod tests {
                 ),
             ]
         );
-        // The strongest finding stays; the platform counts include the rest.
+        // The strongest finding stays. The platform counts include the rest.
         assert_eq!(kinds(&report), ["process_spawn"]);
         assert_eq!(report.findings_dropped, 2);
         assert_eq!(report.platforms, BTreeMap::from([("apple".to_owned(), 1)]));

@@ -40,7 +40,7 @@ pub enum Role {
     Toolchain,
     /// Anything else, for example a shell or `curl`.
     Other,
-    /// Seen only through other events; its exec was not traced.
+    /// Seen only through other events. Its exec was not traced.
     Unknown,
 }
 

@@ -73,7 +73,7 @@ pub struct Sample {
 /// Chooses the replays. A sample qualifies when every package it locks,
 /// except the crate under analysis, is locked by at least `min_jobs`
 /// samples and its checksum is in `eligible` (the age and static analysis
-/// gate). `blobs` maps every stored checksum to its blob; a sample with a
+/// gate). `blobs` maps every stored checksum to its blob. A sample with a
 /// package that is not stored is skipped.
 #[must_use]
 pub fn plan(
@@ -528,7 +528,7 @@ const PROMOTION_MAX_UNITS: usize = 5;
 
 /// Replays the first probe as an ordinary job with the new image mounted.
 /// The image is used only if that job is clean, succeeds and compiles
-/// almost nothing itself; a broken image would otherwise fail every job.
+/// almost nothing itself. A broken image would otherwise fail every job.
 async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result<(), CheckError> {
     let (Some(first), Some(stub)) = (plan.probes.first(), plan.stubs.first()) else {
         return Err(CheckError::NoProbe);

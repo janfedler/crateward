@@ -164,7 +164,7 @@
         - { path: /usr/local/lib/crateward/guest, group: crateward, mode: "0750" }
         - { path: /usr/local/lib/crateward/toolchain, group: root, mode: "0755" }
         - { path: /usr/local/lib/crateward/toolchain/bin, group: root, mode: "0755" }
-        # Setgid, so files stay in the group; UMask=0027 in the units keeps
+        # Setgid, so files stay in the group. UMask=0027 in the units keeps
         # each component's files writable by it alone.
         - { path: /var/lib/crateward, mode: "2770" }
         - { path: /var/lib/crateward/api, owner: crateward-api, mode: "0700" }
@@ -393,7 +393,7 @@
       loop: "{{ crateward_timers }}"
 
     # A restart waits for the old process to exit (the orchestrator drains
-    # its jobs; TimeoutStopSec) before the new one starts, so two
+    # its jobs within TimeoutStopSec) before the new one starts, so two
     # orchestrators never overlap.
     - name: Services
       ansible.builtin.systemd_service:

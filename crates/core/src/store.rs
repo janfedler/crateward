@@ -9,7 +9,7 @@
 //! update matches no row, so a stale worker cannot overwrite the work of
 //! the one that took over.
 //!
-//! Enabled with the `store` feature; the guest agent never links it.
+//! Enabled with the `store` feature. The guest agent never links it.
 
 mod autonomy;
 mod dashboard;
@@ -174,7 +174,7 @@ impl Policies {
     ///
     /// # Errors
     ///
-    /// Fails if a stage has an invalid backoff; configuration validation
+    /// Fails if a stage has an invalid backoff. Configuration validation
     /// already rejects those.
     pub fn from_config(
         stages: &crate::config::StagesConfig,
@@ -282,7 +282,7 @@ impl Store {
     ///
     /// # Errors
     ///
-    /// Fails if a migration fails; nothing of that migration is applied.
+    /// Fails if a migration fails. Nothing of that migration is applied.
     pub async fn migrate(&mut self) -> Result<Vec<i32>, StoreError> {
         self.client
             .batch_execute(
@@ -433,7 +433,7 @@ impl Store {
     ///
     /// # Errors
     ///
-    /// [`StoreError::LeaseLost`] if the worker does not hold the lease;
+    /// [`StoreError::LeaseLost`] if the worker does not hold the lease.
     /// [`StoreError::Transition`] if the state machine rejects the event.
     pub async fn complete(
         &mut self,

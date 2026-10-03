@@ -19,7 +19,7 @@
 //!    seccomp filter then applies.
 //!
 //! The launcher keeps the orchestrator's supplementary groups because it
-//! never calls `setgroups`; that is how Firecracker can still open
+//! never calls `setgroups`. That is how Firecracker can still open
 //! `/dev/kvm`. The orchestrator's service user must therefore have no
 //! supplementary group except `kvm`.
 //!

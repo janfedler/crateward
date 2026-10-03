@@ -17,9 +17,9 @@
 //! * DNS answers every `A` question with the sink's address, so name based
 //!   downloaders connect and reveal what they want. HTTP requests get a 404.
 //! * TLS is terminated with Crateward's own certificate authority, which the
-//!   guest image trusts; its private key reaches this process only through
+//!   guest image trusts. Its private key reaches this process only through
 //!   stdin from the launcher and never exists inside a VM. Clients that
-//!   bring their own root list refuse the handshake; the server name is
+//!   bring their own root list refuse the handshake. The server name is
 //!   logged either way.
 //! * A packet socket on the tap device logs every frame the proxies do not
 //!   see, such as IPv6 and ICMP. The process opens it with the namespace's

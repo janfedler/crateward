@@ -6,7 +6,7 @@ all-features = true
 [advisories]
 # Every RustSec advisory fails the build unless it is listed here with a reason.
 # The same list is in .cargo/audit.toml for cargo-audit. Each entry names the
-# release that makes it obsolete; remove it then.
+# release that makes it obsolete. Remove it then.
 ignore = [
     # wasmtime 45 (through yara-x 1.20.0, the newest release, which requires
     # ^45.0.3): stores can mix up type indices between engines. YARA-X creates
@@ -23,7 +23,7 @@ ignore = [
     # not compiled in. Remove with the entries above (fixed in 48.0.3).
     { id = "RUSTSEC-2026-0316", reason = "the wasmtime component model is not compiled in" },
     # bincode 2 is unmaintained. YARA-X uses it only to (de)serialize compiled
-    # rules, which Crateward never loads from outside; rules are compiled from
+    # rules, which Crateward never loads from outside. Rules are compiled from
     # source embedded in the binary.
     { id = "RUSTSEC-2025-0141", reason = "only for compiled rule serialization, unused" },
 ]

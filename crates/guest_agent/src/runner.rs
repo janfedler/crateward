@@ -4,7 +4,7 @@
 //! the VM, as the unprivileged `builder` user. Two reader threads forward
 //! stdout and stderr through a channel, so the connection has exactly one
 //! writer. Output beyond the job's limit is dropped after one
-//! `OutputTruncated` message; the process keeps running, because a crate
+//! `OutputTruncated` message. The process keeps running, because a crate
 //! that writes a lot of output is behavior worth observing, not an error.
 //!
 //! With tracing active, a third thread streams the eBPF trace through the
@@ -200,7 +200,7 @@ pub fn run_job<W: Write>(
         stop.store(true, Ordering::Release);
         let exit = result?;
         // What the job wrote must reach the scratch disk before the host
-        // reads it; the VM ends without unmounting. Tests on the host run
+        // reads it. The VM ends without unmounting. Tests on the host run
         // without an identity and must not sync the host's disks.
         if options.identity.is_some() {
             rustix::fs::sync();

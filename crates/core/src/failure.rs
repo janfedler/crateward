@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum FailureClass {
     /// Network errors, timeouts, a VM boot hiccup. Retried with exponential
-    /// backoff and jitter; each retry consumes one attempt of the job.
+    /// backoff and jitter. Each retry consumes one attempt of the job.
     Transient,
     /// The infrastructure is at fault, not the crate: KVM errors, a full
     /// scratch filesystem, Postgres unavailable. Retried without consuming

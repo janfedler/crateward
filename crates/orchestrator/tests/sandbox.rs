@@ -2,7 +2,7 @@
 //! scanner, the export of the target directory and the image builder.
 //!
 //! The scratch images are made from inert files by `mkfs.ext4 -d`, and the
-//! payload from a tar of a fixture crate; nothing is mounted or executed.
+//! payload from a tar of a fixture crate. Nothing is mounted or executed.
 //! The children enter their sandbox before they read input, so a passing
 //! test also shows that the sandbox can be entered. Hosts without
 //! unprivileged user namespaces, or without `mkfs.erofs`, skip the tests

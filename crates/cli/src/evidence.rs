@@ -173,7 +173,7 @@ fn copy_original(data_dir: &Path, stored: &StoredJob, dir: &Path) -> Option<Stri
     match std::fs::copy(&original, dir.join(&name)) {
         Ok(_) => Some(name),
         Err(error) => {
-            eprintln!("the original crate file is missing ({error}); the pack has none");
+            eprintln!("the original crate file is missing ({error}), so the pack has none");
             None
         }
     }

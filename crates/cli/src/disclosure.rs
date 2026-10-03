@@ -43,7 +43,7 @@ pub enum Command {
         #[arg(long)]
         reference: Option<String>,
     },
-    /// The finding page `findings/<slug>/` is written; list it publicly.
+    /// The finding page `findings/<slug>/` is written. List it publicly.
     Publish {
         /// The job's number.
         job: i64,
@@ -77,13 +77,13 @@ pub async fn run(store: Store, command: Command) -> Result<(), CliError> {
         }
         Command::Removed { job, note } => {
             store.record_removal(JobId(job), note.as_deref()).await??;
-            out!("job {job} is resolved without a report; it may be published");
+            out!("job {job} is resolved without a report and may be published");
         }
         Command::Resolved { job, reference } => {
             store
                 .mark_resolved(JobId(job), reference.as_deref())
                 .await??;
-            out!("job {job} is resolved; it may be published");
+            out!("job {job} is resolved and may be published");
         }
         Command::Publish { job, slug } => {
             store.publish_finding(JobId(job), &slug).await??;

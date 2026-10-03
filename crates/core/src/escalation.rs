@@ -46,7 +46,7 @@ pub enum HumanEscalation {
 pub enum EscalationCategory {
     /// Operational trouble the automation could not resolve.
     Operations,
-    /// A canary produced the wrong verdict; results cannot be trusted.
+    /// A canary produced the wrong verdict. Results cannot be trusted.
     Canary,
     /// A verdict needs human review before any disclosure.
     Verdict,

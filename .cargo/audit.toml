@@ -1,5 +1,5 @@
 # cargo-audit configuration. The reasons for each ignored advisory are in
-# deny.toml; keep both lists in sync.
+# deny.toml. Keep both lists in sync.
 [advisories]
 ignore = [
     "RUSTSEC-2026-0222",

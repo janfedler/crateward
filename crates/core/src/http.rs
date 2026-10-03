@@ -24,7 +24,7 @@ pub enum HttpError {
     #[error("request failed: {0}")]
     Transport(#[from] reqwest::Error),
     /// The server asked us to slow down. Transient, after the given delay.
-    #[error("rate limited by the server; retry after {0:?}")]
+    #[error("rate limited by the server, retry after {0:?}")]
     RateLimited(Duration),
     /// A server error. Transient.
     #[error("server error {0}")]
@@ -83,8 +83,8 @@ pub struct ClientConfig {
     pub requests_per_second: f64,
     /// Timeout of one request, including reading the body.
     pub timeout: Duration,
-    /// Permit plain HTTP. Only the mock crates.io of the tests uses it;
-    /// configuration validation requires https for every real URL.
+    /// Permit plain HTTP. Only the mock crates.io of the tests uses it.
+    /// Configuration validation requires https for every real URL.
     pub allow_plain_http: bool,
 }
 
@@ -133,7 +133,7 @@ pub struct PoliteClient {
     pacer: Arc<Pacer>,
 }
 
-/// `Retry-After` in seconds, bounded to one hour; HTTP dates fall back to a
+/// `Retry-After` in seconds, bounded to one hour. HTTP dates fall back to a
 /// minute.
 fn retry_after(response: &reqwest::Response) -> Duration {
     response
@@ -178,7 +178,7 @@ impl PoliteClient {
     ///
     /// # Errors
     ///
-    /// See [`HttpError`]; [`HttpError::is_transient`] tells whether to retry.
+    /// See [`HttpError`]. [`HttpError::is_transient`] tells whether to retry.
     pub async fn get(
         &self,
         url: &str,

@@ -317,7 +317,7 @@ async fn a_transient_failure_backs_off() {
     let job = store.get(id).await.unwrap().unwrap();
     assert_eq!(job.job.state, JobState::Discovered);
     assert_eq!(job.job.attempts, 1);
-    // The delay is drawn from [0, 60 s]; it is almost always still running.
+    // The delay is drawn from [0, 60 s]. It is almost always still running.
     // Either way the job must stay in its stage.
     if let Some(again) = store.claim(Stage::Fetch, "w", LEASE).await.unwrap() {
         assert_eq!(again.id, id);

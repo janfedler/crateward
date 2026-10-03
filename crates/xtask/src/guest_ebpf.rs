@@ -35,7 +35,7 @@ pub fn object_path(root: &Path) -> PathBuf {
         .join("guest-ebpf.o")
 }
 
-/// Downloads and verifies the pinned linker; returns its directory.
+/// Downloads and verifies the pinned linker. Returns its directory.
 fn linker(root: &Path) -> Result<PathBuf, TaskError> {
     let pin_path = root.join("guest").join("bpf-linker.toml");
     let pin: Pin = toml::from_str(&std::fs::read_to_string(&pin_path).map_err(io(&pin_path))?)
@@ -84,8 +84,8 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     let path = std::env::join_paths(paths).map_err(|e| TaskError::Command(format!("PATH: {e}")))?;
-    // The outer cargo exports its toolchain; removing it lets the package's
-    // own rust-toolchain.toml choose.
+    // The outer cargo exports its toolchain. Removing it lets the package's
+    // own `rust-toolchain.toml` choose.
     let cargo = |args: &[&str]| -> Result<(), TaskError> {
         let rendered = format!("cargo {}", args.join(" "));
         eprintln!("xtask: running {rendered} in crates/guest_ebpf");

@@ -186,7 +186,7 @@ fn stage_file(source: &Path, target: &Path) -> Result<(), TaskError> {
 /// Files of a staging directory that are appended to the image tarball.
 struct Layer<'a> {
     dir: &'a Path,
-    /// The mode of every entry; `None` keeps the modes in the directory.
+    /// The mode of every entry. `None` keeps the modes in the directory.
     mode: Option<&'a str>,
     paths: &'a [&'a str],
 }
@@ -279,7 +279,7 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
         "--mode=unshare",
         variant.as_str(),
         "--format=tar",
-        // Snapshots of the archive are old by design; their Release files
+        // Snapshots of the archive are old by design. Their Release files
         // are still verified against the Debian keyring.
         "--aptopt=Acquire::Check-Valid-Until \"false\"",
         customize.as_str(),

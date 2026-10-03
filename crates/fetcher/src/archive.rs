@@ -236,7 +236,7 @@ fn walk<R: Read>(
 }
 
 /// Checks the header of one entry. Returns the path of a regular file, whose
-/// content is still to be counted; any other entry is dealt with here.
+/// content is still to be counted. Any other entry is dealt with here.
 fn inspect<R: Read>(
     entry: &tar::Entry<'_, R>,
     prefix: &str,

@@ -3,12 +3,12 @@
 //! The programs live in `crateward_guest_ebpf` (ADR 0007). The
 //! agent loads them once at boot, before the base snapshot, so every
 //! restored VM traces from its first instruction. Loading needs the kernel
-//! structure offsets the programs read ([`OFFSETS`]); they come from the
+//! structure offsets the programs read ([`OFFSETS`]). They come from the
 //! running kernel's BTF ([`crate::btf`]).
 //!
 //! Records are decoded byte by byte against the layouts documented in the
 //! eBPF package. The decoder never trusts a length field beyond the record
-//! it came with; a record that does not fit is counted as malformed.
+//! it came with. A record that does not fit is counted as malformed.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -70,7 +70,7 @@ const MAX_TRACE_BYTES: usize = 96 * 1024 * 1024;
 /// How long the reader sleeps when the ring buffer is empty.
 const IDLE: Duration = Duration::from_millis(10);
 
-// Record kinds and layouts; see `crates/guest_ebpf/src/main.rs`.
+// Record kinds and layouts. See `crates/guest_ebpf/src/main.rs`.
 const HEADER_LEN: usize = 24;
 const KIND_FORK: u32 = 1;
 const KIND_EXEC: u32 = 2;
@@ -152,7 +152,7 @@ fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
         }
         AF_UNIX => {
             let path = addr.get(2..len.max(2)).unwrap_or_default();
-            // A path name ends at its NUL; an abstract name keeps its bytes.
+            // A path name ends at its NUL. An abstract name keeps its bytes.
             let path = if path.first() == Some(&0) {
                 path
             } else {

@@ -24,7 +24,7 @@
 //!
 //! # Wire format
 //!
-//! Every record in the `EVENTS` ring buffer starts with [`Header`]; `kind`
+//! Every record in the `EVENTS` ring buffer starts with [`Header`]. `kind`
 //! selects the layout that follows. All fields are little endian, as the
 //! BPF target is. The guest agent decodes these layouts byte by byte
 //! (`crateward_guest_agent::trace`), so a change here must change the
@@ -71,7 +71,7 @@ const FSTYPE_LEN: usize = 32;
 /// Files the kernel opens for its own use (`include/linux/fs.h`, 6.18):
 /// `FMODE_BACKING` for overlayfs's files on the underlying filesystem, and
 /// `FMODE_NOACCOUNT` for those and for its copy up temporary files. The
-/// open the process made on the overlay is traced; these would only repeat
+/// open the process made on the overlay is traced. These would only repeat
 /// it with internal paths. No open from user space carries either flag.
 const FMODE_KERNEL_INTERNAL: u32 = (1 << 24) | (1 << 29);
 
@@ -163,7 +163,7 @@ struct Mount {
 }
 
 /// Set by the agent before loading. `#[no_mangle]` keeps the names that
-/// the loader looks up; being immutable, they land in `.rodata`, which the
+/// the loader looks up. Being immutable, they land in `.rodata`, which the
 /// verifier treats as constant.
 #[unsafe(no_mangle)]
 static BUILDER_UID: u32 = u32::MAX;
@@ -234,7 +234,7 @@ fn config_usize(value: &u32) -> usize {
 fn current() -> (u32, u32, u32) {
     let pid_tgid = bpf_get_current_pid_tgid();
     // SAFETY: the helper returns the current task, valid while the program
-    // runs; the reads go through `bpf_probe_read_kernel`.
+    // runs. The reads go through `bpf_probe_read_kernel`.
     let uid = unsafe {
         let task = bpf_get_current_task() as *const u8;
         let cred = field_u64(task, &OFF_TASK_REAL_CRED) as *const u8;
@@ -260,7 +260,7 @@ fn track(tgid: u32) {
 #[inline(always)]
 fn dropped() {
     if let Some(counter) = DROPPED.get_ptr_mut(0) {
-        // SAFETY: a per CPU slot; no other program writes it concurrently.
+        // SAFETY: a per CPU slot. No other program writes it concurrently.
         unsafe { *counter += 1 };
     }
 }
@@ -336,7 +336,7 @@ pub fn sched_process_exec(ctx: BtfTracePointContext) -> i32 {
         return 0;
     };
     let record = entry.as_mut_ptr();
-    // SAFETY: `record` points to a reserved entry of the right size; the
+    // SAFETY: `record` points to a reserved entry of the right size. The
     // kernel pointers are the tracepoint's arguments.
     unsafe {
         addr_of_mut!((*record).header).write(header(KIND_EXEC, tgid, tid, uid));
@@ -408,7 +408,7 @@ pub fn file_open(ctx: LsmContext) -> i32 {
         return 0;
     };
     let record = entry.as_mut_ptr();
-    // SAFETY: `record` is a reserved entry; `file` is the hook's argument,
+    // SAFETY: `record` is a reserved entry. `file` is the hook's argument,
     // and `file + OFF_FILE_PATH` is its `f_path` member, which the verifier
     // checks against the kernel's BTF before `bpf_d_path` may use it.
     unsafe {
@@ -432,7 +432,7 @@ fn socket_event(kind: u32, socket: *const u8, address: *const u8, addr_len: u32)
         return;
     };
     let record = entry.as_mut_ptr();
-    // SAFETY: `record` is a reserved entry; the kernel pointers come from
+    // SAFETY: `record` is a reserved entry. The kernel pointers come from
     // the hook's arguments.
     unsafe {
         addr_of_mut!((*record).header).write(header(kind, tgid, tid, uid));
@@ -484,7 +484,7 @@ pub fn socket_sendmsg(ctx: LsmContext) -> i32 {
             field_u32(message, &OFF_MSGHDR_NAMELEN),
         )
     };
-    // Sends on a connected socket carry no address; the connect was
+    // Sends on a connected socket carry no address. The connect was
     // recorded already.
     if name != 0 && name_len != 0 {
         socket_event(KIND_SEND, socket, name as *const u8, name_len);
@@ -546,7 +546,7 @@ pub fn sb_mount(ctx: LsmContext) -> i32 {
         return 0;
     };
     let record = entry.as_mut_ptr();
-    // SAFETY: `record` is a reserved entry; `fstype` is a kernel string or
+    // SAFETY: `record` is a reserved entry. `fstype` is a kernel string or
     // null, which the helper reports as an error.
     unsafe {
         addr_of_mut!((*record).header).write(header(KIND_MOUNT, tgid, tid, uid));
