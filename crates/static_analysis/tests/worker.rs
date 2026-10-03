@@ -59,6 +59,7 @@ fn sha(name: &str, version: &str) -> Sha256Digest {
 
 fn tar_with(name: &str, version: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());
+
     for (path, data) in files {
         let mut header = tar::Header::new_gnu();
         header.set_size(data.len() as u64);
@@ -68,6 +69,7 @@ fn tar_with(name: &str, version: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
             .append_data(&mut header, format!("{name}-{version}/{path}"), *data)
             .unwrap();
     }
+
     builder.into_inner().unwrap()
 }
 
@@ -78,9 +80,11 @@ fn tar_of(name: &str, version: &str, build: bool) -> Vec<u8> {
         ("Cargo.toml", manifest.as_bytes()),
         ("src/lib.rs", b"pub fn f() {}\n"),
     ];
+
     if build {
         files.push(("build.rs", b"fn main() {}\n"));
     }
+
     tar_with(name, version, &files)
 }
 
@@ -110,9 +114,11 @@ impl Lab {
     async fn start() -> Option<Self> {
         let db = TestDb::new("static").await?;
         let store = db.migrated().await;
+
         let dir = std::env::temp_dir().join(format!("cw-{}", db.schema()));
         let _ = std::fs::remove_dir_all(&dir);
         let blobs = BlobStore::open(&dir).unwrap();
+
         let analyzer = Analyzer::new(
             db.store().await,
             db.store().await,
@@ -122,6 +128,7 @@ impl Lab {
             policies(),
             Duration::from_secs(30),
         );
+
         Some(Self {
             db,
             dir,
@@ -146,6 +153,7 @@ impl Lab {
             priority: 0,
             index_entry: json!({}),
         };
+
         let id = self.store.enqueue(&new).await.unwrap().unwrap();
         self.store.get(id).await.unwrap().unwrap()
     }
@@ -169,6 +177,7 @@ impl Lab {
             stored_bytes: Some(1),
             report: json!({}),
         };
+
         self.store.record_crate_file(&file).await.unwrap();
     }
 
@@ -221,14 +230,18 @@ impl Lab {
     async fn decide(&self, job: &StoredJob) -> Decision {
         let decision = self.analyzer.process(job).await.unwrap();
         let (triage, reasons, _) = self.store.job_static(job.id).await.unwrap().unwrap();
+
         assert_eq!(triage, serde_json::to_value(decision.triage).unwrap());
         assert_eq!(reasons, json!(decision.reasons));
+
         decision
     }
 
     async fn failure(&self, job: &StoredJob) -> Failure {
         let failure = self.analyzer.process(job).await.unwrap_err();
+
         assert!(self.store.job_static(job.id).await.unwrap().is_none());
+
         failure
     }
 
@@ -246,6 +259,7 @@ impl Lab {
             "SELECT build_time_code, max_severity FROM {}.static_reports WHERE sha256 = $1",
             self.db.schema()
         );
+
         let row = self
             .db
             .admin()
@@ -261,6 +275,7 @@ impl Lab {
             "UPDATE {}.jobs SET version = $1 WHERE id = $2",
             self.db.schema()
         );
+
         self.db
             .admin()
             .execute(&update, &[&version, &job.id.0])
@@ -274,9 +289,11 @@ async fn a_rejected_archive_is_static_only() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let job = lab.job("bomb", "1.0.0").await;
     lab.crate_file(&job, None, 0).await;
     let decision = lab.decide(&job).await;
+
     assert_eq!(
         decision,
         Decision {
@@ -286,6 +303,7 @@ async fn a_rejected_archive_is_static_only() {
     );
     assert_eq!(lab.recorded_diff(&job).await, None);
     assert!(lab.stored_report(&job).await.is_none());
+
     lab.finish().await;
 }
 
@@ -294,11 +312,13 @@ async fn no_lockfile_means_unresolved_dependencies() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let unlocked = lab.analyzed("solo", "1.0.0", true).await;
     let expected = Decision {
         triage: Triage::StaticOnly(StaticOnlyReason::UnresolvedDependencies),
         reasons: reasons(&["cargo could not resolve the dependencies"]),
     };
+
     assert_eq!(lab.decide(&unlocked).await, expected);
     assert_eq!(lab.recorded_diff(&unlocked).await, None);
 
@@ -308,7 +328,9 @@ async fn no_lockfile_means_unresolved_dependencies() {
         .store
         .record_fetch(failed.id, None, Some("no matching package"), &none);
     record.await.unwrap();
+
     assert_eq!(lab.decide(&failed).await, expected);
+
     lab.finish().await;
 }
 
@@ -317,9 +339,11 @@ async fn a_lock_without_registry_dependencies_is_static_only() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let job = lab.analyzed("app", "1.0.0", false).await;
     lab.lock(&job, &[("app", "1.0.0")]).await;
     let decision = lab.decide(&job).await;
+
     assert_eq!(
         decision,
         Decision {
@@ -330,6 +354,7 @@ async fn a_lock_without_registry_dependencies_is_static_only() {
         }
     );
     assert_eq!(lab.recorded_diff(&job).await, None);
+
     lab.finish().await;
 }
 
@@ -338,13 +363,16 @@ async fn an_unreadable_package_list_counts_as_empty() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let job = lab.analyzed("app", "1.0.0", false).await;
     lab.record_packages(&job, &json!({ "not": "a list" })).await;
     let decision = lab.decide(&job).await;
+
     assert_eq!(
         decision.triage,
         Triage::StaticOnly(StaticOnlyReason::NoBuildTimeCode)
     );
+
     lab.finish().await;
 }
 
@@ -356,6 +384,7 @@ async fn familiar_dependencies_and_the_diff_base() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     // Earlier versions. Only 1.0.0 and 1.5.0 count, and 1.5.0 is the base.
     let first = lab.analyzed("app", "1.0.0", false).await;
     lab.lock(
@@ -365,6 +394,7 @@ async fn familiar_dependencies_and_the_diff_base() {
     .await;
     let base = lab.analyzed("app", "1.5.0", false).await;
     lab.lock(&base, &[("app", "1.5.0"), ("old", "1.0.0")]).await;
+
     // A later version and one with an unreadable version teach nothing.
     let later = lab.job("app", "3.0.0").await;
     lab.lock(&later, &[("app", "3.0.0"), ("future", "1.0.0")])
@@ -372,10 +402,12 @@ async fn familiar_dependencies_and_the_diff_base() {
     let odd = lab.job("app", "0.9.0").await;
     lab.lock(&odd, &[("skipped", "1.0.0")]).await;
     lab.set_version(&odd, "oops").await;
+
     // Statistics: popular by reverse dependencies, by downloads, or not.
     lab.stats("by-reverse", 10, 50).await;
     lab.stats("by-downloads", 1000, 0).await;
     lab.stats("almost", 999, 49).await;
+
     // Tracked: a job for exactly that version exists.
     lab.job("tracked", "1.0.0").await;
     lab.job("wrong", "1.0.0").await;
@@ -404,6 +436,7 @@ async fn familiar_dependencies_and_the_diff_base() {
         ("plain-dep", "1.0.0"),
         ("ghost", "1.0.0"),
     ];
+
     let mut list: Vec<Value> = packages
         .iter()
         .map(|(n, v)| json!({ "name": n, "version": v, "checksum": sha(n, v).to_string() }))
@@ -412,6 +445,7 @@ async fn familiar_dependencies_and_the_diff_base() {
     lab.record_packages(&job, &Value::Array(list)).await;
 
     let decision = lab.decide(&job).await;
+
     assert_eq!(
         decision,
         Decision {
@@ -443,6 +477,7 @@ async fn familiar_dependencies_and_the_diff_base() {
     let before = BTreeSet::from(["old".to_owned()]);
     let expected = diff(&report, &previous, "1.5.0", &current, &before);
     let recorded = lab.recorded_diff(&job).await.unwrap();
+
     assert_eq!(recorded, serde_json::to_value(&expected).unwrap());
     assert_eq!(recorded["previous_version"], "1.5.0");
     assert_eq!(recorded["build_script_added"], true);
@@ -461,6 +496,7 @@ async fn familiar_dependencies_and_the_diff_base() {
             "wrong"
         ])
     );
+
     lab.finish().await;
 }
 
@@ -469,6 +505,7 @@ async fn an_earlier_version_without_a_report_gives_no_diff() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let rejected = lab.job("app", "1.0.0").await;
     lab.crate_file(&rejected, None, 0).await;
     lab.lock(&rejected, &[("app", "1.0.0"), ("kept", "1.0.0")])
@@ -480,6 +517,7 @@ async fn an_earlier_version_without_a_report_gives_no_diff() {
     )
     .await;
     let decision = lab.decide(&job).await;
+
     // `kept` is familiar from the earlier lock, `new` has no report and so
     // counts as running code.
     assert_eq!(
@@ -490,6 +528,7 @@ async fn an_earlier_version_without_a_report_gives_no_diff() {
         }
     );
     assert_eq!(lab.recorded_diff(&job).await, None);
+
     lab.finish().await;
 }
 
@@ -498,10 +537,13 @@ async fn a_job_without_a_crate_file_is_an_infrastructure_failure() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let job = lab.job("app", "1.0.0").await;
     let failure = lab.failure(&job).await;
+
     assert_eq!(failure.class, FailureClass::Infrastructure);
     assert_eq!(failure.message, "the fetch stage stored no crate file");
+
     lab.finish().await;
 }
 
@@ -510,17 +552,21 @@ async fn a_name_or_version_that_does_not_parse_fails_for_good() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let mut job = lab.job("app", "1.0.0").await;
     job.name = "not a name".to_owned();
     let failure = lab.failure(&job).await;
+
     assert_eq!(failure.class, FailureClass::Permanent);
     assert!(!failure.message.is_empty());
 
     job.name = "app".to_owned();
     job.version = "one".to_owned();
     let failure = lab.failure(&job).await;
+
     assert_eq!(failure.class, FailureClass::Permanent);
     assert!(!failure.message.is_empty());
+
     lab.finish().await;
 }
 
@@ -529,16 +575,20 @@ async fn a_missing_blob_is_an_infrastructure_failure() {
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let job = lab.job("app", "1.0.0").await;
     lab.crate_file(&job, Some("0".repeat(64)), 10).await;
     lab.lock(&job, &[("app", "1.0.0")]).await;
     let failure = lab.failure(&job).await;
+
     assert_eq!(failure.class, FailureClass::Infrastructure);
 
     let unlocked = lab.job("other", "1.0.0").await;
     lab.crate_file(&unlocked, Some("0".repeat(64)), 10).await;
     let failure = lab.failure(&unlocked).await;
+
     assert_eq!(failure.class, FailureClass::Infrastructure);
+
     lab.finish().await;
 }
 
@@ -549,22 +599,27 @@ async fn missing_reports_are_analyzed_and_recorded() {
     if !sandbox_available() {
         return;
     }
+
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let old_tar = tar_of("app", "1.0.0", false);
     let old = lab.publish("app", "1.0.0", &old_tar).await;
     lab.lock(&old, &[("app", "1.0.0")]).await;
+
     let tars = [
         ("app", "2.0.0", true),
         ("dep-a", "1.0.0", true),
         ("dep-b", "1.0.0", false),
     ]
     .map(|(name, version, build)| (name, version, tar_of(name, version, build)));
+
     let mut jobs = Vec::new();
     for (name, version, tar) in &tars {
         jobs.push(lab.publish(name, version, tar).await);
     }
+
     lab.lock(
         &jobs[0],
         &[
@@ -578,6 +633,7 @@ async fn missing_reports_are_analyzed_and_recorded() {
 
     // `dep-a` runs code at build time, but it has a job of its own.
     let decision = lab.decide(&jobs[0]).await;
+
     assert_eq!(
         decision,
         Decision {
@@ -588,9 +644,11 @@ async fn missing_reports_are_analyzed_and_recorded() {
             ]),
         }
     );
+
     for ((job, (_, _, tar)), build) in jobs.iter().zip(&tars).zip([true, true, false]) {
         let report = report_of(tar);
         let (version, stored) = lab.stored_report(job).await.unwrap();
+
         assert_eq!(version, ANALYZER_VERSION);
         assert_eq!(stored, serde_json::to_value(&report).unwrap());
         assert_eq!(
@@ -598,16 +656,21 @@ async fn missing_reports_are_analyzed_and_recorded() {
             (build, max_severity(&report))
         );
     }
+
     let (version, stored) = lab.stored_report(&old).await.unwrap();
+
     assert_eq!(version, ANALYZER_VERSION);
     assert_eq!(stored, serde_json::to_value(report_of(&old_tar)).unwrap());
+
     let recorded = lab.recorded_diff(&jobs[0]).await.unwrap();
+
     assert_eq!(recorded["previous_version"], "1.0.0");
     assert_eq!(recorded["build_script_added"], true);
     assert_eq!(
         recorded["new_dependencies"],
         json!(["dep-a", "dep-b", "dep-c"])
     );
+
     lab.finish().await;
 }
 
@@ -616,9 +679,11 @@ async fn old_and_damaged_reports_are_analyzed_again() {
     if !sandbox_available() {
         return;
     }
+
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let tar = tar_of("app", "1.0.0", false);
     let job = lab.publish("app", "1.0.0", &tar).await;
     let dep_tar = tar_of("dep", "1.0.0", true);
@@ -633,12 +698,16 @@ async fn old_and_damaged_reports_are_analyzed_again() {
 
     lab.decide(&job).await;
     let (version, report) = lab.stored_report(&job).await.unwrap();
+
     assert_eq!(version, ANALYZER_VERSION);
     assert_eq!(report, fresh);
+
     let (version, report) = lab.stored_report(&dep).await.unwrap();
+
     assert_eq!(version, ANALYZER_VERSION);
     assert_eq!(report, serde_json::to_value(report_of(&dep_tar)).unwrap());
     assert!(lab.report_columns(&dep).await.0);
+
     lab.finish().await;
 }
 
@@ -647,9 +716,11 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
     if !sandbox_available() {
         return;
     }
+
     let Some(mut lab) = Lab::start().await else {
         return;
     };
+
     let tar = tar_of("app", "1.0.0", true);
     let waiting = lab.publish("app", "1.0.0", &tar).await;
     let unscored = lab
@@ -666,6 +737,7 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
         lab.store_report(job, ANALYZER_VERSION - 1, &json!({}))
             .await;
     }
+
     let verdict = Verdict {
         score: 60,
         level: RiskLevel::High,
@@ -675,16 +747,20 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
         new_behavior: Vec::new(),
         analyzer_version: 1,
     };
+
     for job in [&waiting, &broken] {
         lab.store.record_verdict(job.id, &verdict).await.unwrap();
     }
+
     lab.store
         .set_review(waiting.id, Review::Pending, None)
         .await
         .unwrap();
 
     assert_eq!(lab.analyzer.refresh_some().await.unwrap(), 1);
+
     let (version, report) = lab.stored_report(&waiting).await.unwrap();
+
     assert_eq!(version, ANALYZER_VERSION);
     assert_eq!(report, serde_json::to_value(report_of(&tar)).unwrap());
     assert_eq!(
@@ -695,8 +771,10 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
         lab.stored_report(&broken).await.unwrap().0,
         ANALYZER_VERSION - 1
     );
+
     // The archive that fails is not tried again.
     assert_eq!(lab.analyzer.refresh_some().await.unwrap(), 0);
+
     lab.finish().await;
 }
 
@@ -705,9 +783,11 @@ async fn an_archive_without_a_manifest_fails_the_job_after_the_others_are_record
     if !sandbox_available() {
         return;
     }
+
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let broken = tar_with("app", "1.0.0", &[("src/lib.rs", b"")]);
     let job = lab.publish("app", "1.0.0", &broken).await;
     let dep = lab
@@ -715,10 +795,12 @@ async fn an_archive_without_a_manifest_fails_the_job_after_the_others_are_record
         .await;
     lab.lock(&job, &[("app", "1.0.0"), ("dep", "1.0.0")]).await;
     let failure = lab.failure(&job).await;
+
     assert_eq!(failure.class, FailureClass::Permanent);
     assert_eq!(failure.message, "the crate archive could not be analyzed");
     assert!(lab.stored_report(&job).await.is_none());
     assert!(lab.stored_report(&dep).await.is_some());
+
     lab.finish().await;
 }
 
@@ -727,17 +809,22 @@ async fn the_own_report_is_recorded_without_a_lockfile() {
     if !sandbox_available() {
         return;
     }
+
     let Some(lab) = Lab::start().await else {
         return;
     };
+
     let tar = tar_of("solo", "1.0.0", true);
     let job = lab.publish("solo", "1.0.0", &tar).await;
     let decision = lab.decide(&job).await;
+
     assert_eq!(
         decision.triage,
         Triage::StaticOnly(StaticOnlyReason::UnresolvedDependencies)
     );
+
     let (version, stored) = lab.stored_report(&job).await.unwrap();
+
     assert_eq!(version, ANALYZER_VERSION);
     assert_eq!(stored, serde_json::to_value(report_of(&tar)).unwrap());
 
@@ -745,10 +832,12 @@ async fn the_own_report_is_recorded_without_a_lockfile() {
     let broken = tar_with("odd", "1.0.0", &[("src/lib.rs", b"")]);
     let odd = lab.publish("odd", "1.0.0", &broken).await;
     let decision = lab.decide(&odd).await;
+
     assert_eq!(
         decision.triage,
         Triage::StaticOnly(StaticOnlyReason::UnresolvedDependencies)
     );
     assert!(lab.stored_report(&odd).await.is_none());
+
     lab.finish().await;
 }
