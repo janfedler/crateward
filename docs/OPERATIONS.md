@@ -55,9 +55,9 @@ publishes the share of versions with dynamic results.
 | Egress allowlist refresh (`crateward-egress.timer`) | every 2 minutes |
 | Canaries | hourly |
 | Image refresh: `cargo xtask bump-debian-snapshot`, rootfs build, canary, release, deploy ([ADR 0002](adr/0002-firecracker-rootless-jail.md)) | weekly, by the maintainer |
-| Warm build cache | at every orchestrator start (about 13 minutes for 60 replayed jobs. Jobs wait meanwhile). Stop and start the orchestrator to refresh it |
+| Warm build cache | at every orchestrator start. Stop and start the orchestrator to refresh it |
 | Guest kernel rebuild | only when its version or configuration changes |
-| Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every supervisor round |
+| Retention: trim up to 500 run reports older than `storage.raw_log_retention_days` | every `supervisor.interval_secs` (30) |
 | Integrity manifest check | every `supervisor.integrity_interval_minutes` (60) |
 
 ## Host setup
