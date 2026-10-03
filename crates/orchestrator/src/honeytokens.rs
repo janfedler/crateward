@@ -8,12 +8,10 @@
 //! characters for crates.io, `ghp_` plus 36 for GitHub, `AKIA` plus 16 for
 //! AWS), but none of them is valid anywhere.
 
+use crateward_core::guest::HOME;
 use crateward_core::protocol::{FileSpec, PathSpec};
 use rand::RngExt;
 use rand::distr::Alphanumeric;
-
-/// The builder's home directory in the guest, on the scratch disk.
-pub const HOME: &str = "/work/home";
 
 /// One planted value.
 #[derive(Debug, Clone, PartialEq, Eq)]

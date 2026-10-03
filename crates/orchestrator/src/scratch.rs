@@ -22,6 +22,7 @@ use std::path::Path;
 use std::process::{ExitCode, Stdio};
 
 use crateward_core::child::{self, Child, ChildError};
+use crateward_core::guest::WORK;
 use crateward_core::sandbox::{self, FsAccess, Limits};
 use ext4_view::{Ext4, Ext4Error, FileType, Metadata, PathBuf as ExtPath};
 use serde::{Deserialize, Serialize};
@@ -38,9 +39,6 @@ pub const EXPORT: &str = "sandbox-scratch-export";
 /// Bounds of an export.
 const MAX_EXPORT_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const MAX_EXPORT_ENTRIES: u64 = 1_000_000;
-
-/// Where the guest mounts the scratch disk. Paths are reported below it.
-const MOUNT_POINT: &str = "/work";
 
 const MAX_ENTRIES: u64 = 200_000;
 const MAX_DEPTH: usize = 64;
@@ -196,7 +194,7 @@ fn unit_name(relative: &str) -> Option<&str> {
 /// Whether a link points out of the scratch disk: to an absolute path
 /// elsewhere or up with `..`.
 fn leaves_scratch(target: &str) -> bool {
-    (target.starts_with('/') && !target.starts_with(MOUNT_POINT)) || target.contains("..")
+    (target.starts_with('/') && !target.starts_with(WORK)) || target.contains("..")
 }
 
 struct Scanner<'a> {
@@ -267,7 +265,7 @@ impl Scanner<'_> {
             None
         };
         Ok(Entry {
-            path: format!("{MOUNT_POINT}{relative}"),
+            path: format!("{WORK}{relative}"),
             kind: kind(file_type).into(),
             size: meta.len(),
             mode: meta.mode(),
@@ -377,7 +375,7 @@ pub fn scan(fs: &Ext4, spec: &ScanSpec) -> ScratchReport {
         scanner.report.incomplete = true;
     }
     for planted in &spec.planted {
-        let relative = planted.strip_prefix(MOUNT_POINT).unwrap_or(planted);
+        let relative = planted.strip_prefix(WORK).unwrap_or(planted);
         let intact = fs.read(relative).is_ok_and(|data| {
             spec.tokens
                 .iter()

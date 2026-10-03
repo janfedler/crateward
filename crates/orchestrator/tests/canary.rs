@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
+use crateward_core::guest::{self, artifacts};
 use crateward_orchestrator::backend::{FirecrackerBackend, FirecrackerConfig};
 use crateward_orchestrator::canary;
 use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
@@ -45,7 +46,7 @@ async fn canaries_give_their_known_results() {
     let _ = std::fs::remove_dir_all(&work);
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
-    let out = root().join("target/guest/out");
+    let out = root().join(artifacts::OUT);
     let kernel = std::fs::read_dir(&out)
         .unwrap()
         .filter_map(Result::ok)
@@ -59,7 +60,7 @@ async fn canaries_give_their_known_results() {
         "build crateward_fake_internet for musl first"
     );
     let config = FirecrackerConfig {
-        firecracker: root().join("target/guest/bin/firecracker"),
+        firecracker: root().join(artifacts::BIN).join(artifacts::FIRECRACKER),
         launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
         slots_dir,
         slots: 1,
@@ -72,7 +73,7 @@ async fn canaries_give_their_known_results() {
         },
         max_file_size: 3 << 30,
         fake_internet: Some(fake_internet),
-        authority: Some(root().join("target/guest/ca/authority.pem")),
+        authority: Some(root().join(artifacts::AUTHORITY)),
     };
     for placeholder in [
         "placeholder-payload.img",
@@ -83,10 +84,10 @@ async fn canaries_give_their_known_results() {
     }
     let boot = BootSpec {
         kernel,
-        rootfs: out.join("rootfs.erofs"),
+        rootfs: out.join(artifacts::ROOTFS),
         boot_args: format!(
             "{} {}",
-            BootSpec::default_boot_args("/usr/sbin/crateward-agent"),
+            BootSpec::default_boot_args(guest::AGENT),
             BootSpec::network_boot_args()
         ),
         vcpus: 1,

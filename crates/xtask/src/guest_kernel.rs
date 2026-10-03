@@ -13,6 +13,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use crateward_core::guest::artifacts;
 use serde::Deserialize;
 
 use crate::{TaskError, run_in};
@@ -173,7 +174,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let work = root.join("target").join("guest").join("kernel");
     let src = work.join("src");
     let build = work.join("build");
-    let out_dir = root.join("target").join("guest").join("out");
+    let out_dir = root.join(artifacts::OUT);
     for dir in [&build, &out_dir] {
         std::fs::create_dir_all(dir).map_err(|e| TaskError::Io(dir.clone(), e))?;
     }

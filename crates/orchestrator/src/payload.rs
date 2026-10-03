@@ -30,11 +30,6 @@ use crateward_core::cratesio::probe_manifest;
 use crateward_core::name::CrateName;
 use crateward_core::sandbox::{self, FsAccess, Limits};
 
-/// Where the payload is mounted in the guest.
-pub const MOUNT_POINT: &str = "/cw";
-/// The probe directory in the guest, the job's working directory.
-pub const PROBE_DIR: &str = "/cw/probe";
-
 /// First argument of the image building child.
 pub const MKFS: &str = "sandbox-mkfs";
 

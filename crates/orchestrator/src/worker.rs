@@ -15,6 +15,7 @@ use crateward_core::breaker::BreakerState;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
+use crateward_core::guest;
 use crateward_core::job::{BuildOutcome, JobEvent, RunKind, Stage};
 use crateward_core::name::CrateName;
 use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClock, Workspace};
@@ -27,13 +28,10 @@ use crateward_fake_internet::sniff::Sniffed;
 use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
 use crate::canary::Canary;
 use crate::firecracker::vm::JobDrives;
-use crate::honeytokens::{HOME, Honeytokens, Token};
-use crate::payload::{PROBE_DIR, Package, PayloadSpec, PayloadStats, build_image};
+use crate::honeytokens::{Honeytokens, Token};
+use crate::payload::{Package, PayloadSpec, PayloadStats, build_image};
 use crate::scratch::{ScanSpec, ScratchReport};
 use crate::trace::TraceSummary;
-
-/// UID and GID of the guest's `builder` user.
-pub(crate) const BUILDER: u32 = 1000;
 
 /// Output kept per stream in the report.
 const OUTPUT_TAIL: usize = 16 * 1024;
@@ -412,7 +410,7 @@ impl SandboxWorker {
         let spec = canary
             .payload(&self.sandbox.blobs)
             .map_err(Failure::infrastructure)?;
-        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
         let plan = RunPlan::check(setup.check_timeout);
         let files = JobFiles::named(setup, canary.name);
         let result = self.sandbox.execute(0, spec, &tokens, &files, &plan).await;
@@ -502,7 +500,7 @@ impl SandboxWorker {
 
     async fn run_with(&self, job: &StoredJob, files: &JobFiles) -> Result<RunReport, Failure> {
         let (spec, missing) = self.payload_spec(job).await?;
-        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
         self.store
             .record_honeytokens(job.id, &tokens.records())
             .await?;
@@ -654,7 +652,7 @@ impl RunPlan {
                 .iter()
                 .map(|s| (*s).to_owned())
                 .collect(),
-            cwd: PROBE_DIR.into(),
+            cwd: guest::PROBE.into(),
             timeout,
         }
     }
@@ -669,7 +667,7 @@ impl RunPlan {
                 .iter()
                 .map(|s| (*s).to_owned())
                 .collect(),
-            cwd: PROBE_DIR.into(),
+            cwd: guest::PROBE.into(),
             timeout,
         }
     }
@@ -745,10 +743,10 @@ impl Sandbox {
 /// The environment every job starts with, before its honeytokens.
 const BASE_ENV: [(&str, &str); 7] = [
     ("PATH", "/usr/local/bin:/usr/bin:/bin"),
-    ("HOME", HOME),
-    ("USER", "builder"),
-    ("CARGO_HOME", "/work/home/.cargo"),
-    ("CARGO_TARGET_DIR", "/work/target"),
+    ("HOME", guest::HOME),
+    ("USER", guest::BUILDER_USER),
+    ("CARGO_HOME", guest::CARGO_HOME),
+    ("CARGO_TARGET_DIR", guest::TARGET),
     ("CARGO_TERM_COLOR", "never"),
     ("LANG", "C.UTF-8"),
 ];
@@ -876,32 +874,24 @@ fn leaks(tokens: &Honeytokens, found: impl IntoIterator<Item = (usize, String)>)
         .collect()
 }
 
-/// Where the warm image is mounted in the guest, and the overlay's
-/// writable directories, all on the scratch disk.
-pub const WARM_IMAGE_DIR: &str = "/work/.warm/image";
-const WARM_UPPER: &str = "/work/.warm/upper";
-const WARM_WORK: &str = "/work/.warm/work";
-/// The target directory, as cargo sees it.
-pub const TARGET_DIR: &str = "/work/target";
-
 /// The mounts of a job, and the directories to create before it runs. With
 /// `warm`, the warm image's target directory lies under the job's own
-/// writable layer at [`TARGET_DIR`] (ADR 0006). Without it, the target
+/// writable layer at [`guest::TARGET`] (ADR 0006). Without it, the target
 /// directory is a plain directory on the scratch disk.
 #[must_use]
 pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
     let mut mounts = vec![
         MountSpec {
-            device: "/dev/vdb".into(),
-            target: crate::payload::MOUNT_POINT.into(),
+            device: guest::PAYLOAD_DEVICE.into(),
+            target: guest::PAYLOAD.into(),
             fstype: "erofs".into(),
             read_only: true,
             executable: false,
             options: None,
         },
         MountSpec {
-            device: "/dev/vdc".into(),
-            target: "/work".into(),
+            device: guest::SCRATCH_DEVICE.into(),
+            target: guest::WORK.into(),
             fstype: "ext4".into(),
             read_only: false,
             executable: false,
@@ -912,15 +902,15 @@ pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
         return (
             mounts,
             vec![PathSpec {
-                path: TARGET_DIR.into(),
-                owner: BUILDER,
+                path: guest::TARGET.into(),
+                owner: guest::BUILDER_UID,
                 mode: 0o755,
             }],
         );
     }
     mounts.push(MountSpec {
-        device: "/dev/vdd".into(),
-        target: WARM_IMAGE_DIR.into(),
+        device: guest::WARM_DEVICE.into(),
+        target: guest::WARM_IMAGE.into(),
         fstype: "erofs".into(),
         read_only: true,
         // Compiled build scripts and proc macros run from here.
@@ -929,12 +919,15 @@ pub fn job_mounts(warm: bool) -> (Vec<MountSpec>, Vec<PathSpec>) {
     });
     mounts.push(MountSpec {
         device: "overlay".into(),
-        target: TARGET_DIR.into(),
+        target: guest::TARGET.into(),
         fstype: "overlay".into(),
         read_only: false,
         executable: false,
         options: Some(format!(
-            "lowerdir={WARM_IMAGE_DIR}/target,upperdir={WARM_UPPER},workdir={WARM_WORK}"
+            "lowerdir={}/target,upperdir={},workdir={}",
+            guest::WARM_IMAGE,
+            guest::WARM_UPPER,
+            guest::WARM_WORK
         )),
     });
     (mounts, Vec::new())
@@ -1149,14 +1142,14 @@ mod tests {
 
     #[test]
     fn the_job_input_carries_the_plan_the_tokens_and_the_drives() {
-        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
         let plan = RunPlan::check(Duration::from_secs(90));
         let mut files = JobFiles::named(&setup(PathBuf::from("/work")), "job-1");
         files.warm = None;
         let input = job_input(7, &tokens, &files, &plan, 512);
         assert_eq!(input.spec.job_id, 7);
         assert_eq!(input.spec.argv, plan.argv);
-        assert_eq!(input.spec.cwd, PROBE_DIR);
+        assert_eq!(input.spec.cwd, guest::PROBE);
         assert_eq!(input.spec.timeout_secs, 90);
         assert_eq!(input.spec.output_limit, OUTPUT_LIMIT);
         let (base, planted) = input.spec.env.split_at(BASE_ENV.len());
@@ -1181,7 +1174,7 @@ mod tests {
 
     #[test]
     fn a_warm_image_is_mounted_and_replaces_the_placeholder() {
-        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
         let plan = RunPlan::full(Duration::from_secs(3600));
         let files = JobFiles::named(&setup(PathBuf::from("/work")), "job-1");
         let input = job_input(1, &tokens, &files, &plan, 512);
@@ -1403,7 +1396,7 @@ mod tests {
 
     #[test]
     fn leaks_name_the_token_and_where_it_was_seen() {
-        let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+        let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
         let found = leaks(
             &tokens,
             [

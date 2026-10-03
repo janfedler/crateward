@@ -22,16 +22,24 @@
 
 use std::path::{Path, PathBuf};
 
+use crateward_core::guest::{self, artifacts};
 use serde::Deserialize;
 
 use crate::{GUEST_TARGET, TaskError, run_in};
 
-/// Where the agent lives in the guest, and the kernel's `init=`.
-pub const AGENT_PATH_IN_GUEST: &str = "usr/sbin/crateward-agent";
+/// The guest agent, as the image tarball names it.
+const AGENT_IN_IMAGE: &str = in_image(guest::AGENT);
 
-/// Where the agent loads the eBPF programs from
-/// (`crateward_guest_agent::trace::OBJECT_PATH`).
-const EBPF_PATH_IN_GUEST: &str = "usr/lib/crateward/guest-ebpf.o";
+/// The eBPF object, as the image tarball names it.
+const EBPF_IN_IMAGE: &str = in_image(guest::EBPF_OBJECT);
+
+/// A guest path without its leading slash.
+const fn in_image(path: &'static str) -> &'static str {
+    match path.as_bytes() {
+        [b'/', ..] => path.split_at(1).1,
+        _ => path,
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -91,7 +99,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let hook_text = std::fs::read_to_string(&hook).map_err(io(&hook))?;
 
     let work = root.join("target").join("guest").join("rootfs");
-    let out_dir = root.join("target").join("guest").join("out");
+    let out_dir = root.join(artifacts::OUT);
     for dir in [&work, &out_dir] {
         std::fs::create_dir_all(dir).map_err(io(dir))?;
     }
@@ -111,14 +119,14 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         Layer::new(&toolchain, None, &["usr"]),
         // A later entry replaces an earlier one with the same path.
         Layer::new(&trust, Some("0644"), &[TRUST_BUNDLE, TRUST_ANCHOR]),
-        Layer::new(&agent, Some("0755"), &[AGENT_PATH_IN_GUEST]),
-        Layer::new(&agent, Some("0644"), &[EBPF_PATH_IN_GUEST]),
+        Layer::new(&agent, Some("0755"), &[AGENT_IN_IMAGE]),
+        Layer::new(&agent, Some("0644"), &[EBPF_IN_IMAGE]),
     ];
     for layer in &layers {
         append(root, &tarball, &epoch, layer)?;
     }
 
-    let image = out_dir.join("rootfs.erofs");
+    let image = out_dir.join(artifacts::ROOTFS);
     pack_image(root, &tarball, &image, &manifest.image.compression, &epoch)
 }
 
@@ -175,11 +183,11 @@ fn stage_agent(root: &Path, work: &Path) -> Result<PathBuf, TaskError> {
         .join(GUEST_TARGET)
         .join("release")
         .join("crateward_guest_agent");
-    stage_file(&agent, &staging.join(AGENT_PATH_IN_GUEST))?;
+    stage_file(&agent, &staging.join(AGENT_IN_IMAGE))?;
 
     crate::guest_ebpf::run(root)?;
     let ebpf = crate::guest_ebpf::object_path(root);
-    stage_file(&ebpf, &staging.join(EBPF_PATH_IN_GUEST))?;
+    stage_file(&ebpf, &staging.join(EBPF_IN_IMAGE))?;
 
     Ok(staging)
 }
@@ -328,7 +336,7 @@ fn stage_toolchain(root: &Path, pin_path: &Path, work: &Path) -> Result<PathBuf,
     let pin: Toolchain = toml::from_str(&text)
         .map_err(|e| TaskError::Check(format!("guest/rootfs/rust.toml: {e}")))?;
 
-    let downloads = root.join("target").join("guest").join("downloads");
+    let downloads = root.join(artifacts::DOWNLOADS);
     let staging = work.join("toolchain");
     let prefix = staging.join("usr").join("local");
 
@@ -442,9 +450,9 @@ fn authority_certificate(root: &Path) -> Result<String, TaskError> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
-    let ca_dir = root.join("target").join("guest").join("ca");
-    let authority = ca_dir.join("authority.pem");
-    std::fs::create_dir_all(&ca_dir).map_err(io(&ca_dir))?;
+    let authority = root.join(artifacts::AUTHORITY);
+    let ca_dir = authority.parent().unwrap_or(root);
+    std::fs::create_dir_all(ca_dir).map_err(io(ca_dir))?;
 
     if !authority.exists() {
         let (cert, key) = crateward_fake_internet::tls::generate_ca()
@@ -681,21 +689,13 @@ mod stage_tests {
         );
         let paths = [TRUST_BUNDLE, TRUST_ANCHOR];
         assert_eq!(args(&trust), expected(&["--mode=0644"], "/w/trust", &paths));
-        let agent = Layer::new(
-            Path::new("/w/agent-layer"),
-            Some("0755"),
-            &[AGENT_PATH_IN_GUEST],
-        );
+        let agent = Layer::new(Path::new("/w/agent-layer"), Some("0755"), &[AGENT_IN_IMAGE]);
         let paths = ["usr/sbin/crateward-agent"];
         assert_eq!(
             args(&agent),
             expected(&["--mode=0755"], "/w/agent-layer", &paths)
         );
-        let ebpf = Layer::new(
-            Path::new("/w/agent-layer"),
-            Some("0644"),
-            &[EBPF_PATH_IN_GUEST],
-        );
+        let ebpf = Layer::new(Path::new("/w/agent-layer"), Some("0644"), &[EBPF_IN_IMAGE]);
         let paths = ["usr/lib/crateward/guest-ebpf.o"];
         assert_eq!(
             args(&ebpf),
@@ -914,5 +914,30 @@ mod stage_tests {
             "{error}"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod hook_tests {
+    use crateward_core::guest;
+
+    /// The customize hook creates the builder and the mount points where
+    /// the orchestrator and the agent expect them.
+    #[test]
+    fn the_hook_matches_the_guest_layout() {
+        let hook = include_str!("../../../guest/rootfs/customize.sh");
+        let useradd = format!(
+            "useradd --uid {} --user-group --create-home --shell /bin/sh {}",
+            guest::BUILDER_UID,
+            guest::BUILDER_USER
+        );
+        assert!(hook.contains(&useradd), "{useradd}");
+        assert_eq!(guest::BUILDER_GID, guest::BUILDER_UID, "--user-group");
+        let mounts = format!(
+            r#"mkdir -p "$root{}" "$root{}""#,
+            guest::PAYLOAD,
+            guest::WORK
+        );
+        assert!(hook.contains(&mounts), "{mounts}");
     }
 }

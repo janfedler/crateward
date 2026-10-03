@@ -44,6 +44,7 @@ use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
 use crateward_core::config::{Config, SandboxConfig, WarmConfig};
+use crateward_core::guest;
 use crateward_core::store::{Policies, Store, StoreError};
 use secrecy::ExposeSecret;
 use tokio::sync::watch;
@@ -56,9 +57,6 @@ use crate::worker::{Sandbox, SandboxWorker, WorkerSetup};
 
 /// The component this package implements.
 pub const COMPONENT: Component = Component::Orchestrator;
-
-/// Where the guest agent lives in the root filesystem.
-const AGENT_PATH: &str = "/usr/sbin/crateward-agent";
 
 /// Memory for Firecracker itself on top of guest memory.
 const VMM_OVERHEAD_MIB: u64 = 256;
@@ -258,7 +256,7 @@ fn boot_spec(
         rootfs,
         boot_args: format!(
             "{} {}",
-            BootSpec::default_boot_args(AGENT_PATH),
+            BootSpec::default_boot_args(guest::AGENT),
             BootSpec::network_boot_args()
         ),
         vcpus: u8::try_from(sandbox.vcpus_per_slot).map_err(fatal)?,

@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crateward_core::guest::artifacts;
 use serde::Deserialize;
 
 use crate::{TaskError, run_in};
@@ -29,10 +30,7 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
 
 /// Where the built object is placed.
 pub fn object_path(root: &Path) -> PathBuf {
-    root.join("target")
-        .join("guest")
-        .join("out")
-        .join("guest-ebpf.o")
+    root.join(artifacts::OUT).join(artifacts::EBPF)
 }
 
 /// Downloads and verifies the pinned linker. Returns its directory.
@@ -40,7 +38,7 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
     let pin_path = root.join("guest").join("bpf-linker.toml");
     let pin: Pin = toml::from_str(&std::fs::read_to_string(&pin_path).map_err(io(&pin_path))?)
         .map_err(|e| TaskError::Check(format!("guest/bpf-linker.toml: {e}")))?;
-    let dir = root.join("target").join("guest").join("bin");
+    let dir = root.join(artifacts::BIN);
     std::fs::create_dir_all(&dir).map_err(io(&dir))?;
     let archive = dir.join(format!("bpf-linker-{}.tar.zst", pin.version));
     let archive_str = archive.to_string_lossy().into_owned();

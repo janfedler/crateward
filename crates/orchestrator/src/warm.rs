@@ -29,6 +29,7 @@ use std::time::Duration;
 use crateward_core::child::ChildError;
 use crateward_core::config::{SandboxConfig, WarmConfig};
 use crateward_core::digest::Sha256Digest;
+use crateward_core::guest;
 use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::store::Store;
@@ -38,7 +39,7 @@ use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
 use crate::scratch::ScratchReport;
 use crate::trace::TraceSummary;
-use crate::worker::{BUILDER, Failure, JobFiles, Locked, RunPlan, RunReport, Sandbox};
+use crate::worker::{Failure, JobFiles, Locked, RunPlan, RunReport, Sandbox};
 
 /// A crate version.
 type Key = (String, String);
@@ -153,9 +154,9 @@ fn script(plan: &Plan, probe_secs: u64) -> String {
     let mut out = String::from("#!/bin/sh\nslow=\n");
     for (i, stub) in plan.stubs.iter().enumerate() {
         let dir = if i == 0 {
-            "/cw/probe".to_owned()
+            guest::PROBE.to_owned()
         } else {
-            format!("/cw/probes/{}", i - 1)
+            format!("{}/probes/{}", guest::PAYLOAD, i - 1)
         };
         out.push_str(&format!(
             "cd {dir} && timeout -k 10 {probe_secs} cargo check --locked --offline --keep-going\n\
@@ -454,11 +455,11 @@ async fn replay(
     let mut warming = builder.clone();
     warming.setup.scratch_mib = scratch_mib(config);
     let run = RunPlan {
-        argv: vec!["/bin/sh".into(), "/cw/warm.sh".into()],
-        cwd: "/cw".into(),
+        argv: vec!["/bin/sh".into(), format!("{}/warm.sh", guest::PAYLOAD)],
+        cwd: guest::PAYLOAD.into(),
         timeout: Duration::from_secs(config.timeout_secs),
     };
-    let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+    let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
     let report = warming.execute(0, spec, &tokens, files, &run).await?;
     tracing::info!(
         run_ms = report.run_ms,
@@ -546,7 +547,7 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
         warm: Some(image.to_path_buf()),
         ..JobFiles::named(&sandbox.setup, "warm-check")
     };
-    let tokens = Honeytokens::generate(&mut rand::rng(), BUILDER);
+    let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
     let run = RunPlan::check(sandbox.setup.check_timeout);
     let result = sandbox.execute(0, spec, &tokens, &files, &run).await;
     files.remove();

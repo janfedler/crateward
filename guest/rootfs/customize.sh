@@ -4,10 +4,10 @@
 set -eu
 root="$1"
 
-# The unprivileged user that jobs run as (BUILDER_UID in the guest agent).
+# The unprivileged user that jobs run as, and the payload and scratch disk
+# mount points. A test keeps them equal to crateward_core::guest.
 chroot "$root" useradd --uid 1000 --user-group --create-home --shell /bin/sh builder
 
-# Mount points for the job payload and the scratch disk.
 mkdir -p "$root/cw" "$root/work"
 
 # The fake internet answers DNS on the host side of the tap link. Without

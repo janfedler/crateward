@@ -18,6 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crateward_core::guest::{self, artifacts};
 use crateward_core::protocol::{ExitStatus, JobSpec, WallClock};
 use crateward_orchestrator::firecracker::vm::{BootSpec, Isolation, JailConfig, Launch, Vm};
 use tokio::time::Instant;
@@ -35,7 +36,7 @@ fn root() -> PathBuf {
 }
 
 fn boot_spec() -> BootSpec {
-    let out = root().join("target/guest/out");
+    let out = root().join(artifacts::OUT);
     let kernel = std::fs::read_dir(&out)
         .unwrap()
         .filter_map(Result::ok)
@@ -44,8 +45,8 @@ fn boot_spec() -> BootSpec {
         .expect("run `cargo xtask guest-kernel` first");
     BootSpec {
         kernel,
-        rootfs: out.join("rootfs.erofs"),
-        boot_args: BootSpec::default_boot_args("/usr/sbin/crateward-agent"),
+        rootfs: out.join(artifacts::ROOTFS),
+        boot_args: BootSpec::default_boot_args(guest::AGENT),
         vcpus: 1,
         memory_mib: 512,
         drives: None,
@@ -77,7 +78,7 @@ fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
         Isolation::Direct
     };
     Launch {
-        firecracker: root().join("target/guest/bin/firecracker"),
+        firecracker: root().join(artifacts::BIN).join(artifacts::FIRECRACKER),
         dir: scratch(name),
         id: name.into(),
         isolation,

@@ -16,12 +16,10 @@ use std::time::Duration;
 use aya::maps::{Map, MapData, MapError, PerCpuArray, RingBuf};
 use aya::programs::{BtfTracePoint, Lsm, Program, ProgramError};
 use aya::{Btf as AyaBtf, BtfError as AyaBtfError, Ebpf, EbpfError, EbpfLoader};
+use crateward_core::guest::EBPF_OBJECT;
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
 
 use crate::btf::{Btf, BtfError};
-
-/// Where the root filesystem keeps the compiled programs.
-pub const OBJECT_PATH: &str = "/usr/lib/crateward/guest-ebpf.o";
 
 /// Global name, struct and member of every kernel offset the programs use.
 pub const OFFSETS: [(&str, &str, &str); 15] = [
@@ -300,7 +298,7 @@ pub struct Tracer {
 #[derive(Debug, thiserror::Error)]
 pub enum TraceError {
     /// The compiled programs cannot be read.
-    #[error("{}: {}", OBJECT_PATH, .0)]
+    #[error("{}: {}", EBPF_OBJECT, .0)]
     Object(std::io::Error),
     /// The kernel structure offsets are unavailable.
     #[error(transparent)]
@@ -389,14 +387,14 @@ impl std::fmt::Debug for Tracer {
 }
 
 impl Tracer {
-    /// Loads the programs from [`OBJECT_PATH`] and attaches them. Events of
+    /// Loads the programs from [`EBPF_OBJECT`] and attaches them. Events of
     /// `builder_uid` and their descendants are traced.
     ///
     /// # Errors
     ///
     /// Describes the step that failed.
     pub fn start(builder_uid: u32) -> Result<Self, TraceError> {
-        let object = std::fs::read(OBJECT_PATH).map_err(TraceError::Object)?;
+        let object = std::fs::read(EBPF_OBJECT).map_err(TraceError::Object)?;
         let mut ebpf = load(&object, builder_uid)?;
         let kernel_btf = AyaBtf::from_sys_fs()?;
         for name in TRACEPOINTS {

@@ -9,10 +9,9 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use crateward_core::guest::{self, HOME};
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
 use serde::{Deserialize, Serialize};
-
-use crate::honeytokens::HOME;
 
 /// Processes kept in the summary.
 const MAX_PROCESSES: usize = 2000;
@@ -239,7 +238,8 @@ fn is_sensitive(path: &str, pid: u32) -> bool {
 
 /// Whether a write to this path is part of a normal build.
 fn is_build_write(path: &str) -> bool {
-    path.starts_with("/work/")
+    path.strip_prefix(guest::WORK)
+        .is_some_and(|rest| rest.starts_with('/'))
         || path.starts_with("/tmp/")
         || matches!(path, "/dev/null" | "/dev/tty" | "/dev/zero" | "/dev/full")
         || path.starts_with("/dev/pts/")
@@ -445,6 +445,7 @@ impl TraceSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crateward_core::guest::BUILDER_UID;
 
     #[test]
     fn linkers_belong_to_the_toolchain() {
@@ -455,9 +456,6 @@ mod tests {
         assert_eq!(role("/usr/bin/cc"), Role::Toolchain);
         assert_eq!(role("/usr/bin/curl"), Role::Other);
     }
-
-    /// The builder's user ID in the guest.
-    const BUILDER_UID: u32 = 1000;
 
     fn event(pid: u32, uid: u32, ms: u32, kind: TraceKind) -> TraceEvent {
         TraceEvent {

@@ -6,8 +6,9 @@
 //! ([`component`]), the pipeline state machine ([`job`]), the failure
 //! taxonomy ([`failure`]) and retry policy ([`retry`]), verdict coverage
 //! labels ([`verdict`]), the closed list of human escalations
-//! ([`escalation`]), the typed configuration ([`config`]) and the wire
-//! protocol between host and guest ([`protocol`]).
+//! ([`escalation`]), the typed configuration ([`config`]), the guest's
+//! fixed paths ([`guest`]) and the wire protocol between host and guest
+//! ([`protocol`]).
 //!
 //! By default the package is pure: no I/O besides reading the configuration
 //! file, no async runtime and no database. That keeps it cheap to test
@@ -34,6 +35,7 @@ pub mod digest;
 pub mod elf;
 pub mod escalation;
 pub mod failure;
+pub mod guest;
 #[cfg(feature = "http")]
 pub mod http;
 #[cfg(feature = "integrity")]

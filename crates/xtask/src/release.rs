@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crateward_core::guest::artifacts;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -107,8 +108,8 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
     let target = root.join("target");
     let out = target.join("release-bundle").join(&name);
     create_bundle_dir(&out)?;
-    stage_binaries(&target, &out)?;
-    stage_guest(&target, &out)?;
+    stage_binaries(root, &out)?;
+    stage_guest(root, &out)?;
     stage_deploy(root, &out)?;
 
     let sbom_path = out.join("sbom.cdx.json");
@@ -182,7 +183,8 @@ fn create_bundle_dir(out: &Path) -> Result<(), TaskError> {
 
 /// The service binaries, and the sandbox binaries: the launcher, the fake
 /// internet and Firecracker.
-fn stage_binaries(target: &Path, out: &Path) -> Result<(), TaskError> {
+fn stage_binaries(root: &Path, out: &Path) -> Result<(), TaskError> {
+    let target = root.join("target");
     let release = target.join("release");
     for binary in SERVICES {
         copy(&release.join(binary), &out.join("bin").join(binary), 0o755)?;
@@ -192,8 +194,9 @@ fn stage_binaries(target: &Path, out: &Path) -> Result<(), TaskError> {
         &out.join("sandbox/crateward-vmjail"),
         0o755,
     )?;
-    stage_fake_internet(target, out)?;
-    let firecracker = target.join("guest/bin/firecracker");
+    stage_fake_internet(&target, out)?;
+
+    let firecracker = root.join(artifacts::BIN).join(artifacts::FIRECRACKER);
     if !firecracker.is_file() {
         return Err(TaskError::Check(
             "no Firecracker: run `cargo xtask firecracker`".into(),
@@ -219,14 +222,14 @@ fn stage_fake_internet(target: &Path, out: &Path) -> Result<(), TaskError> {
 }
 
 /// The guest kernel, the root filesystem and the authority it trusts.
-fn stage_guest(target: &Path, out: &Path) -> Result<(), TaskError> {
-    let guest = target.join("guest/out");
+fn stage_guest(root: &Path, out: &Path) -> Result<(), TaskError> {
+    let guest = root.join(artifacts::OUT);
     copy(
         &only(&guest, "kernel-", ".bzImage")?,
         &out.join("guest/kernel.bzImage"),
         0o644,
     )?;
-    let rootfs = guest.join("rootfs.erofs");
+    let rootfs = guest.join(artifacts::ROOTFS);
     if !rootfs.is_file() {
         return Err(TaskError::Check(
             "no root filesystem: run `cargo xtask rootfs`".into(),
@@ -235,7 +238,7 @@ fn stage_guest(target: &Path, out: &Path) -> Result<(), TaskError> {
     copy(&rootfs, &out.join("guest/rootfs.erofs"), 0o644)?;
     // The image trusts exactly this authority, so both come from one build.
     copy(
-        &target.join("guest/ca/authority.pem"),
+        &root.join(artifacts::AUTHORITY),
         &out.join("guest/authority.pem"),
         0o600,
     )
@@ -582,28 +585,35 @@ mod tests {
         bytes
     }
 
-    /// The build outputs that a bundle is made from.
-    fn fake_target(dir: &Path) -> PathBuf {
+    /// The build outputs that a bundle is made from, under `dir` as the
+    /// workspace root.
+    fn fake_build(dir: &Path) {
         let target = dir.join("target");
         for binary in SERVICES.iter().chain(&["crateward-vmjail"]) {
             write(&target.join("release").join(binary), "binary");
         }
         let fake = target.join(GUEST_TARGET).join("release");
         write(&fake.join("crateward_fake_internet"), elf(false));
-        write(&target.join("guest/bin/firecracker"), "firecracker");
-        write(&target.join("guest/out/kernel-6.1.bzImage"), "kernel");
-        write(&target.join("guest/out/rootfs.erofs"), "rootfs");
-        write(&target.join("guest/ca/authority.pem"), "authority");
-        target
+        write(&firecracker(dir), "firecracker");
+        write(
+            &dir.join(artifacts::OUT).join("kernel-6.1.bzImage"),
+            "kernel",
+        );
+        write(&dir.join(artifacts::OUT).join(artifacts::ROOTFS), "rootfs");
+        write(&dir.join(artifacts::AUTHORITY), "authority");
+    }
+
+    fn firecracker(dir: &Path) -> PathBuf {
+        dir.join(artifacts::BIN).join(artifacts::FIRECRACKER)
     }
 
     #[test]
     fn the_binaries_are_staged_and_executable() {
         let dir = scratch("binaries");
-        let target = fake_target(&dir);
+        fake_build(&dir);
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
-        stage_binaries(&target, &out).unwrap();
+        stage_binaries(&dir, &out).unwrap();
         for binary in SERVICES {
             assert_eq!(mode(&out.join("bin").join(binary)), 0o755, "{binary}");
         }
@@ -616,11 +626,11 @@ mod tests {
     #[test]
     fn a_missing_binary_is_named() {
         let dir = scratch("missing");
-        let target = fake_target(&dir);
-        std::fs::remove_file(target.join("release/crateward_feed")).unwrap();
+        fake_build(&dir);
+        std::fs::remove_file(dir.join("target/release/crateward_feed")).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
-        let error = stage_binaries(&target, &out).unwrap_err();
+        let error = stage_binaries(&dir, &out).unwrap_err();
         assert!(
             error.to_string().contains("crateward_feed is missing"),
             "{error}"
@@ -631,14 +641,15 @@ mod tests {
     #[test]
     fn a_fake_internet_that_needs_a_loader_is_refused() {
         let dir = scratch("loader");
-        let target = fake_target(&dir);
-        let fake = target
+        fake_build(&dir);
+        let fake = dir
+            .join("target")
             .join(GUEST_TARGET)
             .join("release/crateward_fake_internet");
         write(&fake, elf(true));
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
-        let error = stage_binaries(&target, &out).unwrap_err();
+        let error = stage_binaries(&dir, &out).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -651,11 +662,11 @@ mod tests {
     #[test]
     fn a_missing_firecracker_names_its_task() {
         let dir = scratch("firecracker");
-        let target = fake_target(&dir);
-        std::fs::remove_file(target.join("guest/bin/firecracker")).unwrap();
+        fake_build(&dir);
+        std::fs::remove_file(firecracker(&dir)).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
-        let error = stage_binaries(&target, &out).unwrap_err();
+        let error = stage_binaries(&dir, &out).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -667,10 +678,10 @@ mod tests {
     #[test]
     fn the_guest_files_are_staged_with_their_modes() {
         let dir = scratch("guest");
-        let target = fake_target(&dir);
+        fake_build(&dir);
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
-        stage_guest(&target, &out).unwrap();
+        stage_guest(&dir, &out).unwrap();
         assert_eq!(mode(&out.join("guest/kernel.bzImage")), 0o644);
         assert_eq!(mode(&out.join("guest/rootfs.erofs")), 0o644);
         assert_eq!(mode(&out.join("guest/authority.pem")), 0o600);
@@ -684,11 +695,11 @@ mod tests {
     #[test]
     fn a_missing_root_filesystem_names_its_task() {
         let dir = scratch("rootfs");
-        let target = fake_target(&dir);
-        std::fs::remove_file(target.join("guest/out/rootfs.erofs")).unwrap();
+        fake_build(&dir);
+        std::fs::remove_file(dir.join(artifacts::OUT).join(artifacts::ROOTFS)).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
-        let error = stage_guest(&target, &out).unwrap_err();
+        let error = stage_guest(&dir, &out).unwrap_err();
         assert!(
             error
                 .to_string()

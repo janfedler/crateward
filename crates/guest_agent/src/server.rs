@@ -8,15 +8,16 @@
 
 use std::io::{Read, Write};
 
+use crateward_core::guest::{BUILDER_GID, BUILDER_UID};
 use crateward_core::protocol::{
     GuestMessage, HostMessage, JobSpec, MAX_FRAME_LEN, PROTOCOL_VERSION, ProtocolError,
     TracingStatus, read_message, write_message,
 };
 use vsock::{VMADDR_CID_ANY, VsockListener};
 
+use crate::AgentError;
 use crate::runner::{RunOptions, run_job};
 use crate::trace::{TraceError, Tracer};
-use crate::{AgentError, BUILDER_GID, BUILDER_UID};
 
 /// What the agent does after a conversation ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

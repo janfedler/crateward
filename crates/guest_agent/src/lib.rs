@@ -38,12 +38,6 @@ use crateward_core::component::Component;
 /// The component this package implements.
 pub const COMPONENT: Component = Component::GuestAgent;
 
-/// User ID that jobs run as. Created in the root filesystem as `builder`.
-pub const BUILDER_UID: u32 = 1000;
-
-/// Group ID that jobs run as.
-pub const BUILDER_GID: u32 = 1000;
-
 /// Why the agent failed.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
