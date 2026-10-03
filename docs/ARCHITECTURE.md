@@ -26,9 +26,11 @@ Three properties of the host shape everything below.
   and per job scratch disks live in tmpfs. The disks hold durable data.
 * **No ECC, plain ext4.** The memory has no ECC, and the disks are an md
   RAID1 with ext4, unencrypted ([ADR 0003](adr/0003-debian-ansible-ssh.md)).
-  Neither checksums data, so Crateward does: content addressed blobs are verified
-  by their BLAKE3 digest on every read, images by BLAKE3 manifests, crate
-  files by the index SHA-256, and PostgreSQL pages by data checksums.
+  Neither checksums data, so Crateward does:
+  * content addressed blobs by their BLAKE3 digest on every read,
+  * images by BLAKE3 manifests,
+  * crate files by the index SHA-256,
+  * PostgreSQL pages by data checksums.
 
 ## Zones
 
@@ -39,7 +41,7 @@ and a unit test checks that only the guest executes crate code.
 | Zone | Components | Executes crate code | Internet |
 |------|------------|---------------------|----------|
 | Trusted | feed, fetcher, static analysis | never | crates.io hosts only (fetcher) |
-| Untrusted | orchestrator, warmer, fake internet | only inside microVMs | none |
+| Untrusted | orchestrator, fake internet | only inside microVMs | none |
 | Control plane | analyzer, api, supervisor, cli, Postgres | never | the alert service, GitHub (export) |
 | Guest | guest agent, crate under analysis | yes | none. The fake internet only |
 
@@ -86,48 +88,55 @@ flowchart LR
 
 ## Data flow
 
-One Postgres row per crate version tracks the whole pipeline. Every stage
-claims rows in its input state with `SELECT ... FOR UPDATE SKIP LOCKED`,
-holds a lease renewed by heartbeats, performs an idempotent step, and reports
-an event to the state machine. See [ADR 0001](adr/0001-one-server-postgres-queue.md).
+One Postgres row per crate version tracks the whole pipeline
+([ADR 0001](adr/0001-one-server-postgres-queue.md)). Every stage:
+
+* claims rows in its input state with `SELECT ... FOR UPDATE SKIP LOCKED`,
+* holds a lease renewed by heartbeats,
+* performs an idempotent step,
+* and reports an event to the state machine.
+
+The stages in order:
 
 1. **feed** sees a new version in the RSS feeds, confirms it in the sparse
    index, and creates the job. The daily database dump reconciles anything
    the feeds missed and provides the popularity data behind priorities.
-2. **fetcher** downloads the `.crate` file, verifies its SHA-256 against the
-   index, validates the archive in a sandboxed child without extracting it,
-   resolves all dependencies for all targets with `cargo generate-lockfile`
-   on a generated consumer probe (sandboxed, no compiler), fetches and
-   validates every locked crate, and stores them as content addressed blobs
-   ([ADR 0004](adr/0004-resolve-fetch-validate.md)).
+2. **fetcher** downloads the `.crate` file and verifies its SHA-256 against
+   the index. It validates the archive in a sandboxed child without
+   extracting it.
+
+   It then resolves all dependencies for all targets with
+   `cargo generate-lockfile` on a generated consumer probe (sandboxed, no
+   compiler). Every locked crate is fetched, validated and stored as a
+   content addressed blob ([ADR 0004](adr/0004-resolve-fetch-validate.md)).
 3. **static analysis** parses every Rust file with `syn` across all `cfg`
    branches in a sandboxed child, runs detectors and YARA-X rules, diffs
    against the previous version, and decides the triage: dynamic, static
    only, or not applicable on Linux
    ([ADR 0005](adr/0005-static-analysis-and-triage.md)).
 4. The job becomes ready for the sandbox, or goes straight to scoring.
-5. **orchestrator** claims the job when a VM slot is free, builds the job's
-   read only payload image and scratch disk, restores the base snapshot,
-   points its placeholder drives at them, and has the agent mount them and
-   plant fresh honeytokens
-   ([ADR 0006](adr/0006-dynamic-runs.md)).
-6. **guest agent** runs `cargo check` as an unprivileged user and streams
-   its output and an eBPF trace (processes, file opens, connections and tamper
-   attempts, see [ADR 0007](adr/0007-guest-agent-ebpf.md)) over the
-   single vsock connection. The fake internet records every network attempt
-   as host side ground truth, including frames no proxy sees
-   ([ADR 0006](adr/0006-dynamic-runs.md)), and after the
-   run the host reads the scratch disk in a sandboxed child
-   ([ADR 0006](adr/0006-dynamic-runs.md)). Planned: cross target
-   checks where the crate has platform specific code.
+5. **orchestrator** claims the job when a VM slot is free
+   ([ADR 0006](adr/0006-dynamic-runs.md)). It builds the job's read only
+   payload image and scratch disk and restores the base snapshot. The
+   snapshot's placeholder drives are pointed at them, and the agent mounts
+   them and plants fresh honeytokens.
+6. **guest agent** runs `cargo check` as an unprivileged user. It streams
+   the output and an eBPF trace over the single vsock connection
+   ([ADR 0007](adr/0007-guest-agent-ebpf.md)). The trace covers processes,
+   file opens, connections and tamper attempts.
+
+   Two host side views complete the picture. The fake internet records
+   every network attempt, including frames no proxy sees. After the run the
+   host reads the scratch disk in a sandboxed child.
+
+   Planned: cross target checks where the crate has platform specific code.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
-8. **analyzer** finalizes: high and critical verdicts wait in the "needs
-   you" inbox of the dashboard (**api**), the **supervisor** raises alerts
-   from the closed escalation list, and the api exports aggregate numbers
-   to the public site
-   ([ADR 0009](adr/0009-scoring-and-dashboard.md),
-   [ADR 0009](adr/0009-scoring-and-dashboard.md)).
+8. **analyzer** finalizes ([ADR 0009](adr/0009-scoring-and-dashboard.md)):
+   * High and critical verdicts wait in the "needs you" inbox of the
+     dashboard (**api**).
+   * The **supervisor** raises alerts from the closed escalation list.
+   * The api exports aggregate numbers to the public site.
 
 ## Job state machine
 
@@ -206,9 +215,7 @@ Notes on the design:
 
 ## Triage and capacity
 
-Crates.io publishes on the order of 500 versions per hour at busy times (one
-sample from the RSS feed on 2026-09-24: 514 versions in 60 minutes). One
-vCPU per core cannot run all of them, so:
+There are far more new versions than VM slots, so:
 
 * Every version gets static analysis.
 * A version gets a VM run only if it has build time code of its own (a build
@@ -221,30 +228,38 @@ vCPU per core cannot run all of them, so:
   scored as static only, and its label says why.
 * The dashboard publishes the share of versions with dynamic results.
 
-A version whose own code has no build time component executes nothing of its
-own during `cargo check`, so labeling it "static only, no build time code"
-loses little. Its dependencies' build scripts are analyzed as their own
-versions.
+A version without build time code of its own executes nothing of its own
+during `cargo check`. Labeling it "static only, no build time code" loses
+little.
+
+Its dependencies' build scripts are analyzed as their own versions.
 
 ## MicroVM lifecycle
 
 The orchestrator drives Firecracker 1.17 through its API socket and always
 starts it in a rootless jail ([ADR 0002](adr/0002-firecracker-rootless-jail.md)).
 
-* **No root.** A single threaded launcher, `crateward-vmjail`, joins the
-  slot's cgroup, creates a user namespace in which the slot's own
-  subordinate UID stands for Firecracker, then mount, network, IPC and UTS
-  namespaces. It bind mounts exactly the kernel, the images and
-  `/dev/kvm`, creates the slot's tap device, calls `pivot_root`, drops
-  every capability, sets `no_new_privs` and executes Firecracker, whose own
-  seccomp filter then applies. Namespaces and tap devices die with the process.
-* **Restore, then personalize.** Jobs restore a Full snapshot of a clean boot
-  (Diff snapshots are a developer preview). Firecracker's documentation calls
-  resuming one snapshot many times insecure for uniqueness, so the job
-  identity, honeytokens and wall clock are sent over vsock after restore,
-  and the guest waits for the VMGenID reseed. `PUT /snapshot/load` supports
-  `network_overrides` and `vsock_override`, and each jail provides the same
-  relative paths the snapshot expects.
+* **No root.** A single threaded launcher, `crateward-vmjail`, prepares
+  each VM:
+  1. It joins the slot's cgroup.
+  2. It creates a user namespace in which the slot's own subordinate UID
+     stands for Firecracker, then mount, network, IPC and UTS namespaces.
+  3. It bind mounts exactly the kernel, the images and `/dev/kvm`, and
+     creates the slot's tap device.
+  4. It calls `pivot_root`, drops every capability, sets `no_new_privs` and
+     executes Firecracker, whose own seccomp filter then applies.
+
+  Namespaces and tap devices die with the process.
+* **Restore, then personalize.** Jobs restore a Full snapshot of a clean
+  boot (Diff snapshots are a developer preview).
+
+  Firecracker's documentation calls resuming one snapshot many times
+  insecure for uniqueness. So the job identity, honeytokens and wall clock
+  are sent over vsock after restore, and the guest waits for the VMGenID
+  reseed.
+
+  `PUT /snapshot/load` supports `network_overrides` and `vsock_override`,
+  and each jail provides the same relative paths the snapshot expects.
 * **Payload.** The host builds a read only EROFS image of the job's vendored
   sources in tmpfs and swaps it in with `PATCH /drives/{id}` after restore.
   The warm build cache is a third drive, switched the same way. Inside the
@@ -262,18 +277,26 @@ starts it in a rootless jail ([ADR 0002](adr/0002-firecracker-rootless-jail.md))
 
 ## Network
 
-Each slot has its own network namespace, created by the rootless jail. All
-clones share the guest IP (`10.0.2.2`) and MAC address baked into the
-snapshot, which works because the namespaces are isolated. The namespace
-holds only the tap device (`10.0.2.1` on the host side) and one fake
-internet process, which runs as the slot's user without filesystem access.
+Each slot has its own network namespace, created by the rootless jail
+([ADR 0006](adr/0006-dynamic-runs.md)). All clones share the guest IP
+(`10.0.2.2`) and MAC address baked into the snapshot. This works because
+the namespaces are isolated.
+
+The namespace holds only:
+
+* the tap device (`10.0.2.1` on the host side),
+* one fake internet process, running as the slot's user without filesystem
+  access.
+
 There is no uplink and no route out, so a guest cannot reach the real
-internet at all. nftables in the namespace redirects every DNS query, TCP
-connection and UDP datagram to the fake internet, which recovers the
-intended TCP destination with `SO_ORIGINAL_DST` and logs each attempt with
-its first 64 KiB. That log is read after the run as ground truth and
-searched for the job's honeytokens
-([ADR 0006](adr/0006-dynamic-runs.md)).
+internet at all.
+
+nftables in the namespace redirects every DNS query, TCP connection and UDP
+datagram to the fake internet. It recovers the intended TCP destination
+with `SO_ORIGINAL_DST` and logs each attempt with its first 64 KiB. After
+the run, that log serves as ground truth and is searched for the job's
+honeytokens.
+
 TLS is terminated with Crateward's own authority, which the guest image
 trusts, so the content of HTTPS requests is logged too. IPv6 logging is
 still open.
@@ -281,30 +304,29 @@ still open.
 ## Build cache
 
 At startup the orchestrator replays the dependency builds of recent jobs in
-a VM, with each crate under analysis replaced by a stub, and packs the
-resulting target directory into a read only image. Every job then mounts it
-under its own writable layer and compiles only what the image lacks. Only
-versions Crateward has stored for two weeks, seen in several jobs and found
-without high severity static findings enter it. The warm build is analyzed
-like a job and a promotion check guards its use. In the measurement, run
-time fell by 28 percent. See
-[ADR 0006](adr/0006-dynamic-runs.md).
+a VM, with each crate under analysis replaced by a stub
+([ADR 0006](adr/0006-dynamic-runs.md)). It packs the resulting target
+directory into a read only image. Every job mounts it under its own
+writable layer and compiles only what the image lacks.
+
+A version enters the image only if Crateward has stored it for two weeks,
+seen it in several jobs and found no high severity static findings. The
+warm build is analyzed like a job, and a promotion check guards its use.
+
+In the measurement, run time fell by 28 percent.
 
 ## Storage layout
 
-| Location | Medium | Contents |
-|----------|--------|----------|
-| `/boot` | md RAID1 | kernel and initramfs |
-| `/` and `/var/lib` | ext4 on md RAID1, unencrypted | Postgres, content addressed store, evidence, logs, image archive |
-| `/run/crateward` | tmpfs with a hard cap | base snapshot, warm image, per job payload and scratch images (sparse files), slot jails |
+See the [storage layout in OPERATIONS.md](OPERATIONS.md#storage-layout).
 
 ## Egress
 
 Every allowlist is enforced per service user by nftables sets that are filled
-from DNS (`deploy/nftables/crateward.nft`). `crateward egress` derives the
-hosts from the configuration, and a root timer loads them every two
-minutes. A packet from a slot UID on the host network is logged and
-dropped.
+from DNS (`deploy/nftables/crateward.nft`).
+
+* `crateward egress` derives the hosts from the configuration.
+* A root timer loads them every two minutes.
+* A packet from a slot UID on the host network is logged and dropped.
 
 | Service user | Destinations | Purpose |
 |--------------|--------------|---------|
@@ -320,18 +342,18 @@ The only inbound path is SSH with keys only. See
 
 ## Package map
 
-| Package | Zone | Milestone |
-|---------|------|-----------|
-| `crateward_core` | shared | M0 |
-| `crateward_feed` | trusted | M2 |
-| `crateward_fetcher` | trusted | M2 |
-| `crateward_static_analysis` | trusted | M3 |
-| `crateward_orchestrator` | untrusted | M1, warmer in M1.5 |
-| `crateward_guest_agent` | guest | M4 |
-| `crateward_guest_ebpf` (GPL-2.0-only, own workspace) | guest | M4 |
-| `crateward_fake_internet` | untrusted | M4 |
-| `crateward_analyzer` | control plane | M6 |
-| `crateward_api` | control plane | M6 |
-| `crateward_supervisor` | control plane | M5 |
-| `crateward_cli` | control plane | grows with each milestone |
-| `crateward_xtask` | development | M0 |
+| Package | Zone |
+|---------|------|
+| `crateward_core` | shared |
+| `crateward_feed` | trusted |
+| `crateward_fetcher` | trusted |
+| `crateward_static_analysis` | trusted |
+| `crateward_orchestrator` | untrusted |
+| `crateward_guest_agent` | guest |
+| `crateward_guest_ebpf` (GPL-2.0-only, own workspace) | guest |
+| `crateward_fake_internet` | untrusted |
+| `crateward_analyzer` | control plane |
+| `crateward_api` | control plane |
+| `crateward_supervisor` | control plane |
+| `crateward_cli` | control plane |
+| `crateward_xtask` | development |
