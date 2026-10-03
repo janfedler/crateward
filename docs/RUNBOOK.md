@@ -35,8 +35,8 @@ filling, the sandbox stage stops claiming jobs.
 
 **What to do.**
 1. `df -h / /run/crateward` shows which filesystem is affected.
-2. Check the storage budget table in [OPERATIONS.md](OPERATIONS.md) for the
-   component that grew.
+2. `du -sh` on the directories in the storage layout of
+   [OPERATIONS.md](OPERATIONS.md) shows the component that grew.
 3. Shorten `storage.raw_log_retention_days` or prune the image archive to
    the last two promoted versions.
 

@@ -37,33 +37,6 @@ PostgreSQL clusters are created with data checksums enabled.
 | Scratch tmpfs | 3 × 4 GiB cap |
 | Headroom and page cache | the rest |
 
-## Storage budget
-
-Target 100 to 200 GB in steady state. Measured on 2026-09-25 over the first
-live day: 2266 versions fetched, 734 dynamic runs, feed database of 190 MB.
-The rates below are per 1000 versions, from the two busiest hours (1466
-versions).
-
-| Item | Measured | Per 1000 versions |
-|------|----------|-------------------|
-| Content addressed store (zstd), crate files and their dependencies | 1.7 GB | about 540 MB. Falls as dependencies repeat |
-| Original `.crate` files | 616 MB | about 300 MB |
-| Postgres, all tables | 190 MB | about 85 MB |
-| of which fetch records (lockfile and resolution) | 70 MB | 31 MB |
-| of which run reports, before trimming | 24 MB | 48 kB per run, up to 255 kB |
-| of which static reports | 14 MB | 6 MB |
-| Behavior profiles and diffs | inside the run reports and verdicts | |
-| Guest image versions (current and previous) | about 800 MB each | |
-| Database dump (latest only, streamed) | about the database size, compressed | |
-
-Retention trims the raw part of unflagged run reports (the process list
-and the output tails, 87 percent of the stored reports) after
-`storage.raw_log_retention_days`. The blob store and the originals have no
-retention yet: at the first day's rate they grow by about 0.85 GB per 1000
-versions, which reaches the target within months. Deduplication will lower
-the rate. How far is measured again after a week. Pruning originals that
-the blob store already holds is a decision for the maintainer.
-
 ## Capacity
 
 Three VM slots of one vCPU each. Static analysis runs on every version.
