@@ -88,6 +88,5 @@ asks not to be the first recipient.
 
 ## Sources
 
-* crates.io security page, `svelte/src/routes/policies/security/+page.svelte`
-  in `https://github.com/rust-lang/crates.io`
+* [crates.io security policy](https://crates.io/policies/security)
 * RustSec `CONTRIBUTING.md`, `https://github.com/rustsec/advisory-db`
