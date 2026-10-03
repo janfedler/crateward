@@ -28,6 +28,7 @@ use crateward_core::blobs::{BlobError, BlobStore};
 use crateward_core::child::{self, Child, ChildError};
 use crateward_core::cratesio::probe_manifest;
 use crateward_core::name::CrateName;
+use crateward_core::paths::host::MKFS_EROFS;
 use crateward_core::sandbox::{self, FsAccess, Limits};
 
 /// First argument of the image building child.
@@ -35,9 +36,6 @@ pub const MKFS: &str = "sandbox-mkfs";
 
 /// The image building child in error messages.
 const NAME: &str = "image builder";
-
-/// `mkfs.erofs` from Debian's `erofs-utils`.
-const MKFS_EROFS: &str = "/usr/bin/mkfs.erofs";
 
 /// What the image builder may use.
 const LIMITS: Limits = Limits {

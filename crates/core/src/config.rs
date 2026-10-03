@@ -28,9 +28,6 @@ use crate::retry::RetryPolicy;
 /// something that is not a configuration file.
 pub const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
-/// Default location of the configuration file on the server.
-pub const DEFAULT_CONFIG_PATH: &str = "/etc/crateward/crateward.toml";
-
 /// The complete configuration.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

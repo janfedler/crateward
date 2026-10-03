@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crateward_core::integrity;
+use crateward_core::paths::host;
 use rustix::fs::inotify;
 
 use crate::checks::{self, HostProcess};
@@ -41,7 +42,7 @@ impl Integrity {
         let inotify =
             inotify::init(inotify::CreateFlags::NONBLOCK | inotify::CreateFlags::CLOEXEC)?;
         Ok(Self {
-            manifest: data_dir.join(integrity::MANIFEST),
+            manifest: data_dir.join(host::INTEGRITY_MANIFEST),
             interval,
             next_manifest_check: Instant::now(),
             warned_no_manifest: false,

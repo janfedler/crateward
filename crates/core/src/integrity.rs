@@ -18,9 +18,6 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 
-/// The manifest's file name in `instance.data_dir`.
-pub const MANIFEST: &str = "integrity.b3";
-
 /// Failure to record or read a manifest.
 #[derive(Debug, thiserror::Error)]
 pub enum IntegrityError {

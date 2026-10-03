@@ -16,7 +16,7 @@ use std::time::Duration;
 use aya::maps::{Map, MapData, MapError, PerCpuArray, RingBuf};
 use aya::programs::{BtfTracePoint, Lsm, Program, ProgramError};
 use aya::{Btf as AyaBtf, BtfError as AyaBtfError, Ebpf, EbpfError, EbpfLoader};
-use crateward_core::guest::EBPF_OBJECT;
+use crateward_core::paths::guest::EBPF_OBJECT;
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
 
 use crate::btf::{Btf, BtfError};

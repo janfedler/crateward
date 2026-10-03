@@ -15,9 +15,9 @@ use crateward_core::breaker::BreakerState;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
-use crateward_core::guest;
 use crateward_core::job::{BuildOutcome, JobEvent, RunKind, Stage};
 use crateward_core::name::CrateName;
+use crateward_core::paths::{guest, host};
 use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClock, Workspace};
 use crateward_core::store::{PauseReason, Policies, Store, StoreError, StoredJob, heartbeat};
 use serde::{Deserialize, Serialize};
@@ -987,7 +987,7 @@ async fn make_scratch(mib: u64, path: &Path) -> Result<(), Failure> {
     file.set_len(mib * 1024 * 1024)
         .map_err(Failure::infrastructure)?;
     drop(file);
-    let status = tokio::process::Command::new("/usr/sbin/mkfs.ext4")
+    let status = tokio::process::Command::new(host::MKFS_EXT4)
         .args([
             "-q",
             "-F",

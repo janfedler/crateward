@@ -44,7 +44,7 @@ use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
 use crateward_core::config::{Config, SandboxConfig, WarmConfig};
-use crateward_core::guest;
+use crateward_core::paths::{guest, host};
 use crateward_core::store::{Policies, Store, StoreError};
 use secrecy::ExposeSecret;
 use tokio::sync::watch;
@@ -107,7 +107,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
             warm: None,
             warm_placeholder: work.join("placeholder-warm.img"),
         },
-        blobs: BlobStore::open(&config.instance.data_dir.join("cas")).map_err(fatal)?,
+        blobs: BlobStore::open(&config.instance.data_dir.join(host::BLOBS)).map_err(fatal)?,
     };
     if let Some(warm_config) = &sandbox.warm {
         template.setup.warm = warm_cache(&booted, &template, &store, warm_config, &stop).await?;
@@ -147,7 +147,7 @@ async fn boot(config: &Config) -> Result<Booted, ComponentError> {
     let cgroups = CgroupTree::own().map_err(fatal)?;
     let fc = firecracker_config(sandbox, authority);
     check_host(sandbox)?;
-    let work = config.instance.run_dir.join("orchestrator");
+    let work = config.instance.run_dir.join(host::ORCHESTRATOR_WORK);
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(fatal)?;
     let boot = boot_spec(sandbox, kernel, rootfs, placeholders(&work)?)?;

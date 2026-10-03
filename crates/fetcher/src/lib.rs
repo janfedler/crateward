@@ -38,6 +38,7 @@ use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::http::{ClientConfig, Fetched, PoliteClient};
+use crateward_core::paths::host;
 use crateward_core::store::{Policies, Store};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
@@ -94,8 +95,8 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
     store.migrate().await?;
     let heartbeats = Store::connect(url).await?;
     let data = &config.instance.data_dir;
-    let blobs = BlobStore::open(&data.join("cas"))?;
-    let work_root = config.instance.run_dir.join("fetch");
+    let blobs = BlobStore::open(&data.join(host::BLOBS))?;
+    let work_root = config.instance.run_dir.join(host::FETCH_WORK);
     std::fs::create_dir_all(&work_root).map_err(|e| format!("{}: {e}", work_root.display()))?;
     let setup = FetcherSetup {
         exe: std::env::current_exe()?,
@@ -104,7 +105,7 @@ async fn start(config: &Config) -> Result<Fetcher, Box<dyn Error>> {
         originals: config
             .fetcher
             .keep_originals
-            .then(|| data.join("originals")),
+            .then(|| data.join(host::ORIGINALS)),
         dl,
         blobs,
     };

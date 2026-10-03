@@ -5,6 +5,7 @@ use std::time::UNIX_EPOCH;
 
 use crateward_core::attack;
 use crateward_core::job::JobId;
+use crateward_core::paths::host;
 use crateward_core::store::{Review, Store, StoreError, StoredEvent, StoredJob};
 use crateward_core::verdict::Verdict;
 use serde_json::{Value, json};
@@ -167,7 +168,7 @@ async fn static_document(store: &Store, stored: &StoredJob) -> Result<Value, Sto
 /// serves, so a missing file only warns.
 fn copy_original(data_dir: &Path, stored: &StoredJob, dir: &Path) -> Option<String> {
     let original = data_dir
-        .join("originals")
+        .join(host::ORIGINALS)
         .join(format!("{}.crate", stored.cksum));
     let name = format!("{}-{}.crate", stored.name, stored.version);
     match std::fs::copy(&original, dir.join(&name)) {

@@ -34,8 +34,9 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use crateward_core::breaker::BreakerState;
-use crateward_core::config::{Config, DEFAULT_CONFIG_PATH};
+use crateward_core::config::Config;
 use crateward_core::job::{JobId, JobState, Stage, mermaid_diagram};
+use crateward_core::paths::host;
 use crateward_core::store::{PauseReason, Store};
 use secrecy::ExposeSecret;
 
@@ -63,7 +64,7 @@ enum Command {
     /// Show pauses, circuit breakers, canaries and pending alerts.
     Status {
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
     /// Quarantine control.
@@ -71,7 +72,7 @@ enum Command {
         #[command(subcommand)]
         command: QuarantineCommand,
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
     /// The host integrity manifest (ADR 0008).
@@ -79,14 +80,14 @@ enum Command {
         #[command(subcommand)]
         command: integrity::Command,
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
     /// Print the nftables script that fills the egress allowlist sets
     /// (`deploy/nftables/crateward.nft`) from the configured hosts.
     Egress {
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
     /// Write the evidence pack of a job for a report (DISCLOSURE.md).
@@ -97,7 +98,7 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
     /// Record the steps of a disclosure (DISCLOSURE.md).
@@ -105,7 +106,7 @@ enum Command {
         #[command(subcommand)]
         command: disclosure::Command,
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
     /// Circuit breaker control.
@@ -113,7 +114,7 @@ enum Command {
         #[command(subcommand)]
         command: BreakerCommand,
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
 }
@@ -138,7 +139,7 @@ enum ConfigCommand {
     /// Load and validate a configuration file.
     Check {
         /// Configuration file.
-        #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
 }

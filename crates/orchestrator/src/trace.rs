@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crateward_core::guest::{self, HOME};
+use crateward_core::paths::guest::{self, HOME};
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
 use serde::{Deserialize, Serialize};
 
@@ -445,7 +445,7 @@ impl TraceSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crateward_core::guest::BUILDER_UID;
+    use crateward_core::paths::guest::BUILDER_UID;
 
     #[test]
     fn linkers_belong_to_the_toolchain() {

@@ -11,10 +11,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crateward_core::guest::artifacts;
+use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
-use crate::{TaskError, run_in};
+use crate::{TaskError, io, read_toml, run_in};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -24,24 +24,15 @@ struct Pin {
     sha256: String,
 }
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
-    move |e| TaskError::Io(path.to_path_buf(), e)
-}
-
-/// Where the built object is placed.
-pub fn object_path(root: &Path) -> PathBuf {
-    root.join(artifacts::OUT).join(artifacts::EBPF)
-}
-
 /// Downloads and verifies the pinned linker. Returns its directory.
 fn linker(root: &Path) -> Result<PathBuf, TaskError> {
-    let pin_path = root.join("guest").join("bpf-linker.toml");
-    let pin: Pin = toml::from_str(&std::fs::read_to_string(&pin_path).map_err(io(&pin_path))?)
-        .map_err(|e| TaskError::Check(format!("guest/bpf-linker.toml: {e}")))?;
-    let dir = root.join(artifacts::BIN);
-    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+    let pin: Pin = read_toml(root, repo::BPF_LINKER_PIN)?;
+
+    let dir = root.join(build::GUEST_BIN);
     let archive = dir.join(format!("bpf-linker-{}.tar.zst", pin.version));
     let archive_str = archive.to_string_lossy().into_owned();
+    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+
     if !archive.exists() {
         run_in(
             &dir,
@@ -50,6 +41,7 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
             &[],
         )?;
     }
+
     let digest = crate::images::sha256_file(&archive)?;
     if digest != pin.sha256 {
         std::fs::remove_file(&archive).map_err(io(&archive))?;
@@ -58,6 +50,7 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
             pin.sha256
         )));
     }
+
     // Extracted every time, so the binary always matches the archive.
     run_in(
         &dir,
@@ -65,6 +58,7 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
         &["--zstd", "-xf", &archive_str, "bpf-linker"],
         &[],
     )?;
+
     Ok(dir)
 }
 
@@ -76,12 +70,14 @@ fn linker(root: &Path) -> Result<PathBuf, TaskError> {
 /// lacks its license section.
 pub fn run(root: &Path) -> Result<(), TaskError> {
     let bin = linker(root)?;
-    let package = root.join("crates").join("guest_ebpf");
-    let target_dir = root.join("target").join("guest").join("ebpf");
+    let package = root.join(repo::GUEST_EBPF);
+    let target_dir = root.join(build::EBPF_WORK);
+
     let path = std::env::var_os("PATH").unwrap_or_default();
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     let path = std::env::join_paths(paths).map_err(|e| TaskError::Command(format!("PATH: {e}")))?;
+
     // The outer cargo exports its toolchain. Removing it lets the package's
     // own `rust-toolchain.toml` choose.
     let cargo = |args: &[&str]| -> Result<(), TaskError> {
@@ -108,9 +104,11 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
             )))
         }
     };
+
     cargo(&["fmt", "--check"])?;
     cargo(&["clippy", "--release", "--locked", "--", "-D", "warnings"])?;
     cargo(&["build", "--release", "--locked"])?;
+
     let built = target_dir
         .join("bpfel-unknown-none")
         .join("release")
@@ -118,10 +116,10 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let object = std::fs::read(&built).map_err(io(&built))?;
     check_license(&object)
         .map_err(|message| TaskError::Check(format!("{}: {message}", built.display())))?;
-    let out = object_path(root);
-    if let Some(parent) = out.parent() {
-        std::fs::create_dir_all(parent).map_err(io(parent))?;
-    }
+
+    let out = root.join(build::EBPF_OBJECT);
+    let out_dir = root.join(build::GUEST_OUT);
+    std::fs::create_dir_all(&out_dir).map_err(io(&out_dir))?;
     std::fs::write(&out, &object).map_err(io(&out))?;
     eprintln!("xtask: eBPF programs in {}", out.display());
     Ok(())

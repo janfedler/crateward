@@ -22,7 +22,7 @@ use std::path::Path;
 use std::process::{ExitCode, Stdio};
 
 use crateward_core::child::{self, Child, ChildError};
-use crateward_core::guest::WORK;
+use crateward_core::paths::guest::WORK;
 use crateward_core::sandbox::{self, FsAccess, Limits};
 use ext4_view::{Ext4, Ext4Error, FileType, Metadata, PathBuf as ExtPath};
 use serde::{Deserialize, Serialize};
@@ -703,6 +703,7 @@ mod tests {
     use std::process::Command;
 
     use super::*;
+    use crateward_core::paths::host::MKFS_EXT4;
 
     /// Builds an ext4 image from a directory with `mkfs.ext4 -d`, as the
     /// orchestrator formats scratch disks with the same tool.
@@ -731,7 +732,7 @@ mod tests {
         std::fs::create_dir_all(root.join("home/.cargo")).ok()?;
         populate(&root).ok()?;
         let out = dir.join("scratch.img");
-        let status = Command::new("/usr/sbin/mkfs.ext4")
+        let status = Command::new(MKFS_EXT4)
             .args(["-q", "-F", "-d"])
             .arg(&root)
             .arg(&out)

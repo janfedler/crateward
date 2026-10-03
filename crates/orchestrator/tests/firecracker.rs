@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crateward_core::guest::{self, artifacts};
+use crateward_core::paths::{build, guest, host};
 use crateward_core::protocol::{ExitStatus, JobSpec, WallClock};
 use crateward_orchestrator::firecracker::vm::{BootSpec, Isolation, JailConfig, Launch, Vm};
 use tokio::time::Instant;
@@ -36,8 +36,7 @@ fn root() -> PathBuf {
 }
 
 fn boot_spec() -> BootSpec {
-    let out = root().join(artifacts::OUT);
-    let kernel = std::fs::read_dir(&out)
+    let kernel = std::fs::read_dir(root().join(build::GUEST_OUT))
         .unwrap()
         .filter_map(Result::ok)
         .map(|e| e.path())
@@ -45,7 +44,7 @@ fn boot_spec() -> BootSpec {
         .expect("run `cargo xtask guest-kernel` first");
     BootSpec {
         kernel,
-        rootfs: out.join(artifacts::ROOTFS),
+        rootfs: root().join(build::ROOTFS_IMAGE),
         boot_args: BootSpec::default_boot_args(guest::AGENT),
         vcpus: 1,
         memory_mib: 512,
@@ -78,7 +77,7 @@ fn launch(name: &str, jailed: bool, slot: u32) -> Launch {
         Isolation::Direct
     };
     Launch {
-        firecracker: root().join(artifacts::BIN).join(artifacts::FIRECRACKER),
+        firecracker: root().join(build::FIRECRACKER),
         dir: scratch(name),
         id: name.into(),
         isolation,
@@ -135,7 +134,7 @@ async fn boot_run_shutdown(jailed: bool) {
         // 2 means a seccomp filter is installed (Firecracker's own).
         assert_eq!(status_field(pid, "Seccomp"), "2");
         // The tap device lives only in the jail's network namespace.
-        let host_links = std::process::Command::new("/usr/sbin/ip")
+        let host_links = std::process::Command::new(host::IP)
             .args(["-br", "link"])
             .output()
             .unwrap();

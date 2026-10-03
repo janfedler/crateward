@@ -8,7 +8,7 @@
 
 use std::io::{Read, Write};
 
-use crateward_core::guest::{BUILDER_GID, BUILDER_UID};
+use crateward_core::paths::guest::{BUILDER_GID, BUILDER_UID};
 use crateward_core::protocol::{
     GuestMessage, HostMessage, JobSpec, MAX_FRAME_LEN, PROTOCOL_VERSION, ProtocolError,
     TracingStatus, read_message, write_message,

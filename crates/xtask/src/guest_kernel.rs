@@ -13,10 +13,10 @@
 use std::path::Path;
 use std::process::Command;
 
-use crateward_core::guest::artifacts;
+use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
-use crate::{TaskError, run_in};
+use crate::{TaskError, io, read_toml, run_in};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -100,7 +100,7 @@ fn unmet(requirements: &[Requirement], config: &str) -> Vec<String> {
 }
 
 fn read(path: &Path) -> Result<String, TaskError> {
-    std::fs::read_to_string(path).map_err(|e| TaskError::Io(path.to_path_buf(), e))
+    std::fs::read_to_string(path).map_err(io(path))
 }
 
 fn output(program: &str, args: &[&str], dir: &Path) -> Result<String, TaskError> {
@@ -168,18 +168,22 @@ fn fetch(source: &Source, src: &Path) -> Result<(), TaskError> {
 /// Fails if a command fails, the source does not match the pin, or the
 /// final configuration lost an option of the fragment.
 pub fn run(root: &Path) -> Result<(), TaskError> {
-    let inputs = root.join("guest").join("kernel");
-    let manifest: Manifest = toml::from_str(&read(&inputs.join("kernel.toml"))?)
-        .map_err(|e| TaskError::Check(format!("guest/kernel/kernel.toml: {e}")))?;
-    let work = root.join("target").join("guest").join("kernel");
-    let src = work.join("src");
-    let build = work.join("build");
-    let out_dir = root.join(artifacts::OUT);
+    let manifest: Manifest = read_toml(root, repo::KERNEL_PIN)?;
+
+    let src = root.join(build::KERNEL_WORK).join("src");
+    let build = root.join(build::KERNEL_WORK).join("build");
+    let out_dir = root.join(build::GUEST_OUT);
     for dir in [&build, &out_dir] {
-        std::fs::create_dir_all(dir).map_err(|e| TaskError::Io(dir.clone(), e))?;
+        std::fs::create_dir_all(dir).map_err(io(dir))?;
     }
+
     fetch(&manifest.source, &src)?;
-    configure(&manifest.config, &inputs, &src, &build)?;
+    configure(
+        &manifest.config,
+        &root.join(repo::KERNEL_INPUTS),
+        &src,
+        &build,
+    )?;
     compile(&manifest.build, &src, &build)?;
     publish(&build, &out_dir, &manifest.source.version)
 }
@@ -363,9 +367,9 @@ mod tests {
 
     #[test]
     fn the_real_manifest_parses_and_names_files_that_exist() {
-        let inputs = crate::workspace_root().join("guest/kernel");
-        let manifest: Manifest =
-            toml::from_str(&std::fs::read_to_string(inputs.join("kernel.toml")).unwrap()).unwrap();
+        let root = crate::workspace_root();
+        let inputs = root.join(repo::KERNEL_INPUTS);
+        let manifest: Manifest = read_toml(&root, repo::KERNEL_PIN).unwrap();
         assert_eq!(manifest.source.commit.len(), 40);
         assert!(inputs.join(&manifest.config.base).is_file());
         assert!(inputs.join(&manifest.config.fragment).is_file());
@@ -373,9 +377,12 @@ mod tests {
 
     #[test]
     fn the_real_fragment_parses() {
-        let text =
-            std::fs::read_to_string(crate::workspace_root().join("guest/kernel/crateward.config"))
-                .unwrap();
+        let text = std::fs::read_to_string(
+            crate::workspace_root()
+                .join(repo::KERNEL_INPUTS)
+                .join("crateward.config"),
+        )
+        .unwrap();
         let reqs = requirements(&text);
         assert!(reqs.contains(&Requirement::Unset("CONFIG_MODULES".into())));
         assert!(reqs.contains(&Requirement::Set("CONFIG_BPF_LSM".into(), "y".into())));

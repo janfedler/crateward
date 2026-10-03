@@ -40,6 +40,7 @@ use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::job::{JobId, Stage};
+use crateward_core::paths::host;
 use crateward_core::store::{Disclosure, JobFilter, Review, Store, StoreError, StoredEvent};
 use crateward_core::verdict::{Evidence, Verdict};
 use secrecy::ExposeSecret;
@@ -635,7 +636,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         // read only connection.
         let exporter = Store::connect(url).await.map_err(fatal)?;
         exporter.make_read_only().await.map_err(fatal)?;
-        let export_dir = config.instance.run_dir.join("export");
+        let export_dir = config.instance.run_dir.join(host::EXPORT_WORK);
         let export_config = config.export.clone();
         tokio::spawn(async move {
             export::run(&exporter, export_dir, export_config.as_ref()).await;

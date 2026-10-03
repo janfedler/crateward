@@ -7,10 +7,10 @@
 
 use std::path::Path;
 
-use crateward_core::guest::artifacts;
+use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
-use crate::{TaskError, run_in};
+use crate::{TaskError, io, read_toml, run_in};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,23 +20,19 @@ struct Pin {
     sha256: String,
 }
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
-    move |e| TaskError::Io(path.to_path_buf(), e)
-}
-
 /// Downloads, verifies and extracts the pinned release.
 ///
 /// # Errors
 ///
 /// Fails if the download fails or the digest does not match the pin.
 pub fn run(root: &Path) -> Result<(), TaskError> {
-    let pin_path = root.join("guest").join("firecracker.toml");
-    let pin: Pin = toml::from_str(&std::fs::read_to_string(&pin_path).map_err(io(&pin_path))?)
-        .map_err(|e| TaskError::Check(format!("guest/firecracker.toml: {e}")))?;
-    let dir = root.join(artifacts::BIN);
-    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+    let pin: Pin = read_toml(root, repo::FIRECRACKER_PIN)?;
+
+    let dir = root.join(build::GUEST_BIN);
     let archive = dir.join(format!("firecracker-{}.tgz", pin.version));
     let archive_str = archive.to_string_lossy().into_owned();
+    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+
     if !archive.exists() {
         run_in(
             &dir,
@@ -45,6 +41,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
             &[],
         )?;
     }
+
     let digest = crate::images::sha256_file(&archive)?;
     if digest != pin.sha256 {
         std::fs::remove_file(&archive).map_err(io(&archive))?;
@@ -53,13 +50,14 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
             pin.sha256
         )));
     }
+
     let release = format!("release-{}-x86_64", pin.version);
     let member = format!("{release}/firecracker-{}-x86_64", pin.version);
-    run_in(&dir, "tar", &["-xzf", &archive_str, &member], &[])?;
     let from = dir.join(&member);
-    let to = dir.join("firecracker");
-    std::fs::rename(&from, &to).map_err(io(&from))?;
+    run_in(&dir, "tar", &["-xzf", &archive_str, &member], &[])?;
+    std::fs::rename(&from, root.join(build::FIRECRACKER)).map_err(io(&from))?;
     let _ = std::fs::remove_dir_all(dir.join(&release));
+
     eprintln!(
         "xtask: firecracker {} verified in {}",
         pin.version,

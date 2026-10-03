@@ -19,12 +19,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crateward_core::guest::artifacts;
+use crateward_core::paths::{build, bundle, repo};
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::{GUEST_TARGET, TaskError, musl_cc, run};
+use crate::{TaskError, io, musl_cc, read_toml, run};
 
 /// Service binaries, from the host build.
 const SERVICES: &[&str] = &[
@@ -37,10 +36,6 @@ const SERVICES: &[&str] = &[
     "crateward_api",
     "crateward_supervisor",
 ];
-
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
-    move |e| TaskError::Io(path.to_path_buf(), e)
-}
 
 fn output(root: &Path, program: &str, args: &[&str]) -> Result<String, TaskError> {
     let out = Command::new(program)
@@ -63,6 +58,9 @@ fn copy(from: &Path, to: &Path, mode: u32) -> Result<(), TaskError> {
     use std::os::unix::fs::PermissionsExt as _;
     if !from.is_file() {
         return Err(TaskError::Check(format!("{} is missing", from.display())));
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).map_err(io(parent))?;
     }
     std::fs::copy(from, to).map_err(io(to))?;
     std::fs::set_permissions(to, std::fs::Permissions::from_mode(mode)).map_err(io(to))
@@ -105,20 +103,22 @@ pub fn run_release(root: &Path) -> Result<(), TaskError> {
     let name = bundle_name(root, version)?;
     build_binaries()?;
 
-    let target = root.join("target");
-    let out = target.join("release-bundle").join(&name);
+    let out = root.join(build::RELEASE_BUNDLES).join(&name);
     create_bundle_dir(&out)?;
     stage_binaries(root, &out)?;
     stage_guest(root, &out)?;
     stage_deploy(root, &out)?;
 
-    let sbom_path = out.join("sbom.cdx.json");
+    let sbom_path = out.join(bundle::SBOM);
     std::fs::write(&sbom_path, sbom(root, version)?).map_err(io(&sbom_path))?;
     crate::vendor()?;
-    let vendor = "crateward-vendor.tar.gz";
-    copy(&target.join(vendor), &out.join(vendor), 0o644)?;
+    copy(
+        &root.join(build::VENDOR_ARCHIVE),
+        &out.join(bundle::VENDOR_ARCHIVE),
+        0o644,
+    )?;
 
-    let sums_path = out.join("SHA256SUMS");
+    let sums_path = out.join(bundle::SUMS);
     std::fs::write(&sums_path, sums(&out)?).map_err(io(&sums_path))?;
     let archive = pack(&out)?;
     eprintln!("xtask: wrote {}", out.display());
@@ -161,7 +161,7 @@ fn build_binaries() -> Result<(), TaskError> {
             "--release",
             "--locked",
             "--target",
-            GUEST_TARGET,
+            build::GUEST_TARGET,
             "--package",
             "crateward_fake_internet",
         ],
@@ -175,7 +175,7 @@ fn create_bundle_dir(out: &Path) -> Result<(), TaskError> {
     if out.exists() {
         std::fs::remove_dir_all(out).map_err(io(out))?;
     }
-    for dir in ["bin", "sandbox", "guest"] {
+    for dir in [bundle::BIN, bundle::SANDBOX, bundle::GUEST] {
         std::fs::create_dir_all(out.join(dir)).map_err(io(out))?;
     }
     Ok(())
@@ -184,33 +184,34 @@ fn create_bundle_dir(out: &Path) -> Result<(), TaskError> {
 /// The service binaries, and the sandbox binaries: the launcher, the fake
 /// internet and Firecracker.
 fn stage_binaries(root: &Path, out: &Path) -> Result<(), TaskError> {
-    let target = root.join("target");
-    let release = target.join("release");
+    let release = root.join(build::RELEASE);
     for binary in SERVICES {
-        copy(&release.join(binary), &out.join("bin").join(binary), 0o755)?;
+        copy(
+            &release.join(binary),
+            &out.join(bundle::BIN).join(binary),
+            0o755,
+        )?;
     }
+    let sandbox = out.join(bundle::SANDBOX);
     copy(
         &release.join("crateward-vmjail"),
-        &out.join("sandbox/crateward-vmjail"),
+        &sandbox.join("crateward-vmjail"),
         0o755,
     )?;
-    stage_fake_internet(&target, out)?;
+    stage_fake_internet(root, out)?;
 
-    let firecracker = root.join(artifacts::BIN).join(artifacts::FIRECRACKER);
+    let firecracker = root.join(build::FIRECRACKER);
     if !firecracker.is_file() {
         return Err(TaskError::Check(
             "no Firecracker: run `cargo xtask firecracker`".into(),
         ));
     }
-    copy(&firecracker, &out.join("sandbox/firecracker"), 0o755)
+    copy(&firecracker, &sandbox.join("firecracker"), 0o755)
 }
 
 /// The fake internet runs on the bare guest, so it must not need a loader.
-fn stage_fake_internet(target: &Path, out: &Path) -> Result<(), TaskError> {
-    let fake = target
-        .join(GUEST_TARGET)
-        .join("release")
-        .join("crateward_fake_internet");
+fn stage_fake_internet(root: &Path, out: &Path) -> Result<(), TaskError> {
+    let fake = root.join(build::FAKE_INTERNET);
     let bytes = std::fs::read(&fake).map_err(io(&fake))?;
     if crateward_core::elf::is_static(&bytes) != Ok(true) {
         return Err(TaskError::Check(format!(
@@ -218,28 +219,33 @@ fn stage_fake_internet(target: &Path, out: &Path) -> Result<(), TaskError> {
             fake.display()
         )));
     }
-    copy(&fake, &out.join("sandbox/crateward_fake_internet"), 0o755)
+    copy(
+        &fake,
+        &out.join(bundle::SANDBOX).join("crateward_fake_internet"),
+        0o755,
+    )
 }
 
 /// The guest kernel, the root filesystem and the authority it trusts.
 fn stage_guest(root: &Path, out: &Path) -> Result<(), TaskError> {
-    let guest = root.join(artifacts::OUT);
     copy(
-        &only(&guest, "kernel-", ".bzImage")?,
-        &out.join("guest/kernel.bzImage"),
+        &only(&root.join(build::GUEST_OUT), "kernel-", ".bzImage")?,
+        &out.join(bundle::KERNEL),
         0o644,
     )?;
-    let rootfs = guest.join(artifacts::ROOTFS);
+
+    let rootfs = root.join(build::ROOTFS_IMAGE);
     if !rootfs.is_file() {
         return Err(TaskError::Check(
             "no root filesystem: run `cargo xtask rootfs`".into(),
         ));
     }
-    copy(&rootfs, &out.join("guest/rootfs.erofs"), 0o644)?;
+    copy(&rootfs, &out.join(bundle::ROOTFS), 0o644)?;
+
     // The image trusts exactly this authority, so both come from one build.
     copy(
-        &root.join(artifacts::AUTHORITY),
-        &out.join("guest/authority.pem"),
+        &root.join(build::AUTHORITY),
+        &out.join(bundle::AUTHORITY),
         0o600,
     )
 }
@@ -250,25 +256,20 @@ fn stage_deploy(root: &Path, out: &Path) -> Result<(), TaskError> {
     for (from, to) in [
         ("LICENSE-MIT", "LICENSE-MIT"),
         ("LICENSE-APACHE", "LICENSE-APACHE"),
-        ("crates/guest_ebpf/LICENSE", "LICENSE-GPL-2.0"),
+        (repo::GUEST_EBPF_LICENSE, "LICENSE-GPL-2.0"),
+        (repo::DEPLOY_README, repo::DEPLOY_README),
+        (repo::CONFIG_EXAMPLE, bundle::CONFIG_EXAMPLE),
     ] {
         copy(&root.join(from), &out.join(to), 0o644)?;
     }
-    let deploy = root.join("deploy");
     for dir in ["ansible", "systemd", "nftables"] {
-        copy_tree(&deploy.join(dir), &out.join("deploy").join(dir))?;
+        let from = root.join(repo::DEPLOY).join(dir);
+        copy_tree(&from, &out.join(bundle::DEPLOY).join(dir))?;
     }
     copy(
-        &deploy.join("README.md"),
-        &out.join("deploy/README.md"),
-        0o644,
-    )?;
-    copy(&deploy.join("install.sh"), &out.join("install.sh"), 0o755)?;
-    std::fs::create_dir_all(out.join("config")).map_err(io(out))?;
-    copy(
-        &root.join("config/crateward.example.toml"),
-        &out.join("config/crateward.example.toml"),
-        0o644,
+        &root.join(repo::INSTALL_SCRIPT),
+        &out.join(bundle::INSTALL_SCRIPT),
+        0o755,
     )
 }
 
@@ -296,19 +297,16 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), TaskError> {
 /// # Errors
 ///
 /// Fails if the directory has no `SHA256SUMS` or `tar` fails.
-pub fn pack(bundle: &Path) -> Result<PathBuf, TaskError> {
-    let bundle = &bundle.canonicalize().map_err(io(bundle))?;
-    if !bundle.join("SHA256SUMS").is_file() {
+pub fn pack(dir: &Path) -> Result<PathBuf, TaskError> {
+    let dir = &dir.canonicalize().map_err(io(dir))?;
+    if !dir.join(bundle::SUMS).is_file() {
         return Err(TaskError::Check(format!(
             "{} is not a release bundle: no SHA256SUMS",
-            bundle.display()
+            dir.display()
         )));
     }
-    let (Some(parent), Some(name)) = (bundle.parent(), bundle.file_name()) else {
-        return Err(TaskError::Check(format!(
-            "{} has no name",
-            bundle.display()
-        )));
+    let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
+        return Err(TaskError::Check(format!("{} has no name", dir.display())));
     };
     let name = name.to_string_lossy().into_owned();
     let archive = parent.join(format!("{name}.tar.gz"));
@@ -415,13 +413,6 @@ fn sbom(root: &Path, version: &str) -> Result<String, TaskError> {
     serde_json::to_string_pretty(&bom).map_err(|e| TaskError::Check(e.to_string()))
 }
 
-/// Reads and parses a TOML file below `root`.
-fn read_toml<T: DeserializeOwned>(root: &Path, path: &str) -> Result<T, TaskError> {
-    let file = root.join(path);
-    let text = std::fs::read_to_string(&file).map_err(io(&file))?;
-    toml::from_str(&text).map_err(|e| TaskError::Check(format!("{path}: {e}")))
-}
-
 /// The string at `key` in `table`, or an empty string.
 fn text(table: Option<&toml::Table>, key: &str) -> String {
     let value = table.and_then(|t| t.get(key));
@@ -488,7 +479,7 @@ fn package_component(package: &Package, checksum: Option<&String>) -> Value {
 }
 
 fn firecracker_component(root: &Path) -> Result<Value, TaskError> {
-    let pin: Pin = read_toml(root, "guest/firecracker.toml")?;
+    let pin: Pin = read_toml(root, repo::FIRECRACKER_PIN)?;
     Ok(json!({
         "type": "application",
         "name": "firecracker",
@@ -499,7 +490,7 @@ fn firecracker_component(root: &Path) -> Result<Value, TaskError> {
 }
 
 fn linux_component(root: &Path) -> Result<Value, TaskError> {
-    let kernel: toml::Table = read_toml(root, "guest/kernel/kernel.toml")?;
+    let kernel: toml::Table = read_toml(root, repo::KERNEL_PIN)?;
     let source = kernel.get("source").and_then(toml::Value::as_table);
     Ok(json!({
         "type": "operating-system",
@@ -513,7 +504,7 @@ fn linux_component(root: &Path) -> Result<Value, TaskError> {
 }
 
 fn debian_component(root: &Path) -> Result<Value, TaskError> {
-    let rootfs: toml::Table = read_toml(root, "guest/rootfs/rootfs.toml")?;
+    let rootfs: toml::Table = read_toml(root, repo::ROOTFS_PIN)?;
     let debian = rootfs.get("debian").and_then(toml::Value::as_table);
     let snapshot = text(debian, "snapshot");
     Ok(json!({
@@ -528,7 +519,7 @@ fn debian_component(root: &Path) -> Result<Value, TaskError> {
 }
 
 fn rust_components(root: &Path) -> Result<Vec<Value>, TaskError> {
-    let rust: toml::Table = read_toml(root, "guest/rootfs/rust.toml")?;
+    let rust: toml::Table = read_toml(root, repo::RUST_PIN)?;
     let version = text(Some(&rust), "version");
     let parts = rust.get("component").and_then(toml::Value::as_array);
     Ok(parts
@@ -588,23 +579,17 @@ mod tests {
     /// The build outputs that a bundle is made from, under `dir` as the
     /// workspace root.
     fn fake_build(dir: &Path) {
-        let target = dir.join("target");
         for binary in SERVICES.iter().chain(&["crateward-vmjail"]) {
-            write(&target.join("release").join(binary), "binary");
+            write(&dir.join(build::RELEASE).join(binary), "binary");
         }
-        let fake = target.join(GUEST_TARGET).join("release");
-        write(&fake.join("crateward_fake_internet"), elf(false));
-        write(&firecracker(dir), "firecracker");
+        write(&dir.join(build::FAKE_INTERNET), elf(false));
+        write(&dir.join(build::FIRECRACKER), "firecracker");
         write(
-            &dir.join(artifacts::OUT).join("kernel-6.1.bzImage"),
+            &dir.join(build::GUEST_OUT).join("kernel-6.1.bzImage"),
             "kernel",
         );
-        write(&dir.join(artifacts::OUT).join(artifacts::ROOTFS), "rootfs");
-        write(&dir.join(artifacts::AUTHORITY), "authority");
-    }
-
-    fn firecracker(dir: &Path) -> PathBuf {
-        dir.join(artifacts::BIN).join(artifacts::FIRECRACKER)
+        write(&dir.join(build::ROOTFS_IMAGE), "rootfs");
+        write(&dir.join(build::AUTHORITY), "authority");
     }
 
     #[test]
@@ -627,7 +612,7 @@ mod tests {
     fn a_missing_binary_is_named() {
         let dir = scratch("missing");
         fake_build(&dir);
-        std::fs::remove_file(dir.join("target/release/crateward_feed")).unwrap();
+        std::fs::remove_file(dir.join(build::RELEASE).join("crateward_feed")).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
@@ -642,11 +627,7 @@ mod tests {
     fn a_fake_internet_that_needs_a_loader_is_refused() {
         let dir = scratch("loader");
         fake_build(&dir);
-        let fake = dir
-            .join("target")
-            .join(GUEST_TARGET)
-            .join("release/crateward_fake_internet");
-        write(&fake, elf(true));
+        write(&dir.join(build::FAKE_INTERNET), elf(true));
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
@@ -663,7 +644,7 @@ mod tests {
     fn a_missing_firecracker_names_its_task() {
         let dir = scratch("firecracker");
         fake_build(&dir);
-        std::fs::remove_file(firecracker(&dir)).unwrap();
+        std::fs::remove_file(dir.join(build::FIRECRACKER)).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
@@ -682,11 +663,11 @@ mod tests {
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         stage_guest(&dir, &out).unwrap();
-        assert_eq!(mode(&out.join("guest/kernel.bzImage")), 0o644);
-        assert_eq!(mode(&out.join("guest/rootfs.erofs")), 0o644);
-        assert_eq!(mode(&out.join("guest/authority.pem")), 0o600);
+        assert_eq!(mode(&out.join(bundle::KERNEL)), 0o644);
+        assert_eq!(mode(&out.join(bundle::ROOTFS)), 0o644);
+        assert_eq!(mode(&out.join(bundle::AUTHORITY)), 0o600);
         assert_eq!(
-            std::fs::read_to_string(out.join("guest/kernel.bzImage")).unwrap(),
+            std::fs::read_to_string(out.join(bundle::KERNEL)).unwrap(),
             "kernel"
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -696,7 +677,7 @@ mod tests {
     fn a_missing_root_filesystem_names_its_task() {
         let dir = scratch("rootfs");
         fake_build(&dir);
-        std::fs::remove_file(dir.join(artifacts::OUT).join(artifacts::ROOTFS)).unwrap();
+        std::fs::remove_file(dir.join(build::ROOTFS_IMAGE)).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_guest(&dir, &out).unwrap_err();
@@ -731,12 +712,12 @@ mod tests {
         let dir = scratch("deploy");
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         stage_deploy(&root, &dir).unwrap();
-        assert_eq!(mode(&dir.join("install.sh")), 0o755);
-        assert_eq!(mode(&dir.join("deploy/README.md")), 0o644);
-        assert_eq!(mode(&dir.join("config/crateward.example.toml")), 0o644);
-        assert!(dir.join("deploy/nftables/crateward.nft").is_file());
-        assert!(dir.join("deploy/ansible").is_dir());
-        assert!(dir.join("deploy/systemd").is_dir());
+        assert_eq!(mode(&dir.join(bundle::INSTALL_SCRIPT)), 0o755);
+        assert_eq!(mode(&dir.join(repo::DEPLOY_README)), 0o644);
+        assert_eq!(mode(&dir.join(bundle::CONFIG_EXAMPLE)), 0o644);
+        assert!(dir.join(repo::FIREWALL).is_file());
+        assert!(dir.join(repo::ANSIBLE).is_dir());
+        assert!(dir.join(repo::UNITS).is_dir());
         for license in ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-GPL-2.0"] {
             assert_eq!(mode(&dir.join(license)), 0o644, "{license}");
         }

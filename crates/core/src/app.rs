@@ -19,7 +19,8 @@ use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
 
 use crate::component::Component;
-use crate::config::{Config, DEFAULT_CONFIG_PATH, LogFormat};
+use crate::config::{Config, LogFormat};
+use crate::paths::host;
 #[cfg(feature = "store")]
 use crate::store::{Policies, Store};
 
@@ -43,7 +44,7 @@ pub enum ComponentError {
 #[command(version, about)]
 struct Args {
     /// Configuration file.
-    #[arg(long, env = "CRATEWARD_CONFIG", default_value = DEFAULT_CONFIG_PATH)]
+    #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
     config: PathBuf,
     #[command(subcommand)]
     command: Option<Command>,

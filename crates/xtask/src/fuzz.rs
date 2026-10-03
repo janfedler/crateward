@@ -8,11 +8,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::TaskError;
+use crateward_core::paths::repo;
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
-    move |e| TaskError::Io(path.to_path_buf(), e)
-}
+use crate::{TaskError, io};
 
 /// Runs each target for `seconds`.
 ///
@@ -21,8 +19,7 @@ fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
 /// Fails if `cargo fuzz` cannot run or a target finds a crash, a leak, a
 /// timeout or an allocation above 2 GiB.
 pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
-    let fuzz = root.join("fuzz");
-    let targets_dir = fuzz.join("fuzz_targets");
+    let targets_dir = root.join(repo::FUZZ_TARGETS);
     let mut targets = Vec::new();
     for entry in std::fs::read_dir(&targets_dir).map_err(io(&targets_dir))? {
         let path = entry.map_err(io(&targets_dir))?.path();
@@ -51,7 +48,7 @@ pub fn run(root: &Path, seconds: u32) -> Result<(), TaskError> {
         // package's own `rust-toolchain.toml` choose.
         let status = Command::new("cargo")
             .args(args)
-            .current_dir(&fuzz)
+            .current_dir(root.join(repo::FUZZ))
             .env_remove("RUSTUP_TOOLCHAIN")
             .env_remove("RUSTC")
             .env_remove("RUSTDOC")

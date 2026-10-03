@@ -22,10 +22,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crateward_core::guest::{self, artifacts};
+use crateward_core::paths::{build, guest, repo};
 use serde::Deserialize;
 
-use crate::{GUEST_TARGET, TaskError, run_in};
+use crate::{TaskError, io, read_toml, run_in};
 
 /// The guest agent, as the image tarball names it.
 const AGENT_IN_IMAGE: &str = in_image(guest::AGENT);
@@ -79,35 +79,25 @@ struct Component {
     sha256: String,
 }
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
-    move |e| TaskError::Io(path.to_path_buf(), e)
-}
-
 /// Builds `target/guest/out/rootfs.erofs`.
 ///
 /// # Errors
 ///
 /// Fails if a build step fails.
 pub fn run(root: &Path) -> Result<(), TaskError> {
-    let inputs = root.join("guest").join("rootfs");
-    let manifest_path = inputs.join("rootfs.toml");
-    let manifest_text = std::fs::read_to_string(&manifest_path).map_err(io(&manifest_path))?;
+    let manifest_text = read(root, repo::ROOTFS_PIN)?;
     let manifest: Manifest = toml::from_str(&manifest_text)
-        .map_err(|e| TaskError::Check(format!("guest/rootfs/rootfs.toml: {e}")))?;
+        .map_err(|e| TaskError::Check(format!("{}: {e}", repo::ROOTFS_PIN)))?;
+    let hook_text = read(root, repo::ROOTFS_HOOK)?;
+    let epoch = manifest.image.source_date_epoch.to_string();
 
-    let hook = inputs.join("customize.sh");
-    let hook_text = std::fs::read_to_string(&hook).map_err(io(&hook))?;
-
-    let work = root.join("target").join("guest").join("rootfs");
-    let out_dir = root.join(artifacts::OUT);
-    for dir in [&work, &out_dir] {
+    let work = root.join(build::ROOTFS_WORK);
+    for dir in [&work, &root.join(build::GUEST_OUT)] {
         std::fs::create_dir_all(dir).map_err(io(dir))?;
     }
 
-    let epoch = manifest.image.source_date_epoch.to_string();
-
     let base = base_layer(&manifest.debian, &manifest_text, &hook_text, &work, &epoch)?;
-    let toolchain = stage_toolchain(root, &inputs.join("rust.toml"), &work)?;
+    let toolchain = stage_toolchain(root, &work)?;
     let trust = stage_trust(root, &base, &work)?;
     let agent = stage_agent(root, &work)?;
 
@@ -126,8 +116,13 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         append(root, &tarball, &epoch, layer)?;
     }
 
-    let image = out_dir.join(artifacts::ROOTFS);
-    pack_image(root, &tarball, &image, &manifest.image.compression, &epoch)
+    pack_image(root, &tarball, &manifest.image.compression, &epoch)
+}
+
+/// Reads a text file at `path` under `root`.
+fn read(root: &Path, path: &str) -> Result<String, TaskError> {
+    let file = root.join(path);
+    std::fs::read_to_string(&file).map_err(io(&file))
 }
 
 /// The name of the cached base tarball. It holds a digest of the inputs, so
@@ -178,16 +173,13 @@ fn stage_agent(root: &Path, work: &Path) -> Result<PathBuf, TaskError> {
     let staging = work.join("agent-layer");
 
     crate::guest_agent()?;
-    let agent = root
-        .join("target")
-        .join(GUEST_TARGET)
-        .join("release")
-        .join("crateward_guest_agent");
-    stage_file(&agent, &staging.join(AGENT_IN_IMAGE))?;
+    stage_file(
+        &root.join(build::GUEST_AGENT),
+        &staging.join(AGENT_IN_IMAGE),
+    )?;
 
     crate::guest_ebpf::run(root)?;
-    let ebpf = crate::guest_ebpf::object_path(root);
-    stage_file(&ebpf, &staging.join(EBPF_IN_IMAGE))?;
+    stage_file(&root.join(build::EBPF_OBJECT), &staging.join(EBPF_IN_IMAGE))?;
 
     Ok(staging)
 }
@@ -250,12 +242,12 @@ fn append(root: &Path, tarball: &Path, epoch: &str, layer: &Layer<'_>) -> Result
 fn pack_image(
     root: &Path,
     tarball: &Path,
-    image: &Path,
     compression: &str,
     epoch: &str,
 ) -> Result<(), TaskError> {
+    let image = root.join(build::ROOTFS_IMAGE);
     if image.exists() {
-        std::fs::remove_file(image).map_err(io(image))?;
+        std::fs::remove_file(&image).map_err(io(&image))?;
     }
 
     run_in(
@@ -272,7 +264,7 @@ fn pack_image(
         &[],
     )?;
 
-    let digest = crate::images::blake3_file(image)?;
+    let digest = crate::images::blake3_file(&image)?;
     eprintln!("xtask: wrote {} (blake3 {digest})", image.display());
     Ok(())
 }
@@ -331,12 +323,10 @@ fn build_base(debian: &Debian, hook: &str, base: &Path, epoch: &str) -> Result<(
 
 /// Downloads and verifies the pinned toolchain components and unpacks them
 /// into `<work>/toolchain/usr/local`. Returns the staging root.
-fn stage_toolchain(root: &Path, pin_path: &Path, work: &Path) -> Result<PathBuf, TaskError> {
-    let text = std::fs::read_to_string(pin_path).map_err(io(pin_path))?;
-    let pin: Toolchain = toml::from_str(&text)
-        .map_err(|e| TaskError::Check(format!("guest/rootfs/rust.toml: {e}")))?;
+fn stage_toolchain(root: &Path, work: &Path) -> Result<PathBuf, TaskError> {
+    let pin: Toolchain = read_toml(root, repo::RUST_PIN)?;
 
-    let downloads = root.join(artifacts::DOWNLOADS);
+    let downloads = root.join(build::DOWNLOADS);
     let staging = work.join("toolchain");
     let prefix = staging.join("usr").join("local");
 
@@ -450,7 +440,7 @@ fn authority_certificate(root: &Path) -> Result<String, TaskError> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
-    let authority = root.join(artifacts::AUTHORITY);
+    let authority = root.join(build::AUTHORITY);
     let ca_dir = authority.parent().unwrap_or(root);
     std::fs::create_dir_all(ca_dir).map_err(io(ca_dir))?;
 
@@ -514,7 +504,7 @@ fn base_bundle(base: &Path) -> Result<String, TaskError> {
 /// Fails if the pin file cannot be read, has no snapshot line, or the date
 /// cannot be read.
 pub fn bump_snapshot(root: &Path) -> Result<(), TaskError> {
-    let path = root.join("guest").join("rootfs").join("rootfs.toml");
+    let path = root.join(repo::ROOTFS_PIN);
     let text = std::fs::read_to_string(&path).map_err(io(&path))?;
 
     let out = std::process::Command::new("date")
@@ -765,7 +755,7 @@ mod stage_tests {
         let base = base_with_bundle(&dir, Some("BASE BUNDLE"));
         let work = dir.join("work");
         let staging = stage_trust(&dir, &base, &work).unwrap();
-        let authority = dir.join("target/guest/ca/authority.pem");
+        let authority = dir.join(build::AUTHORITY);
         let pem = std::fs::read_to_string(&authority).unwrap();
         let (cert, _key) = crateward_fake_internet::tls::split_pem(&pem).unwrap();
         assert_eq!(staging, work.join("trust"));
@@ -812,7 +802,7 @@ mod stage_tests {
     fn an_authority_that_is_not_pem_is_refused() {
         let dir = scratch("badca");
         let base = base_with_bundle(&dir, Some("B"));
-        write(&dir.join("target/guest/ca/authority.pem"), "junk");
+        write(&dir.join(build::AUTHORITY), "junk");
         let error = stage_trust(&dir, &base, &dir.join("work")).unwrap_err();
         assert!(
             error.to_string().contains("is not a certificate and a key"),
@@ -823,11 +813,11 @@ mod stage_tests {
 
     /// A pinned component whose archive is already in the download cache, so
     /// nothing is fetched.
-    fn cached_component(dir: &Path, sha256: Option<&str>) -> PathBuf {
+    fn cached_component(dir: &Path, sha256: Option<&str>) {
         let tree = dir.join("src");
         write(&tree.join("rust-1.0-x86_64/comp/bin/rustc"), "compiler");
         write(&tree.join("rust-1.0-x86_64/comp/manifest.in"), "listing");
-        let archive = dir.join("target/guest/downloads/rust-1.0-x86_64.tar.xz");
+        let archive = dir.join(build::DOWNLOADS).join("rust-1.0-x86_64.tar.xz");
         std::fs::create_dir_all(archive.parent().unwrap()).unwrap();
         succeeds(
             "tar",
@@ -840,7 +830,7 @@ mod stage_tests {
             ],
         );
         let digest = crate::images::sha256_file(&archive).unwrap();
-        let pin = dir.join("rust.toml");
+        let pin = dir.join(repo::RUST_PIN);
         write(
             &pin,
             &format!(
@@ -848,14 +838,13 @@ mod stage_tests {
                 sha256.unwrap_or(&digest)
             ),
         );
-        pin
     }
 
     #[test]
     fn a_cached_component_is_verified_and_unpacked_into_usr_local() {
         let dir = scratch("toolchain");
-        let pin = cached_component(&dir, None);
-        let staging = stage_toolchain(&dir, &pin, &dir.join("work")).unwrap();
+        cached_component(&dir, None);
+        let staging = stage_toolchain(&dir, &dir.join("work")).unwrap();
         assert_eq!(staging, dir.join("work/toolchain"));
         let prefix = staging.join("usr/local");
         assert_eq!(
@@ -869,10 +858,10 @@ mod stage_tests {
     #[test]
     fn staging_the_toolchain_again_starts_from_an_empty_directory() {
         let dir = scratch("restage");
-        let pin = cached_component(&dir, None);
+        cached_component(&dir, None);
         let stale = dir.join("work/toolchain/usr/local/stale");
         write(&stale, "old");
-        stage_toolchain(&dir, &pin, &dir.join("work")).unwrap();
+        stage_toolchain(&dir, &dir.join("work")).unwrap();
         assert!(!stale.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -880,8 +869,8 @@ mod stage_tests {
     #[test]
     fn a_wrong_digest_deletes_the_archive() {
         let dir = scratch("digest");
-        let pin = cached_component(&dir, Some(&"0".repeat(64)));
-        let error = stage_toolchain(&dir, &pin, &dir.join("work")).unwrap_err();
+        cached_component(&dir, Some(&"0".repeat(64)));
+        let error = stage_toolchain(&dir, &dir.join("work")).unwrap_err();
         let message = error.to_string();
         assert!(
             message.contains("rust-1.0-x86_64.tar.xz has SHA-256 "),
@@ -892,7 +881,8 @@ mod stage_tests {
             "{message}"
         );
         assert!(
-            !dir.join("target/guest/downloads/rust-1.0-x86_64.tar.xz")
+            !dir.join(build::DOWNLOADS)
+                .join("rust-1.0-x86_64.tar.xz")
                 .exists()
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -901,12 +891,12 @@ mod stage_tests {
     #[test]
     fn a_url_that_is_not_an_xz_archive_is_refused() {
         let dir = scratch("url");
-        let pin = dir.join("rust.toml");
+        let pin = dir.join(repo::RUST_PIN);
         write(
             &pin,
             "version = \"1.0\"\n[[component]]\ndir = \"c\"\nurl = \"https://example.invalid/rust.zip\"\nsha256 = \"0\"\n",
         );
-        let error = stage_toolchain(&dir, &pin, &dir.join("work")).unwrap_err();
+        let error = stage_toolchain(&dir, &dir.join("work")).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -919,7 +909,7 @@ mod stage_tests {
 
 #[cfg(test)]
 mod hook_tests {
-    use crateward_core::guest;
+    use crateward_core::paths::guest;
 
     /// The customize hook creates the builder and the mount points where
     /// the orchestrator and the agent expect them.

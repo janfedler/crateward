@@ -21,13 +21,8 @@ use rustix::process::{Resource, Rlimit};
 
 use super::{FAKE_INTERNET_IN_JAIL, FIRECRACKER_IN_JAIL, INSIDE_VM_ID, JailSpec, MAX_SPEC_BYTES};
 use crate::firecracker::vm::{HOST_ADDRESS, PREFIX_LEN};
+use crateward_core::paths::host::{IP, NFT};
 use crateward_core::sandbox::{Namespaces, unshare};
-
-/// `ip` on the host, used to create the tap device before `pivot_root`.
-const IP: &str = "/usr/sbin/ip";
-
-/// `nft` on the host, used to redirect guest traffic to the fake internet.
-const NFT: &str = "/usr/sbin/nft";
 
 /// Redirects everything the guest sends to the fake internet's ports
 /// (`crateward_fake_internet::server::SlotConfig::default`). The namespace

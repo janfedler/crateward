@@ -7,8 +7,9 @@
 use std::path::Path;
 
 use crateward_core::job::mermaid_diagram;
+use crateward_core::paths::repo;
 
-use crate::TaskError;
+use crate::{TaskError, io};
 
 const BEGIN: &str =
     "<!-- BEGIN GENERATED: job state diagram, run `cargo xtask state-diagram --write` -->";
@@ -41,8 +42,8 @@ fn replace_block(text: &str) -> Option<String> {
 /// Fails when the file cannot be read or written, the markers are missing,
 /// or (in check mode) the diagram is out of date.
 pub fn run(root: &Path, write: bool) -> Result<(), TaskError> {
-    let path = root.join("docs").join("ARCHITECTURE.md");
-    let text = std::fs::read_to_string(&path).map_err(|e| TaskError::Io(path.clone(), e))?;
+    let path = root.join(repo::ARCHITECTURE);
+    let text = std::fs::read_to_string(&path).map_err(io(&path))?;
     let updated = replace_block(&text).ok_or_else(|| {
         TaskError::Check(format!(
             "{} lacks the generated diagram markers",

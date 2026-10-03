@@ -4,7 +4,8 @@ use std::path::Path;
 
 use clap::Subcommand;
 use crateward_core::config::Config;
-use crateward_core::integrity::{self, MANIFEST};
+use crateward_core::integrity;
+use crateward_core::paths::host;
 
 use crate::error::{CliError, io};
 
@@ -19,7 +20,7 @@ pub enum Command {
 /// Records or checks the manifest in `instance.data_dir`. The Crateward
 /// binaries are the ones next to this tool.
 pub fn run(config: &Config, command: &Command) -> Result<(), CliError> {
-    let manifest = config.instance.data_dir.join(MANIFEST);
+    let manifest = config.instance.data_dir.join(host::INTEGRITY_MANIFEST);
     match command {
         Command::Record => record_manifest(config, &manifest),
         Command::Check => check_manifest(&manifest),

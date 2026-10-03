@@ -22,6 +22,7 @@ use std::process::{ExitCode, Stdio};
 use std::time::Duration;
 
 use crateward_core::child::{self, Child, ChildError};
+use crateward_core::paths::host;
 use crateward_core::sandbox::{self, FsAccess, Limits};
 use serde::{Deserialize, Serialize};
 
@@ -125,7 +126,7 @@ fn relay(tcp: TcpStream, socket: &Path) {
 /// relays a port on it to the index proxy socket. Returns the port.
 fn serve_relay(socket: &Path) -> Result<u16, Box<dyn Error>> {
     // Loopback is down in a new network namespace.
-    let up = child::command("/usr/sbin/ip")
+    let up = child::command(host::IP)
         .args(["link", "set", "lo", "up"])
         .status();
     if !up.is_ok_and(|status| status.success()) {

@@ -37,6 +37,7 @@ use crateward_core::app::{self, ComponentError, Stop};
 use crateward_core::blobs::BlobStore;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
+use crateward_core::paths::host;
 use crateward_core::store::{Policies, Store};
 use secrecy::ExposeSecret;
 
@@ -57,7 +58,7 @@ async fn start(config: &Config) -> Result<Analyzer, Box<dyn Error>> {
     let mut store = Store::connect(url).await?;
     store.migrate().await?;
     let heartbeats = Store::connect(url).await?;
-    let blobs = BlobStore::open(&config.instance.data_dir.join("cas"))?;
+    let blobs = BlobStore::open(&config.instance.data_dir.join(host::BLOBS))?;
     let policies = Policies::from_config(&config.stages)?;
     Ok(Analyzer::new(
         store,

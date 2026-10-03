@@ -22,9 +22,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use clap::{Parser, Subcommand};
-
-/// Target of the guest agent.
-const GUEST_TARGET: &str = "x86_64-unknown-linux-musl";
+use crateward_core::paths::{build, repo};
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about = "Crateward developer tasks")]
@@ -139,6 +138,18 @@ fn main() -> ExitCode {
     }
 }
 
+/// Maps an I/O error to a task error that names `path`.
+fn io(path: &Path) -> impl FnOnce(std::io::Error) -> TaskError + '_ {
+    move |e| TaskError::Io(path.to_path_buf(), e)
+}
+
+/// Reads and parses a TOML file at `path` under `root`.
+fn read_toml<T: DeserializeOwned>(root: &Path, path: &str) -> Result<T, TaskError> {
+    let file = root.join(path);
+    let text = std::fs::read_to_string(&file).map_err(io(&file))?;
+    toml::from_str(&text).map_err(|e| TaskError::Check(format!("{path}: {e}")))
+}
+
 /// The workspace root, derived from this package's manifest directory.
 fn workspace_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -219,7 +230,7 @@ fn ci() -> Result<(), TaskError> {
         &[
             "deny",
             "--manifest-path",
-            "crates/guest_ebpf/Cargo.toml",
+            repo::GUEST_EBPF_MANIFEST,
             "--locked",
             "check",
         ],
@@ -256,16 +267,12 @@ fn guest_agent() -> Result<(), TaskError> {
             "--release",
             "--locked",
             "--target",
-            GUEST_TARGET,
+            build::GUEST_TARGET,
         ],
         &[],
     )?;
-    let binary = workspace_root()
-        .join("target")
-        .join(GUEST_TARGET)
-        .join("release")
-        .join("crateward_guest_agent");
-    let bytes = std::fs::read(&binary).map_err(|error| TaskError::Io(binary.clone(), error))?;
+    let binary = workspace_root().join(build::GUEST_AGENT);
+    let bytes = std::fs::read(&binary).map_err(io(&binary))?;
     match crateward_core::elf::is_static(&bytes) {
         Ok(true) => {
             eprintln!("xtask: {} is statically linked", binary.display());
@@ -329,7 +336,7 @@ fn canary() -> Result<(), TaskError> {
             "--release",
             "--locked",
             "--target",
-            GUEST_TARGET,
+            build::GUEST_TARGET,
             "--package",
             "crateward_fake_internet",
         ],
@@ -363,14 +370,13 @@ fn canary() -> Result<(), TaskError> {
 }
 
 fn vendor() -> Result<(), TaskError> {
-    let out = "target/release-vendor";
     run(
         "cargo",
         &[
             "vendor",
             "--locked",
             "--versioned-dirs",
-            &format!("{out}/vendor"),
+            &format!("{}/vendor", build::VENDOR_DIR),
         ],
         &[],
     )?;
@@ -384,15 +390,15 @@ fn vendor() -> Result<(), TaskError> {
             "--group=0",
             "--numeric-owner",
             "-C",
-            out,
+            build::VENDOR_DIR,
             // `gzip -n` leaves the name and time out of the header.
             "--use-compress-program=gzip -n",
             "-cf",
-            "target/crateward-vendor.tar.gz",
+            build::VENDOR_ARCHIVE,
             "vendor",
         ],
         &[],
     )?;
-    eprintln!("xtask: wrote target/crateward-vendor.tar.gz");
+    eprintln!("xtask: wrote {}", build::VENDOR_ARCHIVE);
     Ok(())
 }

@@ -5,7 +5,9 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::TaskError;
+use crateward_core::paths::{build, host, repo};
+
+use crate::{TaskError, io};
 
 /// Firewall variables with placeholder IDs, for the dry run.
 const SAMPLE_VARS: &str = "define SSH_PORT = 22
@@ -19,9 +21,6 @@ define API_UID = 996
 define SUPERVISOR_UID = 997
 define BUILDER_UID = 998
 ";
-
-/// Where the firewall includes its variables on the server.
-const VARS_PATH: &str = "/etc/crateward/nftables-vars.nft";
 
 fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
     let out = command
@@ -45,11 +44,10 @@ fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
 ///
 /// Fails if a tool is missing or a check finds a problem.
 pub fn run(root: &Path) -> Result<(), TaskError> {
-    let deploy = root.join("deploy");
-    check_playbooks(&deploy.join("ansible"))?;
-    check_install_script(&deploy.join("install.sh"))?;
-    check_units(&deploy.join("systemd"))?;
-    check_firewall(root, &deploy.join("nftables").join("crateward.nft"))
+    check_playbooks(&root.join(repo::ANSIBLE))?;
+    check_install_script(&root.join(repo::INSTALL_SCRIPT))?;
+    check_units(&root.join(repo::UNITS))?;
+    check_firewall(root)
 }
 
 fn check_playbooks(ansible: &Path) -> Result<(), TaskError> {
@@ -131,16 +129,19 @@ fn unit_problems(stderr: &str) -> Vec<&str> {
         .collect()
 }
 
-fn check_firewall(root: &Path, rules_path: &Path) -> Result<(), TaskError> {
-    let dir = root.join("target").join("deploy-check");
-    std::fs::create_dir_all(&dir).map_err(|e| TaskError::Io(dir.clone(), e))?;
+fn check_firewall(root: &Path) -> Result<(), TaskError> {
+    let dir = root.join(build::DEPLOY_CHECK);
     let vars = dir.join("nftables-vars.nft");
-    std::fs::write(&vars, SAMPLE_VARS).map_err(|e| TaskError::Io(vars.clone(), e))?;
-    let rules = std::fs::read_to_string(rules_path)
-        .map_err(|e| TaskError::Io(rules_path.to_path_buf(), e))?
-        .replace(VARS_PATH, &vars.to_string_lossy());
+    let rules = root.join(repo::FIREWALL);
     let test = dir.join("crateward.nft");
-    std::fs::write(&test, rules).map_err(|e| TaskError::Io(test.clone(), e))?;
+
+    std::fs::create_dir_all(&dir).map_err(io(&dir))?;
+    std::fs::write(&vars, SAMPLE_VARS).map_err(io(&vars))?;
+    let text = std::fs::read_to_string(&rules)
+        .map_err(io(&rules))?
+        .replace(host::NFTABLES_VARS, &vars.to_string_lossy());
+    std::fs::write(&test, text).map_err(io(&test))?;
+
     // In a new user and network namespace, so no privilege is needed and
     // the host's firewall is untouched.
     let test = test.to_string_lossy().into_owned();
@@ -149,7 +150,7 @@ fn check_firewall(root: &Path, rules_path: &Path) -> Result<(), TaskError> {
             "--user",
             "--map-root-user",
             "--net",
-            "/usr/sbin/nft",
+            host::NFT,
             "-c",
             "-f",
             &test,
@@ -175,7 +176,7 @@ mod tests {
     /// the guest image.
     #[test]
     fn the_playbook_pins_the_guest_cargo() {
-        let pins: toml::Table = toml::from_str(&read("guest/rootfs/rust.toml")).unwrap();
+        let pins: toml::Table = toml::from_str(&read(repo::RUST_PIN)).unwrap();
         let cargo = pins["component"]
             .as_array()
             .unwrap()
@@ -199,8 +200,7 @@ mod tests {
     #[test]
     fn the_orchestrator_may_finish_a_full_build_when_stopped() {
         let config =
-            crateward_core::config::Config::from_toml(&read("config/crateward.example.toml"))
-                .unwrap();
+            crateward_core::config::Config::from_toml(&read(repo::CONFIG_EXAMPLE)).unwrap();
         let unit = read("deploy/systemd/crateward-orchestrator.service");
         let minutes: u64 = unit
             .lines()
@@ -220,8 +220,8 @@ mod tests {
         for user in ["site.yml", "uninstall.yml"] {
             assert!(read(&format!("deploy/ansible/{user}")).contains("    - components.yml\n"));
         }
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/systemd");
-        for entry in std::fs::read_dir(root).unwrap() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for entry in std::fs::read_dir(root.join(repo::UNITS)).unwrap() {
             let name = entry.unwrap().file_name().into_string().unwrap();
             let stem = name.rsplit_once('.').unwrap().0;
             assert!(playbook.contains(&format!("  - {stem}\n")), "{name}");
@@ -261,6 +261,6 @@ mod tests {
     /// while the rules include the path it replaces.
     #[test]
     fn the_firewall_includes_the_variables_file() {
-        assert!(read("deploy/nftables/crateward.nft").contains(VARS_PATH));
+        assert!(read(repo::FIREWALL).contains(host::NFTABLES_VARS));
     }
 }

@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crateward_core::guest::{self, artifacts};
+use crateward_core::paths::{build, guest, host};
 use crateward_core::protocol::{ExitStatus, JobSpec, WallClock, Workspace};
 use crateward_orchestrator::backend::{
     FirecrackerBackend, FirecrackerConfig, JobEnd, JobInput, VmBackend,
@@ -112,7 +112,7 @@ fn rss_kib() -> u64 {
 }
 
 fn host_links() -> String {
-    let out = std::process::Command::new("/usr/sbin/ip")
+    let out = std::process::Command::new(host::IP)
         .args(["-br", "link"])
         .output()
         .unwrap();
@@ -136,8 +136,7 @@ async fn sequential_jobs_leave_nothing_behind() {
     let _ = std::fs::remove_dir_all(&work);
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
-    let out = root().join(artifacts::OUT);
-    let kernel = std::fs::read_dir(&out)
+    let kernel = std::fs::read_dir(root().join(build::GUEST_OUT))
         .unwrap()
         .filter_map(Result::ok)
         .map(|e| e.path())
@@ -145,7 +144,7 @@ async fn sequential_jobs_leave_nothing_behind() {
         .expect("run `cargo xtask guest-kernel` first");
     let spec = BootSpec {
         kernel,
-        rootfs: out.join(artifacts::ROOTFS),
+        rootfs: root().join(build::ROOTFS_IMAGE),
         boot_args: BootSpec::default_boot_args(guest::AGENT),
         vcpus: 1,
         memory_mib: 512,
@@ -153,7 +152,7 @@ async fn sequential_jobs_leave_nothing_behind() {
         network: false,
     };
     let config = FirecrackerConfig {
-        firecracker: root().join(artifacts::BIN).join(artifacts::FIRECRACKER),
+        firecracker: root().join(build::FIRECRACKER),
         launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
         slots_dir: slots_dir.clone(),
         slots: SLOTS,
@@ -273,10 +272,9 @@ async fn sequential_jobs_leave_nothing_behind() {
 
 /// The snapshot files written by the base VM.
 fn backend_snapshot(work: &Path) -> crateward_orchestrator::firecracker::vm::Snapshot {
-    let out = root().join(artifacts::OUT);
     crateward_orchestrator::firecracker::vm::Snapshot {
         state: work.join("snapshot/vm.state"),
         memory: work.join("snapshot/vm.mem"),
-        rootfs: out.join(artifacts::ROOTFS),
+        rootfs: root().join(build::ROOTFS_IMAGE),
     }
 }
