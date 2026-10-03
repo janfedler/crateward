@@ -63,10 +63,10 @@ pub struct BindMount {
     pub writable: bool,
 }
 
-/// The fake internet of a jail (see `crateward_fake_internet`).
+/// The fake internet of a jail (see `crateward-fake-internet`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sinks {
-    /// The `crateward_fake_internet` binary on the host.
+    /// The `crateward-fake-internet` binary on the host.
     pub binary: PathBuf,
     /// Its event log on the host, opened before the jail closes.
     pub events: PathBuf,

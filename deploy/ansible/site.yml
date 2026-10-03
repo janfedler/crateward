@@ -259,7 +259,7 @@
         owner: root
         group: root
         mode: "0755"
-      loop: [firecracker, crateward-vmjail, crateward_fake_internet]
+      loop: [firecracker, crateward-vmjail, crateward-fake-internet]
 
     # Guest files are versioned by the root filesystem's digest, with
     # `current` and `previous` links (ADR 0002).

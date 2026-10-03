@@ -12,7 +12,7 @@ User=crateward-static
 Group=crateward
 UMask=0027
 Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
-ExecStart=/usr/local/lib/crateward/bin/crateward_static_analysis
+ExecStart=/usr/local/lib/crateward/bin/crateward-static-analysis
 Restart=on-failure
 RestartSec=10
 # The current step finishes after SIGTERM.

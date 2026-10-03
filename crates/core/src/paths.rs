@@ -173,11 +173,11 @@ pub mod build {
     pub const RELEASE: &str = "target/release";
 
     /// The static guest agent.
-    pub const GUEST_AGENT: &str = "target/x86_64-unknown-linux-musl/release/crateward_guest_agent";
+    pub const GUEST_AGENT: &str = "target/x86_64-unknown-linux-musl/release/crateward-guest-agent";
 
     /// The static fake internet.
     pub const FAKE_INTERNET: &str =
-        "target/x86_64-unknown-linux-musl/release/crateward_fake_internet";
+        "target/x86_64-unknown-linux-musl/release/crateward-fake-internet";
 
     /// The finished guest kernel (`kernel-<version>.bzImage`), root
     /// filesystem and eBPF object.

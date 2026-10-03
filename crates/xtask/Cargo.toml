@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "crateward-xtask"
+path = "src/main.rs"
+
 [dependencies]
 blake3.workspace = true
 clap.workspace = true

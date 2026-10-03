@@ -27,7 +27,7 @@ dominates the run time.
    `GITHUB_TOKEN`. They pass format checks, are valid nowhere, and are
    stored per job, so a value found anywhere names its job.
 4. **A fake internet per slot.** nftables in the slot's namespace redirects
-   all DNS, TCP and UDP from the tap device to `crateward_fake_internet`,
+   all DNS, TCP and UDP from the tap device to `crateward-fake-internet`,
    which answers DNS, HTTP and HTTPS. TLS is terminated with the
    installation's own authority, which the guest image trusts, so the plain
    text is logged. Every other frame (IPv6, ICMP, raw Ethernet) is captured

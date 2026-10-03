@@ -36,7 +36,7 @@ fn fixture(files: &[(&str, &[u8])]) -> Vec<u8> {
 }
 
 fn run(tars: Vec<Vec<u8>>) -> Option<Vec<Outcome>> {
-    let exe = Path::new(env!("CARGO_BIN_EXE_crateward_static_analysis"));
+    let exe = Path::new(env!("CARGO_BIN_EXE_crateward-static-analysis"));
 
     match analyze_in_sandbox(exe, tars) {
         Ok(outcomes) => Some(outcomes),

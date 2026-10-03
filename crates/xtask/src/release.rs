@@ -27,13 +27,13 @@ use crate::{TaskError, copy, io, musl_cc, output, read_toml, run};
 /// Service binaries, from the host build.
 const SERVICES: &[&str] = &[
     "crateward",
-    "crateward_feed",
-    "crateward_fetcher",
-    "crateward_static_analysis",
-    "crateward_orchestrator",
-    "crateward_analyzer",
-    "crateward_api",
-    "crateward_supervisor",
+    "crateward-feed",
+    "crateward-fetcher",
+    "crateward-static-analysis",
+    "crateward-orchestrator",
+    "crateward-analyzer",
+    "crateward-api",
+    "crateward-supervisor",
 ];
 
 /// The one file in `dir` whose name starts with `prefix` and ends with
@@ -200,7 +200,7 @@ fn stage_fake_internet(root: &Path, out: &Path) -> Result<(), TaskError> {
 
     copy(
         &fake,
-        &out.join(bundle::SANDBOX).join("crateward_fake_internet"),
+        &out.join(bundle::SANDBOX).join("crateward-fake-internet"),
         0o755,
     )
 }
@@ -597,7 +597,7 @@ mod tests {
             assert_eq!(mode(&out.join("bin").join(binary)), 0o755, "{binary}");
         }
 
-        for file in ["crateward-vmjail", "crateward_fake_internet", "firecracker"] {
+        for file in ["crateward-vmjail", "crateward-fake-internet", "firecracker"] {
             assert_eq!(mode(&out.join("sandbox").join(file)), 0o755, "{file}");
         }
 
@@ -608,13 +608,13 @@ mod tests {
     fn a_missing_binary_is_named() {
         let dir = scratch("missing");
         fake_build(&dir);
-        std::fs::remove_file(dir.join(build::RELEASE).join("crateward_feed")).unwrap();
+        std::fs::remove_file(dir.join(build::RELEASE).join("crateward-feed")).unwrap();
         let out = dir.join("bundle");
         create_bundle_dir(&out).unwrap();
         let error = stage_binaries(&dir, &out).unwrap_err();
 
         assert!(
-            error.to_string().contains("crateward_feed is missing"),
+            error.to_string().contains("crateward-feed is missing"),
             "{error}"
         );
 
@@ -633,7 +633,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("crateward_fake_internet is not static"),
+                .contains("crateward-fake-internet is not static"),
             "{error}"
         );
 

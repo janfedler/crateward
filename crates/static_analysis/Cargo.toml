@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "crateward-static-analysis"
+path = "src/main.rs"
+
 [dependencies]
 crateward_core = { workspace = true, features = ["app", "blobs", "sandbox", "store"] }
 proc-macro2.workspace = true

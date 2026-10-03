@@ -268,7 +268,7 @@ pub struct SandboxConfig {
     pub firecracker_bin: PathBuf,
     /// The `crateward-vmjail` launcher (ADR 0002).
     pub vmjail_bin: PathBuf,
-    /// The `crateward_fake_internet` binary, started in every slot.
+    /// The `crateward-fake-internet` binary, started in every slot.
     pub fake_internet_bin: PathBuf,
     /// The fake internet's TLS authority: certificate and private key in
     /// one PEM file, readable only by the orchestrator. The guest image

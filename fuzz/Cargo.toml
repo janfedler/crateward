@@ -47,8 +47,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "index_line"
-path = "fuzz_targets/index_line.rs"
+name = "index-line"
+path = "fuzz_targets/index-line.rs"
 test = false
 doc = false
 bench = false
@@ -75,8 +75,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "rust_source"
-path = "fuzz_targets/rust_source.rs"
+name = "rust-source"
+path = "fuzz_targets/rust-source.rs"
 test = false
 doc = false
 bench = false
@@ -96,22 +96,22 @@ doc = false
 bench = false
 
 [[bin]]
-name = "static_analysis"
-path = "fuzz_targets/static_analysis.rs"
+name = "static-analysis"
+path = "fuzz_targets/static-analysis.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "stub_manifest"
-path = "fuzz_targets/stub_manifest.rs"
+name = "stub-manifest"
+path = "fuzz_targets/stub-manifest.rs"
 test = false
 doc = false
 bench = false
 
 [[bin]]
-name = "trace_record"
-path = "fuzz_targets/trace_record.rs"
+name = "trace-record"
+path = "fuzz_targets/trace-record.rs"
 test = false
 doc = false
 bench = false

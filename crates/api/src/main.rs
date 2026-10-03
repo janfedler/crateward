@@ -1,4 +1,4 @@
-//! Entry point of the `crateward_api` service. The logic lives in the
+//! Entry point of the `crateward-api` service. The logic lives in the
 //! library so that it can be tested without a process boundary.
 
 use std::process::ExitCode;

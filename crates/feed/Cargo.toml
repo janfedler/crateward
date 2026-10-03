@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "crateward-feed"
+path = "src/main.rs"
+
 [dependencies]
 crateward_core = { workspace = true, features = ["app", "cratesio", "http", "store"] }
 bytes.workspace = true

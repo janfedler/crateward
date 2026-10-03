@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "crateward-guest-agent"
+path = "src/main.rs"
+
 [dependencies]
 # Without the `app` feature: the guest never reads the host configuration.
 crateward_core.workspace = true

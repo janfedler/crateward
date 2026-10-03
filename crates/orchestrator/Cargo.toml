@@ -10,7 +10,7 @@ homepage.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "crateward_orchestrator"
+name = "crateward-orchestrator"
 path = "src/main.rs"
 
 [[bin]]

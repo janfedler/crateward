@@ -26,7 +26,7 @@ use crateward_core::sandbox;
 use crateward_orchestrator::payload::{Package, PayloadError, PayloadSpec, build_image};
 use crateward_orchestrator::scratch::{ScanSpec, ScratchReport, export_to_erofs, scan_in_sandbox};
 
-const ORCHESTRATOR: &str = env!("CARGO_BIN_EXE_crateward_orchestrator");
+const ORCHESTRATOR: &str = env!("CARGO_BIN_EXE_crateward-orchestrator");
 const MKFS_EXT4: &str = "/usr/sbin/mkfs.ext4";
 const MKFS_EROFS: &str = "/usr/bin/mkfs.erofs";
 

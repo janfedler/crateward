@@ -9,6 +9,10 @@ repository.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "crateward-analyzer"
+path = "src/main.rs"
+
 [dependencies]
 crateward_core = { workspace = true, features = ["app", "store"] }
 # The report types the other stages store. Only types are used, nothing of

@@ -127,7 +127,7 @@ impl Site {
                 files.join("vmjail"),
             ),
             (
-                "/usr/local/lib/crateward/crateward_fake_internet",
+                "/usr/local/lib/crateward/crateward-fake-internet",
                 files.join("fake_internet"),
             ),
             (

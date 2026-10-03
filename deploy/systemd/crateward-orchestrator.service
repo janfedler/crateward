@@ -12,7 +12,7 @@ User=crateward-orchestrator
 Group=crateward
 UMask=0027
 Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
-ExecStart=/usr/local/lib/crateward/bin/crateward_orchestrator
+ExecStart=/usr/local/lib/crateward/bin/crateward-orchestrator
 Restart=on-failure
 RestartSec=10
 # Running jobs finish after SIGTERM. A full build may take

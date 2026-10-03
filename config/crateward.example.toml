@@ -106,7 +106,7 @@ firecracker_bin = "/usr/local/lib/crateward/firecracker"
 # The rootless jail launcher (ADR 0002).
 vmjail_bin = "/usr/local/lib/crateward/crateward-vmjail"
 # The fake internet, started in every slot's network namespace.
-fake_internet_bin = "/usr/local/lib/crateward/crateward_fake_internet"
+fake_internet_bin = "/usr/local/lib/crateward/crateward-fake-internet"
 # Its TLS authority (certificate and key), from `cargo xtask rootfs`, which
 # also makes the guest image trust the certificate. Mode 0600.
 fake_internet_authority = "/usr/local/lib/crateward/guest/current/authority.pem"

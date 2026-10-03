@@ -38,7 +38,7 @@ use crateward_static_analysis::worker::Analyzer;
 use crateward_static_analysis::yara::Rules;
 use serde_json::{Value, json};
 
-const EXE: &str = env!("CARGO_BIN_EXE_crateward_static_analysis");
+const EXE: &str = env!("CARGO_BIN_EXE_crateward-static-analysis");
 
 /// Whether this host lets the child enter its sandbox.
 fn sandbox_available() -> bool {

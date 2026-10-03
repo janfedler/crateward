@@ -43,12 +43,11 @@ async fn canaries_give_their_known_results() {
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
     let kernel = kernel();
-    let fake_internet =
-        root().join("target/x86_64-unknown-linux-musl/release/crateward_fake_internet");
+    let fake_internet = root().join(build::FAKE_INTERNET);
 
     assert!(
         fake_internet.exists(),
-        "build crateward_fake_internet for musl first"
+        "build crateward-fake-internet for musl first"
     );
 
     let config = FirecrackerConfig {
@@ -103,7 +102,7 @@ async fn canaries_give_their_known_results() {
         backend: Arc::new(FirecrackerBackend::new(config, cgroups, snapshot)),
         slot: 0,
         setup: WorkerSetup {
-            exe: PathBuf::from(env!("CARGO_BIN_EXE_crateward_orchestrator")),
+            exe: PathBuf::from(env!("CARGO_BIN_EXE_crateward-orchestrator")),
             work_dir: work.clone(),
             scratch_mib: 2048,
             check_timeout: Duration::from_secs(300),

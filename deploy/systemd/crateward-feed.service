@@ -12,7 +12,7 @@ User=crateward-feed
 Group=crateward
 UMask=0027
 Environment=CRATEWARD_CONFIG=/etc/crateward/crateward.toml
-ExecStart=/usr/local/lib/crateward/bin/crateward_feed
+ExecStart=/usr/local/lib/crateward/bin/crateward-feed
 Restart=on-failure
 RestartSec=10
 # The current step finishes after SIGTERM.

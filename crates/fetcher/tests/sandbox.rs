@@ -31,7 +31,7 @@ use crateward_fetcher::proxy::Index;
 use crateward_fetcher::resolve::{ResolveError, resolve as resolve_in_sandbox};
 use crateward_fetcher::sandboxed::{RESOLVE, ResolveOutcome, validate_in_sandbox};
 
-const FETCHER: &str = env!("CARGO_BIN_EXE_crateward_fetcher");
+const FETCHER: &str = env!("CARGO_BIN_EXE_crateward-fetcher");
 
 fn crate_file(entries: &[(&str, tar::EntryType, &[u8], &str)]) -> Vec<u8> {
     let mut builder = tar::Builder::new(Vec::new());

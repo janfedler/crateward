@@ -258,7 +258,7 @@ pub struct FirecrackerConfig {
     pub limits: SlotLimits,
     /// `RLIMIT_FSIZE` for Firecracker.
     pub max_file_size: u64,
-    /// The `crateward_fake_internet` binary, started in every job's jail.
+    /// The `crateward-fake-internet` binary, started in every job's jail.
     pub fake_internet: Option<PathBuf>,
     /// The fake internet's TLS authority (certificate and key, PEM).
     pub authority: Option<PathBuf>,
