@@ -138,6 +138,5 @@ they raise a sandbox escape indicator.
 
 ## Backups
 
-Encrypted offsite backups with tested restores are required. The offsite
-target is not chosen yet. It waits for the maintainer's decision. Backups
-must exclude the decoys listed in `supervisor.decoys`.
+Encrypted offsite backups with tested restores are required. Backups must
+exclude the decoys listed in `supervisor.decoys`.
