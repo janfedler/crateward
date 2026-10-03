@@ -5,7 +5,7 @@
 **Crate code is never executed outside a microVM.** That includes tests and
 CI. Fixture crates are inert, stored as archives, and never workspace
 members, so `cargo test` at the root can never build them. CI tests the
-orchestrator against a fake Firecracker backend; real VMs run only on the
+orchestrator against a fake Firecracker backend. Real VMs run only on the
 server.
 
 ## Layers
@@ -15,25 +15,31 @@ server.
 | Unit tests | Pure logic: names, digests, config validation, state machine paths | `#[cfg(test)]` modules |
 | Property tests | Parsers and the state machine under arbitrary input | `proptest`, for example `crates/core/tests/state_machine.rs` |
 | Documentation checks | Writing style, generated diagram up to date | `cargo xtask docs-lint`, `cargo xtask state-diagram` |
-| Integration tests | The feed against a mock crates.io, the job store, the static analysis worker, the dashboard and the `crateward` tool on a real PostgreSQL; the sandboxed children of the fetcher, static analysis and the orchestrator | `crates/*/tests/`, for example `crates/feed/tests/feed.rs`; the database tests need `CRATEWARD_TEST_DATABASE_URL` |
-| Canary tests | A known bad crate must be caught and a known good one must come out clean, built in a real microVM | `crates/orchestrator/tests/canary.rs` through `cargo xtask canary`, on the server; the orchestrator also runs them every `sandbox.canary_interval_minutes` |
-| Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly); `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
-| Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default; run on the server with `--ignored` |
-| Deployment checks | The playbooks parse, the units verify with `systemd-analyze`, the firewall loads in a throwaway network namespace; unit tests keep the playbook's pins and unit list in sync | `cargo xtask deploy-check`, in CI |
+| Integration tests | The feed against a mock crates.io, the job store, the static analysis worker, the dashboard and the `crateward` tool on a real PostgreSQL. The sandboxed children of the fetcher, static analysis and the orchestrator | `crates/*/tests/`, for example `crates/feed/tests/feed.rs`. The database tests need `CRATEWARD_TEST_DATABASE_URL` |
+| Canary tests | A known bad crate must be caught and a known good one must come out clean, built in a real microVM | `crates/orchestrator/tests/canary.rs` through `cargo xtask canary`, on the server. The orchestrator also runs them every `sandbox.canary_interval_minutes` |
+| Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly). `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
+| Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default and run on the server with `--ignored` |
+| Deployment checks | The playbooks parse, the units verify with `systemd-analyze`, the firewall loads in a throwaway network namespace. Unit tests keep the playbook's pins and unit list in sync | `cargo xtask deploy-check`, in CI |
 | Soak test | Sequential jailed jobs, a host side timeout and crash reconciliation, then checks for leaked processes, cgroups, directories, network interfaces, file descriptors and memory | `cargo xtask soak --jobs 50`, on the server |
 
 ## State machine properties
 
-`crates/core/tests/state_machine.rs` drives the job state machine with
-arbitrary event sequences and checks:
+The job state machine is a deterministic finite automaton. Its states are
+the job states together with the bounded retry counters, its input alphabet
+is the set of job events, and its transition function is partial.
+`crates/core/tests/state_machine.rs` runs it on arbitrary event sequences
+and checks these properties:
 
-* rejected events leave the job unchanged;
-* terminal states accept no event;
-* every sequence of valid events reaches a terminal state within a fixed
-  bound, so there is no infinite path;
-* transient failures end in `Failed` after at most `max_attempts`;
-* escalation to a full build happens at most once;
-* the coverage label is "dynamic on Linux" exactly when a VM run completed.
+* An event without a transition is rejected and leaves the job unchanged.
+* Terminal states have no outgoing transitions.
+* The transition graph is acyclic, because every retry increments a
+  bounded counter. Every run therefore reaches a terminal state within a
+  fixed number of steps (termination).
+* Every reachable state is coreachable: a few events of the happy path lead
+  from it to a terminal state, so the automaton has no trap states.
+* Transient failures end in `Failed` after at most `max_attempts`.
+* Escalation to a full build happens at most once.
+* The coverage label is "dynamic on Linux" exactly when a VM run completed.
 
 ## Real microVM tests
 
@@ -44,14 +50,17 @@ cargo xtask firecracker     # pinned release, SHA-256 verified
 cargo xtask guest-kernel    # pinned source, fragment checked
 cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1, eBPF programs
 cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-threads 1
-cargo xtask soak --jobs 50  # needs a delegated cgroup; xtask starts a systemd user scope
+cargo xtask soak --jobs 50  # needs a delegated cgroup, so xtask starts a systemd user scope
 ```
 
-Results on the production server (2026-09-24): boot to a ready agent in
-about 430 ms; restore of a snapshot into a new jail, including the jail
-setup and cgroup, to a ready agent in 60 to 68 ms at the median and at most
-92 ms; 50 jobs in about 12.5 seconds; resident memory of the test process
-grew by 4 KiB over 50 jobs, and nothing was left behind.
+Results on the production server (2026-09-24):
+
+* Boot to a ready agent takes about 430 ms.
+* Restoring a snapshot into a new jail, including the jail setup and
+  cgroup, reaches a ready agent in 60 to 68 ms at the median and at most
+  92 ms.
+* 50 jobs take about 12.5 seconds. The resident memory of the test process
+  grew by 4 KiB over them, and nothing was left behind.
 
 The only programs these tests start inside the VM are the guest agent and
 standard tools of the guest image.
@@ -66,7 +75,7 @@ input, through `crateward_core::sandbox::enter`. The parents start them
 through `crateward_core::child`, which gives them an empty environment,
 keeps the start of their stderr and enforces the deadline.
 
-The tests run the real child binaries on inert fixtures; nothing in a
+The tests run the real child binaries on inert fixtures. Nothing in a
 fixture is ever executed. They live in `crates/fetcher/tests/sandbox.rs`,
 `crates/static_analysis/tests/sandbox.rs` and
 `crates/orchestrator/tests/sandbox.rs`. The resolution child runs a fake
@@ -79,18 +88,18 @@ them.
 `cargo xtask canary` runs the end to end canary on the server: a fixture
 crate whose build script reads the job's cargo token and posts it to a
 made up host and has `curl` post the AWS credentials over HTTPS. Its
-source exists only as strings in `crates/orchestrator/tests/canary.rs`; it
-is compiled and run only inside a microVM. The test passes when the fake
+source exists only as strings in `crates/orchestrator/tests/canary.rs`, and
+it is compiled and run only inside a microVM. The test passes when the fake
 internet recorded the lookup, the orchestrator found both tokens in what
 left the VM, and the eBPF trace shows the build script reading the cargo
 credentials and connecting out, and `curl`, started by the build script,
 reading the AWS file. The build script also copies the token into its
-`OUT_DIR` and drops an autostart file into the home directory; the host's
+`OUT_DIR` and drops an autostart file into the home directory. The host's
 scan of the scratch disk must find both.
 
 The same test also runs the known good canary, which must come out with
 nothing flagged. The orchestrator runs both canaries on a schedule
-(ADR 0008); their fixtures live in `crates/orchestrator/src/canary.rs`.
+(ADR 0008). Their fixtures live in `crates/orchestrator/src/canary.rs`.
 
 The eBPF programs themselves only run in the guest kernel. On the host,
 tests cover the agent's record decoder (including every truncation of a
@@ -119,8 +128,10 @@ Documentation, rustdoc comments and configuration comments are English, in
 short and precise sentences, with no em dashes and no hyphenated compounds.
 `cargo xtask docs-lint` enforces the last two rules:
 
-* write "read only", "content addressed", "build time" instead of joining
-  words with hyphens;
-* put names that contain hyphens (crates, tools, flags, targets) in inline
-  code, for example `cargo-deny`;
-* text inside double quotes is a quotation of a source and is not checked.
+* Write "read only", "content addressed", "build time" instead of joining
+  words with hyphens.
+* Put names that contain hyphens (crates, tools, flags, targets) in inline
+  code, for example `cargo-deny`.
+* Text inside double quotes is a quotation of a source and is not checked.
+
+Sentences end with a full stop, not a semicolon.
