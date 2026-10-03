@@ -62,18 +62,14 @@ publishes the share of versions with dynamic results.
 
 ## Host setup
 
-These steps were applied to the production server by hand on 2026-09-24.
-`deploy/ansible/site.yml` now encodes them, with everything else a fresh
+`deploy/ansible/site.yml` encodes these steps, with everything else a fresh
 server needs. See [deploy/README.md](../deploy/README.md).
 
 * Kernel command line: `nosmt mds=full,nosmt l1tf=full,force` in
   `GRUB_CMDLINE_LINUX_DEFAULT`. Verified: SMT `forceoff`, L1TF "VMX: cache
   flushes, SMT disabled", `kvm_intel.vmentry_l1d_flush=always`.
 * Swap disabled and removed from `/etc/fstab`. KSM off.
-* Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap`.
-  Still to install: `musl-tools`, the proper C compiler for the fake
-  internet's static build (ring compiles a little C). Until then the build
-  falls back to the host `gcc`.
+* Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap musl-tools`.
 * Development user `claude`: groups `kvm` and `systemd-journal`, lingering
   enabled, subordinate IDs `100000:65536`, and
   `/etc/systemd/system/user@1000.service.d/delegate.conf` with
