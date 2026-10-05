@@ -33,6 +33,7 @@ each control exists. This page says how to see that it still holds.
 | Check | How |
 |-------|-----|
 | SMT is off | `/sys/devices/system/cpu/smt/control` reads `off` or `forceoff` |
+| Nested virtualization is off | `/sys/module/kvm_intel/parameters/nested` (or `kvm_amd` on AMD) reads `N` or `0` |
 | KSM is off and there is no swap | `/sys/kernel/mm/ksm/run` reads `0`. `/proc/swaps` lists nothing |
 | PostgreSQL data checksums are on | `SHOW data_checksums` returns `on` |
 | The RAID is healthy and the last scrub found nothing | `/proc/mdstat`, `mismatch_cnt` of each array |

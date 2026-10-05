@@ -65,9 +65,10 @@ publishes the share of versions with dynamic results.
 `deploy/ansible/site.yml` encodes these steps, with everything else a fresh
 server needs. See [deploy/README.md](../deploy/README.md).
 
-* Kernel command line: `nosmt mds=full,nosmt l1tf=full,force` in
-  `GRUB_CMDLINE_LINUX_DEFAULT`. Verified: SMT `forceoff`, L1TF "VMX: cache
-  flushes, SMT disabled", `kvm_intel.vmentry_l1d_flush=always`.
+* Kernel command line in `GRUB_CMDLINE_LINUX_DEFAULT`:
+  `nosmt mds=full,nosmt l1tf=full,force kvm_intel.nested=0 kvm_amd.nested=0`.
+  Verified: SMT `forceoff`, L1TF "VMX: cache flushes, SMT disabled",
+  `kvm_intel.vmentry_l1d_flush=always`.
 * Swap disabled and removed from `/etc/fstab`. KSM off.
 * Packages: `build-essential bc bison flex libelf-dev libssl-dev dwarves nftables erofs-utils mmdebstrap uidmap musl-tools`.
 

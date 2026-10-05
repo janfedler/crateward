@@ -57,11 +57,13 @@
 
     # Host (OPERATIONS.md, ADR 0002)
 
-    - name: Kernel command line without SMT and with full MDS and L1TF mitigations
+    # The guests never run VMs of their own, so KVM's nested
+    # virtualization code is attack surface only.
+    - name: Kernel command line without SMT and nested virtualization, with full MDS and L1TF mitigations
       ansible.builtin.lineinfile:
         path: /etc/default/grub
         regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
-        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet nosmt mds=full,nosmt l1tf=full,force"'
+        line: 'GRUB_CMDLINE_LINUX_DEFAULT="quiet nosmt mds=full,nosmt l1tf=full,force kvm_intel.nested=0 kvm_amd.nested=0"'
       notify: Update grub
 
     - name: No swap in fstab
