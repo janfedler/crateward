@@ -80,3 +80,5 @@ todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
 indexing_slicing = "deny"
+# Every unsafe block states why it is sound.
+undocumented_unsafe_blocks = "deny"

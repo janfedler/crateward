@@ -231,3 +231,33 @@ pub fn enter(limits: Limits, access: &FsAccess) -> Result<(), SandboxError> {
 
     restrict_fs(access)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL: [Namespaces; 3] = [Namespaces::User, Namespaces::Isolation, Namespaces::Network];
+
+    /// Whether `namespaces` is in [`ALL`]. The match does not compile until
+    /// a new variant is listed, so the test below cannot miss one.
+    fn listed(namespaces: Namespaces) -> bool {
+        match namespaces {
+            Namespaces::User | Namespaces::Isolation | Namespaces::Network => {
+                ALL.contains(&namespaces)
+            }
+        }
+    }
+
+    /// The safety argument of [`unshare`]: no namespace set unshares the
+    /// file descriptor table.
+    #[test]
+    fn no_namespace_set_unshares_the_file_table() {
+        for namespaces in ALL {
+            assert!(listed(namespaces));
+            assert!(
+                !namespaces.flags().contains(UnshareFlags::FILES),
+                "{namespaces:?}"
+            );
+        }
+    }
+}

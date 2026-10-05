@@ -15,6 +15,10 @@ repository = "https://github.com/janfedler/crateward"
 # toolchain, which the main workspace must not inherit.
 [workspace]
 
+# Every unsafe block states why it is sound, as in the main workspace.
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
 [dependencies]
 aya-ebpf = { version = "0.2.1", default-features = false }
 

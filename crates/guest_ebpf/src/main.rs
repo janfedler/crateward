@@ -251,6 +251,9 @@ fn current() -> (u32, u32, u32) {
 
 #[inline(always)]
 fn is_tracked(tgid: u32, uid: u32) -> bool {
+    // SAFETY: `get` is unsafe because another CPU may change or remove the
+    // entry while the reference lives. Only its presence is checked, and the
+    // reference is dropped at once.
     uid == config(&BUILDER_UID) || unsafe { TRACKED.get(tgid) }.is_some()
 }
 
@@ -280,14 +283,26 @@ fn header(kind: u32, tgid: u32, tid: u32, uid: u32) -> Header {
 }
 
 /// Reads a `u32` field of a kernel object.
+///
+/// # Safety
+///
+/// `base` points to the kernel object whose field `offset` names.
 #[inline(always)]
 unsafe fn field_u32(base: *const u8, offset: &u32) -> u32 {
+    // SAFETY: the offset comes from the kernel's BTF for this object, so the
+    // field lies inside it. `bpf_probe_read_kernel` copies the value and
+    // returns an error instead of faulting on a bad address.
     unsafe { bpf_probe_read_kernel(base.add(config_usize(offset)).cast::<u32>()) }.unwrap_or(0)
 }
 
 /// Reads a pointer sized field of a kernel object.
+///
+/// # Safety
+///
+/// `base` points to the kernel object whose field `offset` names.
 #[inline(always)]
 unsafe fn field_u64(base: *const u8, offset: &u32) -> u64 {
+    // SAFETY: as in `field_u32`.
     unsafe { bpf_probe_read_kernel(base.add(config_usize(offset)).cast::<u64>()) }.unwrap_or(0)
 }
 
