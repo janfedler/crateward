@@ -1,7 +1,7 @@
 //! Read queries for the dashboard.
 
 use super::{Store, StoreError};
-use crate::job::JobId;
+use crate::job::{JobId, JobState};
 
 /// A row in the inbox or a job list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +39,8 @@ pub struct JobFilter {
     pub review: Option<String>,
     /// Only confirmed jobs without a recorded report.
     pub unreported: bool,
+    /// Job state name.
+    pub state: Option<String>,
 }
 
 /// Numbers for the overview.
@@ -80,6 +82,27 @@ const ROW: &str = "j.id, j.crate_name, j.version, j.state, v.score, v.level, v.r
 /// Confirmed, and nobody recorded a report yet.
 const UNREPORTED: &str = "v.review = 'confirmed'
      AND NOT EXISTS (SELECT 1 FROM disclosures d WHERE d.job_id = j.id)";
+
+/// The job list's filters but the state, as `$1` to `$4`.
+fn filtered() -> String {
+    format!(
+        "FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
+         WHERE ($1::text IS NULL OR j.canonical_name LIKE $1)
+           AND ($2::text IS NULL OR v.level = $2)
+           AND ($3::text IS NULL OR v.review = $3)
+           AND (NOT $4 OR ({UNREPORTED}))"
+    )
+}
+
+/// A crate name prefix as a `LIKE` pattern on the canonical name.
+fn name_pattern(filter: &JobFilter) -> Option<String> {
+    filter.name.as_deref().map(|n| {
+        format!(
+            "{}%",
+            n.to_ascii_lowercase().replace('-', "_").replace('%', "")
+        )
+    })
+}
 
 fn job_row(row: &tokio_postgres::Row) -> Result<JobRow, StoreError> {
     Ok(JobRow {
@@ -262,40 +285,79 @@ impl Store {
             .collect()
     }
 
-    /// Jobs matching `filter`, newest first, at most `limit`.
+    /// Jobs matching `filter`, newest first, `limit` of them after skipping
+    /// `offset`.
     ///
     /// # Errors
     ///
     /// Fails on database errors.
-    pub async fn jobs(&self, filter: &JobFilter, limit: i64) -> Result<Vec<JobRow>, StoreError> {
-        let prefix = filter.name.as_deref().map(|n| {
-            format!(
-                "{}%",
-                n.to_ascii_lowercase().replace('-', "_").replace('%', "")
-            )
-        });
-
+    pub async fn jobs(
+        &self,
+        filter: &JobFilter,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<JobRow>, StoreError> {
         self.client
             .query(
+                // The offset skips IDs only: skipping whole rows would
+                // read every skipped verdict.
                 &format!(
                     "SELECT {ROW} FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
-                     WHERE ($1::text IS NULL OR j.canonical_name LIKE $1)
-                       AND ($2::text IS NULL OR v.level = $2)
-                       AND ($3::text IS NULL OR v.review = $3)
-                       AND (NOT $4 OR ({UNREPORTED}))
-                     ORDER BY j.id DESC LIMIT $5"
+                     WHERE j.id IN (
+                         SELECT j.id {}
+                           AND ($5::text IS NULL OR j.state = $5)
+                         ORDER BY j.id DESC LIMIT $6 OFFSET $7)
+                     ORDER BY j.id DESC",
+                    filtered()
                 ),
                 &[
-                    &prefix,
+                    &name_pattern(filter),
                     &filter.level,
                     &filter.review,
                     &filter.unreported,
+                    &filter.state,
                     &limit,
+                    &offset,
                 ],
             )
             .await?
             .iter()
             .map(job_row)
             .collect()
+    }
+
+    /// Jobs matching `filter` per state, every state in pipeline order. The
+    /// state filter is ignored.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn job_states(&self, filter: &JobFilter) -> Result<Vec<(String, i64)>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                &format!("SELECT j.state, count(*) {} GROUP BY 1", filtered()),
+                &[
+                    &name_pattern(filter),
+                    &filter.level,
+                    &filter.review,
+                    &filter.unreported,
+                ],
+            )
+            .await?;
+        let counts = rows
+            .iter()
+            .map(|r| Ok((r.try_get::<_, String>(0)?, r.try_get::<_, i64>(1)?)))
+            .collect::<Result<std::collections::HashMap<_, _>, StoreError>>()?;
+
+        Ok(JobState::ALL
+            .iter()
+            .map(|s| {
+                (
+                    s.name().to_owned(),
+                    counts.get(s.name()).copied().unwrap_or(0),
+                )
+            })
+            .collect())
     }
 }

@@ -25,7 +25,7 @@
 <h2>Jobs by state</h2>
 <table>
 <tr><th>State</th><th>Jobs</th></tr>
-{% for (state, n) in o.states %}<tr><td>{{ state }}</td><td>{{ n }}</td></tr>{% endfor %}
+{% for (state, n) in o.states %}<tr><td>{{ state }}</td><td><a href="/jobs?state={{ state }}">{{ n }}</a></td></tr>{% endfor %}
 </table>
 <h2>Verdicts by level</h2>
 <table>

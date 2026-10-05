@@ -12,7 +12,24 @@
     <option value="">any review</option>
     {% for (value, label) in reviews %}<option value="{{ value }}"{% if *value == review %} selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
+  <select name="state">
+    <option value="">any state</option>
+    {% for s in states %}<option value="{{ s.name }}"{% if s.selected %} selected{% endif %}>{{ s.name }}</option>{% endfor %}
+  </select>
   <button type="submit">Filter</button>
 </form>
+<p class="states">
+  <a href="{{ all_href }}"{% if state.is_empty() %} class="selected"{% endif %}>all</a>
+  {% for s in states %}<a href="{{ s.href }}"{% if s.selected %} class="selected"{% endif %}>{{ s.name }} <span class="muted">{{ s.n }}</span></a>
+  {% endfor %}
+</p>
+<p class="muted">{{ total }} matching, newest first.{% if first > 0 %} Showing {{ first }} to {{ last }}.{% endif %}</p>
 {% include "rows.html" %}
+<nav class="pager" aria-label="pages">
+  {% for l in pager %}{% if l.href.is_empty() %}<span class="{{ l.class }}"{% if !l.title.is_empty() %} title="{{ l.title }}"{% endif %}{% if l.class == "current" %} aria-current="page"{% endif %}>{{ l.label }}</span>{% else %}<a href="{{ l.href }}" title="{{ l.title }}">{{ l.label }}</a>{% endif %}
+  {% endfor %}
+  <span class="sizes muted">per page
+  {% for l in sizes %}{% if l.class == "current" %}<span class="current" aria-current="true">{{ l.label }}</span>{% else %}<a href="{{ l.href }}" title="{{ l.title }}">{{ l.label }}</a>{% endif %}
+  {% endfor %}</span>
+</nav>
 {% endblock %}

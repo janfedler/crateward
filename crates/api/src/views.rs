@@ -109,11 +109,51 @@ pub struct InboxPage {
     pub unreported: Vec<Row>,
 }
 
+/// The number of matching jobs in one state, linking to them.
+#[derive(Debug, Clone)]
+pub struct StateCount {
+    /// State name.
+    pub name: String,
+    /// Matching jobs in it.
+    pub n: i64,
+    /// The job list filtered to it.
+    pub href: String,
+    /// Whether the list is filtered to it.
+    pub selected: bool,
+}
+
+/// A link in the pager.
+#[derive(Debug, Clone)]
+pub struct PageLink {
+    /// Shown text.
+    pub label: String,
+    /// Tooltip, or empty.
+    pub title: String,
+    /// Target, or empty for no link.
+    pub href: String,
+    /// `current`, `disabled`, `gap` or empty.
+    pub class: &'static str,
+}
+
 /// The job list.
 #[derive(Template)]
 #[template(path = "jobs.html")]
 pub struct JobsPage {
-    /// Matching jobs.
+    /// Matching jobs per state, in pipeline order.
+    pub states: Vec<StateCount>,
+    /// The job list without the state filter.
+    pub all_href: String,
+    /// Matching jobs, in the selected state if any.
+    pub total: i64,
+    /// The position of the first job shown, from 1, or 0 when none is.
+    pub first: i64,
+    /// The position of the last job shown.
+    pub last: i64,
+    /// Links to other pages.
+    pub pager: Vec<PageLink>,
+    /// Links to the same jobs with another page size.
+    pub sizes: Vec<PageLink>,
+    /// Matching jobs on this page.
     pub rows: Vec<Row>,
     /// The name filter.
     pub name: String,
@@ -125,6 +165,8 @@ pub struct JobsPage {
     pub review: String,
     /// Every review filter, value and label.
     pub reviews: Vec<(&'static str, &'static str)>,
+    /// The state filter.
+    pub state: String,
 }
 
 /// One piece of evidence as shown.

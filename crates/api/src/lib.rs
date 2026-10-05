@@ -39,7 +39,7 @@ use crateward_core::attack;
 use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
-use crateward_core::job::{JobId, Stage};
+use crateward_core::job::{JobId, JobState, Stage};
 use crateward_core::paths::host;
 use crateward_core::store::{Disclosure, JobFilter, Review, Store, StoreError, StoredEvent};
 use crateward_core::verdict::{Evidence, Verdict};
@@ -48,7 +48,7 @@ use serde::Deserialize;
 
 use crate::views::{
     EvidenceView, FindingView, InboxPage, JobPage, JobsPage, OverviewBody, OverviewData,
-    OverviewPage, Row, VerdictView, ago,
+    OverviewPage, PageLink, Row, StateCount, VerdictView, ago,
 };
 
 /// The component this package implements.
@@ -257,7 +257,19 @@ pub struct JobsQuery {
     level: String,
     #[serde(default)]
     review: String,
+    #[serde(default)]
+    state: String,
+    /// Page number, from 1.
+    page: Option<i64>,
+    /// Jobs per page, one of [`PER_PAGE`].
+    per: Option<i64>,
 }
+
+/// The choices of jobs per page.
+const PER_PAGE: [i64; 4] = [10, 25, 50, 100];
+
+/// Jobs per page unless chosen.
+const DEFAULT_PER_PAGE: i64 = 10;
 
 const LEVELS: [&str; 5] = ["none", "low", "medium", "high", "critical"];
 
@@ -280,6 +292,10 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
         .iter()
         .find(|(value, _)| *value == q.review)
         .map(|(value, _)| *value);
+    let job_state = JobState::ALL
+        .iter()
+        .map(|s| s.name())
+        .find(|s| *s == q.state);
     let filter = JobFilter {
         name: (!name.is_empty()).then(|| name.clone()),
         level: level.clone(),
@@ -287,27 +303,180 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             .map(|r| if r == "unreported" { "confirmed" } else { r })
             .map(str::to_owned),
         unreported: review == Some("unreported"),
+        state: job_state.map(str::to_owned),
     };
 
-    let rows = state
-        .reader
-        .jobs(&filter, 200)
-        .await?
-        .into_iter()
-        .map(Row::from)
-        .collect();
+    let counts = state.reader.job_states(&filter).await?;
+    let total: i64 = counts
+        .iter()
+        .filter(|(s, _)| job_state.is_none_or(|j| j == s))
+        .map(|(_, n)| n)
+        .sum();
+    let per = q
+        .per
+        .filter(|p| PER_PAGE.contains(p))
+        .unwrap_or(DEFAULT_PER_PAGE);
+    let pages = ((total + per - 1) / per).max(1);
+    let page = q.page.unwrap_or(1).clamp(1, pages);
+    let offset = (page - 1) * per;
+    let rows = state.reader.jobs(&filter, offset, per).await?;
+
+    let review = review.unwrap_or_default();
+    let level = level.unwrap_or_default();
+    let href = |state: &str, page: i64, per: i64| {
+        let page = if page > 1 {
+            page.to_string()
+        } else {
+            String::new()
+        };
+        let per = if per == DEFAULT_PER_PAGE {
+            String::new()
+        } else {
+            per.to_string()
+        };
+        jobs_href(&[
+            ("name", &name),
+            ("level", &level),
+            ("review", review),
+            ("state", state),
+            ("per", &per),
+            ("page", &page),
+        ])
+    };
+    let state_name = job_state.unwrap_or_default();
+    let at = |p: i64| href(state_name, p, per);
 
     Ok(Html(
         JobsPage {
-            rows,
+            states: counts
+                .iter()
+                .map(|(s, n)| StateCount {
+                    href: href(s, 1, per),
+                    selected: job_state == Some(s.as_str()),
+                    name: s.clone(),
+                    n: *n,
+                })
+                .collect(),
+            all_href: href("", 1, per),
+            total,
+            first: if rows.is_empty() { 0 } else { offset + 1 },
+            last: offset + rows.len() as i64,
+            pager: pager(page, pages, &at),
+            sizes: PER_PAGE
+                .iter()
+                .map(|&p| PageLink {
+                    label: p.to_string(),
+                    title: format!("{p} jobs per page"),
+                    href: href(state_name, offset / p + 1, p),
+                    class: if p == per { "current" } else { "" },
+                })
+                .collect(),
+            rows: rows.into_iter().map(Row::from).collect(),
             name,
-            level: level.unwrap_or_default(),
+            level,
             levels: LEVELS.iter().map(|l| (*l).to_owned()).collect(),
-            review: review.unwrap_or_default().to_owned(),
+            review: review.to_owned(),
             reviews: REVIEWS.to_vec(),
+            state: state_name.to_owned(),
         }
         .render()?,
     ))
+}
+
+/// Pages shown on each side of the current one, besides the first and last.
+const PAGE_SPREAD: i64 = 2;
+
+/// The page numbers to show: the first, the last and those near `page`,
+/// with `None` for a gap of more than one page.
+fn page_numbers(page: i64, pages: i64) -> Vec<Option<i64>> {
+    let near = (page - PAGE_SPREAD).max(1)..=(page + PAGE_SPREAD).min(pages);
+    let mut shown: Vec<i64> = [1, pages].into_iter().chain(near).collect();
+    shown.sort_unstable();
+    shown.dedup();
+
+    let mut out = Vec::new();
+    let mut prev = 0;
+    for p in shown {
+        match p - prev {
+            1 => {}
+            2 => out.push(Some(p - 1)),
+            _ => out.push(None),
+        }
+        out.push(Some(p));
+        prev = p;
+    }
+
+    out
+}
+
+/// Links to the first, previous, nearby, next and last page.
+fn pager(page: i64, pages: i64, at: &dyn Fn(i64) -> String) -> Vec<PageLink> {
+    let arrow = |label: &str, title: &str, to: i64, enabled: bool| PageLink {
+        label: label.to_owned(),
+        title: title.to_owned(),
+        href: if enabled { at(to) } else { String::new() },
+        class: if enabled { "" } else { "disabled" },
+    };
+    let numbers = page_numbers(page, pages).into_iter().map(|p| match p {
+        Some(p) if p == page => PageLink {
+            label: p.to_string(),
+            title: format!("page {p}, shown"),
+            href: String::new(),
+            class: "current",
+        },
+        Some(p) => PageLink {
+            label: p.to_string(),
+            title: format!("page {p}"),
+            href: at(p),
+            class: "",
+        },
+        None => PageLink {
+            label: "…".to_owned(),
+            title: String::new(),
+            href: String::new(),
+            class: "gap",
+        },
+    });
+
+    [
+        arrow("«", "first page", 1, page > 1),
+        arrow("‹", "previous page", page - 1, page > 1),
+    ]
+    .into_iter()
+    .chain(numbers)
+    .chain([
+        arrow("›", "next page", page + 1, page < pages),
+        arrow("»", "last page", pages, page < pages),
+    ])
+    .collect()
+}
+
+/// The job list with these filters, leaving out empty ones.
+fn jobs_href(params: &[(&str, &str)]) -> String {
+    let query: Vec<String> = params
+        .iter()
+        .filter(|(_, v)| !v.is_empty())
+        .map(|(k, v)| format!("{k}={}", encode(v).replace('/', "%2F")))
+        .collect();
+
+    if query.is_empty() {
+        "/jobs".to_owned()
+    } else {
+        format!("/jobs?{}", query.join("&"))
+    }
+}
+
+/// Percent encodes everything but unreserved characters and the path
+/// separator.
+fn encode(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                char::from(b).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 fn text(v: &serde_json::Value, key: &str) -> String {
@@ -317,20 +486,8 @@ fn text(v: &serde_json::Value, key: &str) -> String {
 }
 
 /// A file of a crate version in the crates.io code viewer, at the line when
-/// there is one. Everything but unreserved characters and the path
-/// separator is percent encoded.
+/// there is one.
 fn code_url(name: &str, version: &str, file: &str, line: Option<u64>) -> String {
-    let encode = |text: &str| {
-        text.bytes()
-            .map(|b| match b {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                    char::from(b).to_string()
-                }
-                _ => format!("%{b:02X}"),
-            })
-            .collect::<String>()
-    };
-
     let anchor = line.map(|l| format!("#L{l}")).unwrap_or_default();
 
     format!(
@@ -689,6 +846,24 @@ mod tests {
     use sha2::Digest;
 
     use super::*;
+
+    #[test]
+    fn page_numbers_show_the_ends_and_the_neighborhood() {
+        let shown = |page, pages| {
+            page_numbers(page, pages)
+                .iter()
+                .map(|p| p.map_or("…".to_owned(), |p| p.to_string()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+
+        assert_eq!(shown(1, 1), "1");
+        assert_eq!(shown(1, 5), "1 2 3 4 5");
+        assert_eq!(shown(1, 9), "1 2 3 … 9");
+        assert_eq!(shown(5, 11), "1 2 3 4 5 6 7 … 11");
+        assert_eq!(shown(6, 11), "1 … 4 5 6 7 8 … 11");
+        assert_eq!(shown(11, 11), "1 … 9 10 11");
+    }
 
     #[test]
     fn vendored_files_match_their_pins() {

@@ -698,6 +698,95 @@ async fn an_unknown_job_is_not_found() {
 }
 
 #[tokio::test]
+async fn the_job_list_counts_states_and_pages() {
+    let Some(db) = Dashboard::start().await else {
+        return;
+    };
+
+    for i in 0..101 {
+        let new = NewJob {
+            name: format!("many-{i}").parse().unwrap(),
+            version: "0.1.0".parse().unwrap(),
+            cksum: CKSUM.parse().unwrap(),
+            published_at: None,
+            priority: 0,
+            index_entry: json!({}),
+        };
+        db.store.enqueue(&new).await.unwrap().unwrap();
+    }
+    let fail = format!(
+        "UPDATE {}.jobs SET state = 'Failed' WHERE id = 7",
+        db.db.schema()
+    );
+    db.db.admin().execute(&fail, &[]).await.unwrap();
+
+    let link = |id: i64| format!("<a href=\"/jobs/{id}\">");
+    let (status, first) = db.get("/jobs").await;
+
+    assert_eq!(status, 200);
+    assert!(first.contains("101 matching, newest first. Showing 1 to 10."));
+    assert!(first.contains("Discovered <span class=\"muted\">100</span>"));
+    assert!(first.contains("<a href=\"/jobs?state=Failed\">Failed <span class=\"muted\">1</span>"));
+    assert!(first.contains("Running <span class=\"muted\">0</span>"));
+    assert!(first.contains(&link(92)) && !first.contains(&link(91)));
+    assert!(first.contains("<span class=\"disabled\" title=\"first page\">«</span>"));
+    assert!(first.contains(
+        "<span class=\"current\" title=\"page 1, shown\" aria-current=\"page\">1</span>"
+    ));
+    assert!(first.contains("<a href=\"/jobs?page=2\" title=\"next page\">›</a>"));
+    assert!(first.contains("<a href=\"/jobs?page=11\" title=\"last page\">»</a>"));
+
+    let (_, second) = db.get("/jobs?page=2").await;
+
+    assert!(second.contains("<a href=\"/jobs\" title=\"previous page\">‹</a>"));
+
+    let (_, last) = db.get("/jobs?page=11").await;
+
+    assert!(last.contains("Showing 101 to 101."));
+    assert!(last.contains(&link(1)) && !last.contains(&link(2)));
+    assert!(last.contains("<a href=\"/jobs?page=10\" title=\"previous page\">‹</a>"));
+    assert!(last.contains("<span class=\"disabled\" title=\"last page\">»</span>"));
+
+    // Another page size, and links that keep the first job in view.
+    let (_, third) = db.get("/jobs?per=25&page=3").await;
+
+    assert!(third.contains("Showing 51 to 75."));
+    assert!(third.contains(&link(51)) && third.contains(&link(27)));
+    assert!(!third.contains(&link(52)) && !third.contains(&link(26)));
+    assert!(third.contains("<span class=\"current\" aria-current=\"true\">25</span>"));
+    assert!(
+        third.contains("<a href=\"/jobs?per=50&#38;page=2\" title=\"50 jobs per page\">50</a>")
+    );
+    assert!(third.contains("<a href=\"/jobs?page=6\" title=\"10 jobs per page\">10</a>"));
+    assert!(third.contains("<a href=\"/jobs?state=Failed&#38;per=25\">Failed"));
+
+    // Out of range pages and sizes fall back.
+    assert!(
+        db.get("/jobs?page=99")
+            .await
+            .1
+            .contains("Showing 101 to 101.")
+    );
+    assert!(db.get("/jobs?per=500").await.1.contains("Showing 1 to 10."));
+
+    // The counts keep the other filters, the list takes the state.
+    let (_, failed) = db.get("/jobs?name=many&state=Failed").await;
+
+    assert!(failed.contains("1 matching"));
+    assert!(failed.contains(&link(7)) && !failed.contains(&link(8)));
+    assert!(
+        failed.contains("<a href=\"/jobs?name=many&#38;state=Failed\" class=\"selected\">Failed")
+    );
+    assert!(failed.contains("<a href=\"/jobs?name=many\">all</a>"));
+    assert!(failed.contains("<option value=\"Failed\" selected>"));
+
+    // An unknown state is no filter.
+    assert!(db.get("/jobs?state=Bogus").await.1.contains("101 matching"));
+
+    db.drop().await;
+}
+
+#[tokio::test]
 async fn static_evidence_links_to_its_line_on_crates_io() {
     let Some(db) = Dashboard::start().await else {
         return;

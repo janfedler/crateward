@@ -82,6 +82,17 @@ input[type="checkbox"] { accent-color: var(--accent); padding: 0; }
 .filters input { min-width: 16rem; }
 .filters button { background: var(--fg-primary); color: var(--bg-base); border-color: transparent; }
 .filters button:hover { background: var(--color-cream-200); }
+.states { display: flex; gap: .4rem 1rem; flex-wrap: wrap; }
+.states a { white-space: nowrap; }
+.states a.selected { font-weight: 600; text-decoration: none; }
+.pager { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin-top: 1.25rem; }
+.pager a, .pager span:not(.sizes) { min-width: 2.25rem; padding: 6px 10px; text-align: center; border-radius: var(--radius-base);
+       border: 1px solid var(--border-default); text-decoration: none; font-variant-numeric: tabular-nums; }
+.pager a:hover { background: var(--bg-elevated); }
+.pager .current { background: var(--fg-primary); color: var(--bg-base); border-color: transparent; font-weight: 600; }
+.pager .disabled { color: var(--fg-muted); opacity: .45; }
+.pager .gap { border-color: transparent; }
+.pager .sizes { display: flex; gap: .35rem; align-items: center; margin-left: auto; }
 
 /* Pills: badges for states, tags for ATT&CK identifiers, chips for names. */
 .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full);
