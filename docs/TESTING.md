@@ -61,7 +61,9 @@ standard tools of the guest image.
 `cargo xtask canary` runs both canaries on the server, through
 `crates/orchestrator/tests/canary.rs`. Their sources exist only as strings
 in `crates/orchestrator/src/canary.rs`, and they are compiled and run only
-inside a microVM.
+inside a microVM. `cargo xtask canary` and `cargo xtask soak` run under
+umask 0027, as the systemd units do, so a file a VM cannot open fails the
+test as it would in production.
 
 The known bad canary has a build script that reads the job's cargo token
 and posts it to a made up host, and has `curl` post the AWS credentials
@@ -90,3 +92,16 @@ warnings denied, the static musl build of the guest agent, the eBPF
 programs (format, clippy and build with the pinned nightly and
 `bpf-linker`), the documentation checks, `cargo deny` for both lockfiles,
 `cargo audit` and `cargo vet`, in the same order as CI.
+
+## Coverage
+
+```sh
+cargo xtask coverage
+```
+
+runs the workspace tests under `cargo llvm-cov` and prints the line
+coverage per crate. The report per line is in
+`target/llvm-cov/html/index.html`. The database tests count when
+`CRATEWARD_TEST_DATABASE_URL` is set. The microVM tests, the fuzz targets
+and the eBPF programs are not measured. It needs the `llvm-tools`
+component and `cargo install cargo-llvm-cov`.

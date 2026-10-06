@@ -221,6 +221,12 @@ pub mod build {
 
     /// Scratch files of `cargo xtask deploy-check`.
     pub const DEPLOY_CHECK: &str = "target/deploy-check";
+
+    /// The line coverage summary of `cargo xtask coverage`.
+    pub const COVERAGE_SUMMARY: &str = "target/llvm-cov/summary.json";
+
+    /// The coverage report per line, from `cargo xtask coverage`.
+    pub const COVERAGE_HTML: &str = "target/llvm-cov/html";
 }
 
 /// Inside a release bundle, relative to its directory. `cargo xtask

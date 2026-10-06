@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod coverage;
 mod deploy;
 mod diagram;
 mod docs_lint;
@@ -83,6 +84,9 @@ enum Task {
     /// Run the canary: a fixture crate that steals a honeytoken inside a
     /// microVM must be caught.
     Canary,
+    /// Measure the line coverage of the workspace tests (needs
+    /// `cargo llvm-cov`).
+    Coverage,
 }
 
 /// Why a task failed.
@@ -123,6 +127,7 @@ fn main() -> ExitCode {
         Task::BumpDebianSnapshot => rootfs::bump_snapshot(&workspace_root()),
         Task::Soak { jobs } => soak(jobs),
         Task::Canary => canary(),
+        Task::Coverage => coverage::run_coverage(&workspace_root()),
         Task::DeployCheck => deploy::run(&workspace_root()),
         Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
     };
