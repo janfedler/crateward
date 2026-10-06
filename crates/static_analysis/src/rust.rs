@@ -8,7 +8,7 @@
 //! `clap`). Expressions inside macro calls such as `format!` are parsed and
 //! visited too, since that is where many string literals live.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use proc_macro2::Span;
 use syn::punctuated::Punctuated;
@@ -170,9 +170,56 @@ struct Scanner<'a> {
     globs: Vec<String>,
     unsafe_count: u32,
     first_unsafe: Option<u32>,
+    /// Where `env::vars` calls start whose values are dropped or whose keys
+    /// are filtered to Cargo's own variables.
+    keys_only: HashSet<(usize, usize)>,
     scan: FileScan,
 }
 
+/// Where a span starts, as line and column.
+fn position(span: Span) -> (usize, usize) {
+    let start = span.start();
+    (start.line, start.column)
+}
+
+/// Whether a pattern is a key and value pair that drops the value:
+/// `(key, _)`.
+fn drops_value(pat: &syn::Pat) -> bool {
+    let pat = match pat {
+        syn::Pat::Type(t) => &*t.pat,
+        other => other,
+    };
+
+    matches!(pat, syn::Pat::Tuple(t) if t.elems.len() == 2
+        && matches!(t.elems.last(), Some(syn::Pat::Wild(_))))
+}
+
+/// Whether a closure keeps only keys: it maps each pair to something made
+/// from the key alone, or keeps the pairs whose key has a prefix of Cargo's
+/// own variables.
+fn keys_only(method: &str, closure: &syn::ExprClosure) -> bool {
+    let Some(pair) = closure.inputs.first() else {
+        return false;
+    };
+
+    match method {
+        "map" | "filter_map" | "flat_map" | "for_each" | "any" | "all" | "find_map" => {
+            drops_value(pair)
+        }
+        "filter" => {
+            let syn::Expr::MethodCall(call) = &*closure.body else {
+                return false;
+            };
+
+            call.method == "starts_with"
+                && call.args.iter().any(|a| {
+                    matches!(a, syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. })
+                        if ["CARGO_", "DEP_"].iter().any(|p| s.value().starts_with(p)))
+                })
+        }
+        _ => false,
+    }
+}
 fn line(span: Span) -> u32 {
     u32::try_from(span.start().line).unwrap_or(0)
 }
@@ -240,6 +287,21 @@ impl Scanner<'_> {
         if pushed {
             self.cfg.pop();
         }
+    }
+
+    /// Where the function path of `expr` starts, if `expr` calls
+    /// `env::vars` or `env::vars_os`.
+    fn vars_call(&self, expr: &syn::Expr) -> Option<(usize, usize)> {
+        let syn::Expr::Call(call) = expr else {
+            return None;
+        };
+        let syn::Expr::Path(func) = &*call.func else {
+            return None;
+        };
+        let full = self.resolve(&func.path);
+
+        (full.ends_with("env::vars") || full.ends_with("env::vars_os"))
+            .then(|| position(func.path.span()))
     }
 
     /// The full path of a path expression, resolved through `use`.
@@ -332,12 +394,22 @@ impl Scanner<'_> {
         } else if PROCESS.iter().any(|p| full.starts_with(p)) {
             self.add(FindingKind::ProcessSpawn, Severity::Low, span, &full);
         } else if full.ends_with("env::vars") || full.ends_with("env::vars_os") {
-            self.add(
-                FindingKind::EnvironmentEnumeration,
-                Severity::Medium,
-                span,
-                &full,
-            );
+            if self.keys_only.contains(&position(span)) {
+                let text = format!("{full}, keys only");
+                self.add(
+                    FindingKind::EnvironmentEnumeration,
+                    Severity::Info,
+                    span,
+                    &text,
+                );
+            } else {
+                self.add(
+                    FindingKind::EnvironmentEnumeration,
+                    Severity::Medium,
+                    span,
+                    &full,
+                );
+            }
         } else if WINDOWS_API.iter().any(|w| last.starts_with(w)) {
             self.add(FindingKind::WindowsApi, Severity::Medium, span, &full);
         }
@@ -474,6 +546,27 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
         };
 
         self.with_cfg(attrs, |s| visit::visit_expr(s, expr));
+    }
+
+    fn visit_expr_for_loop(&mut self, expr: &'ast syn::ExprForLoop) {
+        if drops_value(&expr.pat)
+            && let Some(at) = self.vars_call(&expr.expr)
+        {
+            self.keys_only.insert(at);
+        }
+
+        visit::visit_expr_for_loop(self, expr);
+    }
+
+    fn visit_expr_method_call(&mut self, expr: &'ast syn::ExprMethodCall) {
+        if let Some(at) = self.vars_call(&expr.receiver)
+            && let Some(syn::Expr::Closure(closure)) = expr.args.first()
+            && keys_only(&expr.method.to_string(), closure)
+        {
+            self.keys_only.insert(at);
+        }
+
+        visit::visit_expr_method_call(self, expr);
     }
 
     fn visit_expr_unsafe(&mut self, expr: &'ast syn::ExprUnsafe) {
@@ -614,6 +707,7 @@ pub fn scan_file(file: &str, source: &str, context: CodeContext) -> FileScan {
         globs: Vec::new(),
         unsafe_count: 0,
         first_unsafe: None,
+        keys_only: HashSet::new(),
         scan: FileScan::default(),
     };
 
@@ -722,6 +816,46 @@ fn main() {
             .unwrap();
 
         assert_eq!(net.platform, Platform::Apple);
+    }
+
+    #[test]
+    fn reading_only_keys_of_the_environment_is_low() {
+        let source = r#"
+use std::env;
+fn main() {
+    for (name, _) in env::vars_os() {
+        cargo.env_remove(name);
+    }
+    let features: Vec<String> = std::env::vars()
+        .filter_map(|(key, _)| key.strip_prefix("CARGO_FEATURE_").map(str::to_owned))
+        .collect();
+    let deps = env::vars().filter(|(k, _)| k.starts_with("DEP_")).count();
+    for (key, value) in env::vars() {
+        println!("cargo:warning={key}={value}");
+    }
+    let rest = env::vars().filter(|(k, _)| !k.starts_with("CARGO_")).collect::<Vec<_>>();
+    let pairs = env::vars().filter(|(k, _)| k.len() > 3).map(|(_, v)| v);
+}
+"#;
+        let scan = scan_file("build.rs", source, CodeContext::BuildScript);
+        let found: Vec<_> = scan
+            .findings
+            .iter()
+            .filter(|f| f.kind == FindingKind::EnvironmentEnumeration)
+            .map(|f| (f.line.unwrap(), f.severity))
+            .collect();
+
+        assert_eq!(
+            found,
+            [
+                (4, Severity::Low),
+                (7, Severity::Low),
+                (10, Severity::Low),
+                (11, Severity::High),
+                (14, Severity::High),
+                (15, Severity::High),
+            ]
+        );
     }
 
     #[test]

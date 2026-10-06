@@ -88,6 +88,10 @@ pub struct ScanSpec {
     pub planted: Vec<String>,
     /// Directories the agent created, as the guest sees them.
     pub created: Vec<String>,
+    /// Values of the job's ordinary environment variables. A file that
+    /// holds a honeytoken and all of these holds a dump of the environment.
+    #[serde(default)]
+    pub environment: Vec<String>,
 }
 
 /// One file or directory.
@@ -133,6 +137,10 @@ pub struct ScratchReport {
     pub planted_changed: Vec<String>,
     /// `(token index, path)`: honeytokens found in file contents.
     pub tokens_found: Vec<(usize, String)>,
+    /// Files with honeytokens that also hold the rest of the environment.
+    /// `None` in reports of scanners that did not look for them.
+    #[serde(default)]
+    pub environment_dumps: Option<Vec<String>>,
     /// File names of compiled units in `target/debug/deps` (for example
     /// `libserde-0123456789abcdef.rmeta`). The hash in each name identifies
     /// the unit exactly (version, features, dependencies, profile), which
@@ -160,6 +168,11 @@ fn kind(file_type: FileType) -> &'static str {
 
 fn render(bytes: &[u8]) -> String {
     crate::trace::render(bytes)
+}
+
+/// Whether `haystack` holds `value`. An empty value is never found.
+fn contains(haystack: &[u8], value: &str) -> bool {
+    !value.is_empty() && haystack.windows(value.len()).any(|w| w == value.as_bytes())
 }
 
 fn push<T>(list: &mut Vec<T>, omitted: &mut u64, item: T) {
@@ -211,12 +224,20 @@ impl Scanner<'_> {
     /// whether it starts with an ELF header.
     fn search(&mut self, path: &ExtPath, guest: &str) -> Result<bool, Ext4Error> {
         let mut file = self.fs.open(path.as_path())?;
-        let longest = self.spec.tokens.iter().map(String::len).max().unwrap_or(0);
+        let spec = self.spec;
+        let longest = spec
+            .tokens
+            .iter()
+            .chain(&spec.environment)
+            .map(String::len)
+            .max()
+            .unwrap_or(0);
         let mut window: Vec<u8> = Vec::new();
         let mut buffer = vec![0_u8; 64 * 1024];
         let mut read_total = 0_u64;
         let mut elf = false;
-        let mut found = vec![false; self.spec.tokens.len()];
+        let mut found = vec![false; spec.tokens.len()];
+        let mut environment = vec![false; spec.environment.len()];
 
         while read_total < MAX_FILE_SEARCH && self.searched < MAX_TOTAL_SEARCH {
             let n = file.read_bytes(&mut buffer)?;
@@ -232,15 +253,12 @@ impl Scanner<'_> {
             read_total += n as u64;
             self.searched += n as u64;
 
-            // Keep the tail of the previous chunk, so a token split across
+            // Keep the tail of the previous chunk, so a value split across
             // two reads is still found.
             window.extend_from_slice(chunk);
 
-            for (i, token) in self.spec.tokens.iter().enumerate() {
-                if !found.get(i).copied().unwrap_or(true)
-                    && !token.is_empty()
-                    && window.windows(token.len()).any(|w| w == token.as_bytes())
-                {
+            for (i, token) in spec.tokens.iter().enumerate() {
+                if !found.get(i).copied().unwrap_or(true) && contains(&window, token) {
                     if let Some(f) = found.get_mut(i) {
                         *f = true;
                     }
@@ -250,12 +268,24 @@ impl Scanner<'_> {
                 }
             }
 
+            for (seen, value) in environment.iter_mut().zip(&spec.environment) {
+                *seen = *seen || contains(&window, value);
+            }
+
             let keep = window.len().saturating_sub(longest);
             window.drain(..keep);
         }
 
         if read_total >= MAX_FILE_SEARCH || self.searched >= MAX_TOTAL_SEARCH {
             self.report.incomplete = true;
+        }
+
+        let dump = !environment.is_empty() && environment.iter().all(|&seen| seen);
+        if dump
+            && found.contains(&true)
+            && let Some(dumps) = &mut self.report.environment_dumps
+        {
+            push(dumps, &mut self.report.omitted, guest.to_owned());
         }
 
         Ok(elf)
@@ -389,7 +419,10 @@ pub fn scan(fs: &Ext4, spec: &ScanSpec) -> ScratchReport {
     let mut scanner = Scanner {
         fs,
         spec,
-        report: ScratchReport::default(),
+        report: ScratchReport {
+            environment_dumps: Some(Vec::new()),
+            ..ScratchReport::default()
+        },
         entries: 0,
         searched: 0,
     };
@@ -815,6 +848,7 @@ mod tests {
                 "/work/home/.cargo".into(),
                 "/work/target".into(),
             ],
+            environment: vec!["/work/home/.cargo".into(), "C.UTF-8".into()],
         }
     }
 
@@ -875,9 +909,47 @@ mod tests {
             report.tokens_found,
             [(0, "/work/target/debug/out/stolen.txt".to_owned())]
         );
+        assert_eq!(report.environment_dumps, Some(Vec::new()));
         assert!(report.planted_changed.is_empty());
         assert!(report.files >= 7);
         assert_eq!(report.units, ["libx-0123abcd.rmeta"]);
+    }
+
+    #[test]
+    fn a_token_with_the_rest_of_the_environment_is_a_dump() {
+        // A dump whose values lie in two reads, a token without the
+        // environment, and the environment without a token.
+        let mut split = b"LANG=\"C.UTF-8\" ".to_vec();
+        split.resize(64 * 1024 - 4, b' ');
+        split
+            .extend_from_slice(b"GITHUB_TOKEN=\"cioSECRETTOKEN0123\" CARGO_HOME=/work/home/.cargo");
+        let Some(data) = image(&[
+            (
+                "/target/debug/build/z-0123456789abcdef/output",
+                &split,
+                0o644,
+            ),
+            (
+                "/target/debug/build/y-0123456789abcdef/output",
+                b"cioSECRETTOKEN0123",
+                0o644,
+            ),
+            ("/target/debug/env", b"C.UTF-8 /work/home/.cargo", 0o644),
+        ]) else {
+            eprintln!("skipping: mkfs.ext4 is not available");
+            return;
+        };
+
+        let fs = Ext4::load(Box::new(data)).unwrap();
+        let report = scan(&fs, &spec());
+
+        assert_eq!(report.tokens_found.len(), 2);
+        assert_eq!(
+            report.environment_dumps,
+            Some(vec![
+                "/work/target/debug/build/z-0123456789abcdef/output".to_owned()
+            ])
+        );
     }
 
     fn mkfifo(path: &Path) -> io::Result<()> {

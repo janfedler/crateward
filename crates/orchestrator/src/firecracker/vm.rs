@@ -55,6 +55,10 @@ pub const TAP: &str = "tap0";
 pub const GUEST_ADDRESS: &str = "10.0.2.2";
 /// Host side address of the tap device, the guest's gateway and resolver.
 pub const HOST_ADDRESS: &str = "10.0.2.1";
+/// The guest's host name. Without one the kernel names the guest after its
+/// address, and the C library then appends the domain part (`0.2.2`) to
+/// names it fails to resolve, so every lookup shows up twice.
+pub const GUEST_HOSTNAME: &str = "build";
 /// Prefix length of the link between guest and host.
 pub const PREFIX_LEN: u8 = 30;
 const GUEST_MAC: &str = "06:00:0a:00:02:02";
@@ -210,7 +214,7 @@ impl BootSpec {
     /// Kernel IP autoconfiguration for the guest side of the tap link.
     #[must_use]
     pub fn network_boot_args() -> String {
-        format!("ip={GUEST_ADDRESS}::{HOST_ADDRESS}:255.255.255.252::eth0:off")
+        format!("ip={GUEST_ADDRESS}::{HOST_ADDRESS}:255.255.255.252:{GUEST_HOSTNAME}:eth0:off")
     }
 }
 
@@ -722,5 +726,19 @@ impl Vm {
         tokio::fs::remove_dir_all(&self.dir)
             .await
             .map_err(io_error(format!("removing {}", self.dir.display())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_guest_gets_a_host_name_without_a_domain() {
+        assert_eq!(
+            BootSpec::network_boot_args(),
+            "ip=10.0.2.2::10.0.2.1:255.255.255.252:build:eth0:off"
+        );
+        assert!(!GUEST_HOSTNAME.contains('.'));
     }
 }

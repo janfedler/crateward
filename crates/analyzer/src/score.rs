@@ -9,7 +9,11 @@
 //! * A honeytoken that left the VM is theft, and alone makes a verdict
 //!   critical.
 //! * A honeytoken copied inside the VM, a process that became root, an
-//!   attempt to tamper with tracing, or a guest that stopped itself are high.
+//!   attempt to tamper with tracing, a build that runs a program it wrote,
+//!   or a guest that stopped itself are high.
+//! * A build script that prints the whole environment copies the planted
+//!   token along with everything else. Common tools do this, so such a dump
+//!   counts as reading credentials, not as theft.
 //! * Reading credentials, writing to persistence locations, contacting the
 //!   network, or running shells and downloaders during a build are
 //!   suspicious on their own and common in legitimate `-sys` crates, so they
@@ -24,15 +28,18 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crateward_core::job::BuildOutcome;
+use crateward_core::paths::guest;
 use crateward_core::verdict::{Coverage, Evidence, EvidenceSource, RiskLevel, Verdict};
+use crateward_orchestrator::firecracker::vm::GUEST_ADDRESS;
+use crateward_orchestrator::scratch::Entry;
 use crateward_orchestrator::trace::{Process, Role};
-use crateward_orchestrator::worker::RunReport;
+use crateward_orchestrator::worker::{Leak, RunReport};
 use crateward_static_analysis::analyze::StaticReport;
 use crateward_static_analysis::diff::VersionDiff;
 use crateward_static_analysis::findings::{Finding, FindingKind, Severity};
 
 /// Bumped whenever scoring changes, so old verdicts can be recomputed.
-pub const ANALYZER_VERSION: u32 = 3;
+pub const ANALYZER_VERSION: u32 = 4;
 
 /// Everything scoring reads about one version.
 #[derive(Debug, Clone, Copy)]
@@ -63,6 +70,7 @@ struct Groups {
 enum Group {
     Theft,
     Integrity,
+    Dropper,
     Credentials,
     Persistence,
     Network,
@@ -74,7 +82,7 @@ enum Group {
 impl Group {
     const fn cap(self) -> u32 {
         match self {
-            Self::Theft | Self::Integrity => 100,
+            Self::Theft | Self::Integrity | Self::Dropper => 100,
             Self::Credentials | Self::Persistence => 60,
             Self::Network => 40,
             Self::Static => 30,
@@ -219,6 +227,31 @@ fn persistence(path: &str) -> bool {
     .any(|p| path.contains(p))
 }
 
+/// The directory a path left outside the build lies in: the first one below
+/// the home directory or `/work`, or the first one of the path elsewhere.
+fn top_directory(path: &str) -> String {
+    let (base, rest) = [guest::HOME, guest::WORK, ""]
+        .into_iter()
+        .find_map(|base| Some((base, path.strip_prefix(base)?.strip_prefix('/')?)))
+        .unwrap_or(("", path));
+    let first = rest.split('/').next().unwrap_or(rest);
+
+    format!("{base}/{first}")
+}
+
+/// Whether a program lies where the build can write: anything it runs from
+/// there, it put there itself. Build scripts and what cargo builds live in
+/// the target directory, and installed tools in `CARGO_HOME/bin`.
+fn writable_location(exe: &str) -> bool {
+    let work = exe.starts_with(&format!("{}/", guest::WORK))
+        && !exe.starts_with(&format!("{}/", guest::TARGET))
+        && !exe.starts_with(&format!("{}/bin/", guest::CARGO_HOME));
+
+    work || ["/tmp/", "/var/tmp/", "/dev/shm/", "/run/"]
+        .iter()
+        .any(|dir| exe.starts_with(dir))
+}
+
 /// Programs worth noting when a build script runs them.
 fn notable_program(exe: &str) -> Option<(&'static str, u32)> {
     let name = exe.rsplit('/').next().unwrap_or(exe);
@@ -283,6 +316,14 @@ fn score_static(inputs: &Inputs<'_>, groups: &mut Groups, profile: &mut BTreeSet
             continue;
         }
 
+        // A payload is no static finding like the others: it does not share
+        // their cap.
+        let (group, points) = if f.kind == FindingKind::DropperPattern {
+            (Group::Dropper, 40)
+        } else {
+            (Group::Static, points)
+        };
+
         let more = if count > 1 {
             format!(" ({} places)", count)
         } else {
@@ -290,7 +331,7 @@ fn score_static(inputs: &Inputs<'_>, groups: &mut Groups, profile: &mut BTreeSet
         };
 
         groups.add(
-            Group::Static,
+            group,
             Evidence {
                 signal: format!("static:{name}"),
                 points,
@@ -393,7 +434,27 @@ fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Stri
         );
     }
 
-    for leak in run.tokens_in_trace.iter().chain(&run.tokens_on_disk) {
+    for leak in run.tokens_on_disk.iter().filter(|l| dumped(run, l)) {
+        profile.insert("dump:environment".into());
+        groups.add(
+            Group::Credentials,
+            Evidence {
+                signal: "environment_dumped".into(),
+                points: 15,
+                source: EvidenceSource::Disk,
+                summary: format!(
+                    "A build script wrote the whole environment, with the planted {}, \
+                     into its build directory.",
+                    leak.kind
+                ),
+                package: build_dir_package(&leak.via),
+                location: Some(leak.via.clone()),
+            },
+        );
+    }
+
+    let copies = run.tokens_on_disk.iter().filter(|l| !dumped(run, l));
+    for leak in run.tokens_in_trace.iter().chain(copies) {
         profile.insert(format!("copy:{}", leak.kind));
         groups.add(
             Group::Theft,
@@ -407,6 +468,18 @@ fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Stri
             },
         );
     }
+}
+
+/// Whether a honeytoken on disk came with the rest of the environment, in a
+/// build script's own directory. Reports of scanners that did not look for
+/// the environment count every copy there as a dump.
+fn dumped(run: &RunReport, leak: &Leak) -> bool {
+    build_dir_package(&leak.via).is_some()
+        && run
+            .scratch
+            .as_ref()
+            .and_then(|s| s.environment_dumps.as_ref())
+            .is_none_or(|dumps| dumps.contains(&leak.via))
 }
 
 /// A process that became root, tampering with the tracing, and a guest that
@@ -435,7 +508,7 @@ fn score_integrity(
         );
     }
 
-    for x in &run.trace.tamper {
+    for x in run.trace.tamper.iter().filter(|x| !x.is_read_check()) {
         profile.insert(format!(
             "tamper:{}",
             x.what.split(' ').next().unwrap_or("?")
@@ -525,21 +598,51 @@ fn score_files(
 fn score_disk(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     let Some(scratch) = &run.scratch else { return };
 
-    for e in &scratch.outside_build {
-        let (behavior, signal, points) = if persistence(&e.path) {
-            ("disk:persistence", "disk_persistence", 40)
-        } else {
-            ("disk:outside", "disk_outside_build", 10)
-        };
+    let (lasting, other): (Vec<_>, Vec<_>) = scratch
+        .outside_build
+        .iter()
+        .partition(|e| persistence(&e.path));
 
-        profile.insert(behavior.into());
+    for e in lasting {
+        profile.insert("disk:persistence".into());
         groups.add(
             Group::Persistence,
             Evidence {
-                signal: signal.into(),
-                points,
+                signal: "disk_persistence".into(),
+                points: 40,
                 source: EvidenceSource::Disk,
                 summary: format!("The build left {} ({}).", e.path, e.kind),
+                package: None,
+                location: Some(e.path.clone()),
+            },
+        );
+    }
+
+    // A cache directory with its contents counts once.
+    let mut trees: BTreeMap<String, (&Entry, usize)> = BTreeMap::new();
+    for e in other {
+        let tree = trees.entry(top_directory(&e.path)).or_insert((e, 0));
+        tree.1 += 1;
+
+        if e.path.len() < tree.0.path.len() {
+            tree.0 = e;
+        }
+    }
+
+    for (e, count) in trees.into_values() {
+        let below = match count {
+            1 => String::new(),
+            n => format!(" and {} entries below it", n - 1),
+        };
+
+        profile.insert("disk:outside".into());
+        groups.add(
+            Group::Persistence,
+            Evidence {
+                signal: "disk_outside_build".into(),
+                points: 10,
+                source: EvidenceSource::Disk,
+                summary: format!("The build left {} ({}){below}.", e.path, e.kind),
                 package: None,
                 location: Some(e.path.clone()),
             },
@@ -599,7 +702,17 @@ fn score_network(
         None
     };
 
-    for name in &run.network.dns {
+    // Guests without a host name looked up every name a second time with
+    // the domain of their address appended.
+    let (_, domain) = GUEST_ADDRESS.split_once('.').unwrap_or_default();
+    let names = run.network.dns.iter().filter(|name| {
+        !name
+            .strip_suffix(domain)
+            .and_then(|n| n.strip_suffix('.'))
+            .is_some_and(|bare| run.network.dns.iter().any(|d| d == bare))
+    });
+
+    for name in names {
         profile.insert(format!("net:{name}"));
         groups.add(
             Group::Network,
@@ -645,7 +758,8 @@ fn score_network(
     }
 }
 
-/// Programs that build scripts ran, directly or through children.
+/// Programs that the build wrote and ran, and programs that build scripts
+/// ran, directly or through children.
 fn score_execution(
     run: &RunReport,
     processes: &Processes<'_>,
@@ -653,6 +767,29 @@ fn score_execution(
     profile: &mut BTreeSet<String>,
 ) {
     let mut seen = BTreeSet::new();
+
+    for p in run
+        .trace
+        .processes
+        .iter()
+        .filter(|p| writable_location(&p.exe))
+    {
+        profile.insert("exec:dropped".into());
+        groups.add(
+            Group::Dropper,
+            Evidence {
+                signal: "exec_dropped".into(),
+                points: 60,
+                source: EvidenceSource::Trace,
+                summary: format!(
+                    "The build ran {}, a program in a writable location, which the build put there.",
+                    p.exe
+                ),
+                package: package_of(p.pid, processes),
+                location: Some(p.exe.clone()),
+            },
+        );
+    }
 
     for p in &run.trace.processes {
         let Some((kind, points)) = notable_program(&p.exe) else {
@@ -748,6 +885,7 @@ pub fn score(inputs: &Inputs<'_>) -> Verdict {
 
 #[cfg(test)]
 mod tests {
+    use crateward_orchestrator::scratch::ScratchReport;
     use crateward_orchestrator::trace::TraceSummary;
     use serde_json::json;
 
@@ -832,11 +970,209 @@ mod tests {
         assert!(!should_escalate(&v));
     }
 
+    /// A scan of the scratch disk that found the given environment dumps,
+    /// and the entries outside the build.
+    fn scratch(dumps: &[&str], outside: &[&str]) -> serde_json::Value {
+        let entry = |path: &&str| Entry {
+            path: (*path).to_owned(),
+            kind: "dir".into(),
+            size: 0,
+            mode: 0o755,
+            uid: 1000,
+            target: None,
+        };
+
+        serde_json::to_value(ScratchReport {
+            environment_dumps: Some(dumps.iter().map(|d| (*d).to_owned()).collect()),
+            outside_build: outside.iter().map(entry).collect(),
+            ..ScratchReport::default()
+        })
+        .unwrap()
+    }
+
+    /// A build script's output, as `libz-sys` writes it.
+    const OUTPUT: &str = "/work/.warm/upper/debug/build/libz-sys-8151eeab73d3e858/output";
+
+    #[test]
+    fn a_dumped_environment_is_no_theft() {
+        let with = |scratch: serde_json::Value| {
+            let mut r = run(json!({
+                "tokens_on_disk": [{"kind": "github_token_env", "via": OUTPUT}],
+                "scratch": scratch,
+            }));
+            r.trace.processes.truncate(2);
+            score(&inputs(&[r]))
+        };
+
+        let v = with(scratch(&[OUTPUT], &[]));
+
+        assert_eq!((v.score, v.level), (15, RiskLevel::Low));
+        assert_eq!(v.evidence[0].signal, "environment_dumped");
+        assert_eq!(v.evidence[0].package.as_deref(), Some("libz-sys"));
+        assert_eq!(v.profile, ["dump:environment"]);
+
+        // The same file without the rest of the environment is a copy.
+        let v = with(scratch(&[], &[]));
+
+        assert_eq!((v.score, v.level), (60, RiskLevel::High));
+        assert_eq!(v.evidence[0].signal, "honeytoken_copied");
+
+        // A report from before the scanner looked for dumps.
+        assert_eq!(
+            with(serde_json::Value::Null).evidence[0].signal,
+            "environment_dumped"
+        );
+    }
+
+    /// `monica_rand_core` 0.10.2: its build script printed the environment,
+    /// wrote an embedded executable to `/tmp` and started it.
+    #[test]
+    fn a_build_that_runs_what_it_dropped_is_critical() {
+        let mut r = run(json!({
+            "tokens_on_disk": [{"kind": "github_token_env", "via": OUTPUT}],
+            "scratch": scratch(&[OUTPUT], &[]),
+        }));
+        r.trace.processes[2].exe = "/tmp/code-helper".into();
+        let runs = [r];
+        let finding = |kind, file: &str| Finding {
+            kind,
+            severity: Severity::High,
+            file: file.into(),
+            line: Some(1),
+            context: crateward_static_analysis::findings::CodeContext::BuildScript,
+            cfg: None,
+            platform: crateward_static_analysis::findings::Platform::Any,
+            evidence: "e".into(),
+        };
+        let report = StaticReport {
+            analyzer_version: 6,
+            manifest: crateward_static_analysis::manifest::ManifestFacts::default(),
+            files: 4,
+            rust_files: 1,
+            skipped: Vec::new(),
+            findings: vec![
+                finding(FindingKind::EnvironmentEnumeration, "build.rs"),
+                finding(FindingKind::IncludedBinary, "build.rs"),
+                finding(FindingKind::DropperPattern, "build.rs"),
+            ],
+            findings_dropped: 0,
+            library_platform: crateward_static_analysis::findings::Platform::Any,
+            platforms: BTreeMap::new(),
+        };
+
+        let mut i = inputs(&runs);
+        let dynamic = score(&i);
+
+        assert_eq!((dynamic.score, dynamic.level), (75, RiskLevel::High));
+
+        let dropped = dynamic
+            .evidence
+            .iter()
+            .find(|e| e.signal == "exec_dropped")
+            .unwrap();
+
+        assert_eq!(dropped.package.as_deref(), Some("evil"));
+        assert!(dynamic.profile.contains(&"exec:dropped".to_owned()));
+
+        i.report = Some(&report);
+        let v = score(&i);
+
+        assert_eq!(v.level, RiskLevel::Critical);
+        assert!(
+            v.evidence
+                .iter()
+                .any(|e| e.signal == "static:dropper_pattern" && e.points == 40)
+        );
+    }
+
+    #[test]
+    fn a_directory_left_outside_the_build_counts_once() {
+        let r = run(json!({"scratch": scratch(&[], &[
+            "/work/home/.cache",
+            "/work/home/.cache/ort.pyke.io",
+            "/work/home/.cache/ort.pyke.io/dfbin",
+            "/tmp/left",
+        ])}));
+        let v = score(&inputs(&[r]));
+        let left: Vec<_> = v
+            .evidence
+            .iter()
+            .filter(|e| e.signal == "disk_outside_build")
+            .map(|e| (e.points, e.summary.as_str()))
+            .collect();
+
+        assert_eq!(
+            left,
+            [
+                (10, "The build left /tmp/left (dir)."),
+                (
+                    10,
+                    "The build left /work/home/.cache (dir) and 2 entries below it."
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn stored_resolver_and_procfs_artifacts_count_nothing() {
+        let mut r = run(json!({
+            "network": {"dns": ["index.crates.io", "index.crates.io.0.2.2", "x.0.2.2"],
+                        "connections": [], "udp_datagrams": 0, "refused": 0, "truncated": false}
+        }));
+        r.trace.processes.truncate(2);
+        r.trace.tamper.push(
+            serde_json::from_value(json!({"pid": 2, "what": "ptrace 1 mode 0xd", "ms": 5}))
+                .unwrap(),
+        );
+        let v = score(&inputs(&[r]));
+        let signals: Vec<_> = v
+            .evidence
+            .iter()
+            .map(|e| (e.signal.as_str(), e.location.as_deref()))
+            .collect();
+
+        assert_eq!(
+            signals,
+            [
+                ("network_lookup", Some("index.crates.io")),
+                ("network_lookup", Some("x.0.2.2")),
+            ]
+        );
+    }
+
+    #[test]
+    fn programs_in_writable_places_were_dropped() {
+        for dropped in [
+            "/tmp/code-helper",
+            "/dev/shm/x",
+            "/work/home/.local/bin/x",
+            "/work/x",
+        ] {
+            assert!(writable_location(dropped), "{dropped}");
+        }
+
+        for installed in [
+            "/usr/bin/cc",
+            "/work/target/debug/build/x-0123456789abcdef/build-script-build",
+            "/work/home/.cargo/bin/cargo-x",
+            "./conftest",
+        ] {
+            assert!(!writable_location(installed), "{installed}");
+        }
+
+        assert_eq!(top_directory("/work/home/.cache/a/b"), "/work/home/.cache");
+        assert_eq!(top_directory("/work/src/tool"), "/work/src");
+        assert_eq!(top_directory("/tmp/left"), "/tmp");
+    }
+
     #[test]
     fn one_behavior_in_two_runs_counts_once() {
         let copy = |dir: &str| {
-            run(json!({"tokens_on_disk": [{"kind": "github_token_env",
-                "via": format!("/work/target/debug/build/dep-{dir}/out/env.rs")}]}))
+            let via = format!("/work/target/debug/build/dep-{dir}/out/env.rs");
+            run(
+                json!({"tokens_on_disk": [{"kind": "github_token_env", "via": via}],
+                "scratch": scratch(&[], &[])}),
+            )
         };
 
         let runs = [copy("0123456789abcdef"), copy("fedcba9876543210")];

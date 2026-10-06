@@ -19,8 +19,10 @@ per core, so overhead matters.
    (`crateward_guest_ebpf`) with a pinned nightly and `bpf-linker`:
    * Tracepoints for fork, exec (path and argument vector) and exit.
    * LSM hooks `file_open`, `socket_connect` and `socket_sendmsg`, plus
-     `bpf`, `ptrace_access_check` and `sb_mount` as tamper attempts. Every
-     hook returns 0: tracing never changes a decision.
+     `bpf`, `ptrace_access_check` and `sb_mount` as tamper attempts. A
+     ptrace check counts only when it asks for attach access, since reading
+     many `/proc/<pid>` files asks for read access. Every hook returns 0:
+     tracing never changes a decision.
 3. **Who is traced:** the builder user and everything it forks, so a change
    of user does not end tracking. The user comes from the task's objective
    credentials, which overlayfs does not swap during a copy up.

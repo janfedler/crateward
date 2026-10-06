@@ -73,6 +73,10 @@ const TOOLCHAIN: [&str; 25] = [
     "objcopy",
 ];
 
+/// `PTRACE_MODE_ATTACH` from `linux/ptrace.h`: attaching to a process, or
+/// reading or writing its memory.
+const PTRACE_MODE_ATTACH: u32 = 0x02;
+
 fn role(exe: &str) -> Role {
     let name = exe.rsplit('/').next().unwrap_or(exe);
 
@@ -154,6 +158,19 @@ pub struct Tamper {
     pub what: String,
     /// Milliseconds after the job started.
     pub ms: u32,
+}
+
+impl Tamper {
+    /// Whether this is a ptrace check for read access only, which reports
+    /// from before such checks were left out still list.
+    #[must_use]
+    pub fn is_read_check(&self) -> bool {
+        self.what
+            .strip_prefix("ptrace ")
+            .and_then(|rest| rest.split_once(" mode 0x"))
+            .and_then(|(_, mode)| u32::from_str_radix(mode, 16).ok())
+            .is_some_and(|mode| mode & PTRACE_MODE_ATTACH == 0)
+    }
 }
 
 /// The guest's account of a job.
@@ -333,9 +350,12 @@ impl TraceBuilder {
                 self.socket(pid, ms, "send", *sock_type, address);
             }
             TraceKind::Bpf { cmd } => self.tamper(pid, format!("bpf cmd {cmd}"), ms),
-            TraceKind::Ptrace { target, mode } => {
+            // The kernel checks read access for many `/proc/<pid>` files,
+            // which process listings read. Those reads are traced as opens.
+            TraceKind::Ptrace { target, mode } if mode & PTRACE_MODE_ATTACH != 0 => {
                 self.tamper(pid, format!("ptrace {target} mode {mode:#x}"), ms);
             }
+            TraceKind::Ptrace { .. } => {}
             TraceKind::Mount { fstype } => {
                 self.tamper(pid, format!("mount {}", render(fstype)), ms);
             }
@@ -614,6 +634,14 @@ mod tests {
     }
 
     #[test]
+    fn read_checks_are_told_from_attaching() {
+        assert!(tamper_entry("ptrace 572 mode 0xd").is_read_check());
+        assert!(!tamper_entry("ptrace 572 mode 0x12").is_read_check());
+        assert!(!tamper_entry("bpf cmd 5").is_read_check());
+        assert!(!tamper_entry("ptrace x").is_read_check());
+    }
+
+    #[test]
     fn every_event_kind_lands_in_the_summary() {
         let mut b = TraceBuilder::default();
         let open = |ms: u32, path: &str, flags: u32| {
@@ -663,7 +691,17 @@ mod tests {
                 6,
                 TraceKind::Ptrace {
                     target: 7,
-                    mode: 0x10,
+                    mode: 0x12,
+                },
+            ),
+            // Reading `/proc/7/stat` checks read access only.
+            event(
+                2,
+                BUILDER_UID,
+                6,
+                TraceKind::Ptrace {
+                    target: 7,
+                    mode: 0xd,
                 },
             ),
             event(
@@ -708,7 +746,7 @@ mod tests {
         let expected = TraceSummary {
             complete: true,
             totals: Some(totals),
-            received: 17,
+            received: 18,
             opens: 4,
             processes: vec![root, curl, unknown],
             processes_omitted: 0,
@@ -722,7 +760,7 @@ mod tests {
             ],
             tamper: vec![
                 tamper_entry("bpf cmd 5"),
-                tamper_entry("ptrace 7 mode 0x10"),
+                tamper_entry("ptrace 7 mode 0x12"),
                 tamper_entry("mount tmpfs"),
             ],
             omitted: 0,

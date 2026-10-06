@@ -184,6 +184,7 @@ fn yara(rule: &str) -> Vec<Technique> {
 fn finding(kind: &str) -> Vec<Technique> {
     match kind {
         "downloader_pattern" => vec![INGRESS],
+        "dropper_pattern" => vec![EMBEDDED],
         "shell_command" => vec![UNIX_SHELL],
         "credential_access" => vec![CREDENTIAL_FILES],
         "secret_environment_variable" => vec![UNSECURED],
@@ -220,6 +221,7 @@ pub fn techniques(signal: &str, location: Option<&str>) -> Vec<Technique> {
         "read_ssh" => vec![PRIVATE_KEYS],
         "read_other_process" => vec![PROC_MEMORY],
         "honeytoken_copied" => vec![CREDENTIAL_FILES],
+        "environment_dumped" => vec![UNSECURED],
         "honeytoken_left_vm" => exfiltration(location),
         "write_persistence" | "disk_persistence" => vec![persistence(location)],
         "became_root" => vec![ELEVATION],

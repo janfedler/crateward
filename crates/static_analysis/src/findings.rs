@@ -152,6 +152,9 @@ pub enum FindingKind {
     /// Network access combined with running or writing code, in code that
     /// runs at build time: the shape of a downloader.
     DownloaderPattern,
+    /// An embedded executable and starting programs, in code that runs at
+    /// build time: the shape of a dropper.
+    DropperPattern,
     /// Paths or names of credentials: SSH keys, cargo tokens, cloud keys,
     /// browser and wallet data.
     CredentialAccess,
@@ -201,6 +204,7 @@ impl FindingKind {
             Self::ProcessSpawn => "process_spawn",
             Self::ShellCommand => "shell_command",
             Self::DownloaderPattern => "downloader_pattern",
+            Self::DropperPattern => "dropper_pattern",
             Self::CredentialAccess => "credential_access",
             Self::SecretEnvironmentVariable => "secret_environment_variable",
             Self::EnvironmentEnumeration => "environment_enumeration",
@@ -326,6 +330,7 @@ mod tests {
             ProcessSpawn,
             ShellCommand,
             DownloaderPattern,
+            DropperPattern,
             CredentialAccess,
             SecretEnvironmentVariable,
             EnvironmentEnumeration,

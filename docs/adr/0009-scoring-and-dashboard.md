@@ -22,8 +22,9 @@ the one person who can act on it.
    |-------|-----|--------------------|
    | Theft | 100 | honeytoken left the VM 100, copied inside the VM 60 |
    | Integrity | 100 | became root 80, tamper attempt 60, guest stopped 50, set ID file 40 |
-   | Credentials | 60 | a non cargo process read credentials 50, another process's memory or environment 30 |
-   | Persistence | 60 | write to a persistence location 40, elsewhere outside the build 15, left on disk (persistence 40, executable 20, other 10) |
+   | Dropper | 100 | the build ran a program from a writable location 60, build time code embeds an executable and starts programs 40 |
+   | Credentials | 60 | a non cargo process read credentials 50, another process's memory or environment 30, a build script wrote the whole environment with a honeytoken into its build directory 15 |
+   | Persistence | 60 | write to a persistence location 40, elsewhere outside the build 15, left on disk (persistence 40, executable 20, other 10 per top directory) |
    | Network | 40 | name looked up 10, connection without lookup 20, raw frame 30 |
    | Static | 30 | per finding kind, its strongest instance: high at build time 30, high elsewhere or medium at build time 10, medium elsewhere 2, low at build time 1 |
    | Execution | 20 | a build script ran a network or privilege tool 15, an encoder 8, a downloader 5, a shell 3 |
@@ -54,6 +55,12 @@ the one person who can act on it.
 
 ## Alternatives
 
+* **Count every honeytoken copy as theft:** `cc` 1.6 sets the whole
+  environment on the commands it builds, and `libz-sys` prints its command,
+  so every crate depending on it copied the token into its build output.
+  That was 44 of the first 104 high and critical verdicts. A copy that
+  comes with the rest of the environment counts as a dump, and what such a
+  build does next (running a program it wrote, sending the token) decides.
 * **Count every finding instance:** large crates reached medium by volume
   alone (108 medium verdicts in the first live run).
 * **A single page app with a JSON API:** an npm dependency tree in the

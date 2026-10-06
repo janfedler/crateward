@@ -947,6 +947,7 @@ async fn scan_scratch(
         tokens: tokens.tokens.iter().map(|t| t.value.clone()).collect(),
         planted: tokens.files.iter().map(|f| f.path.path.clone()).collect(),
         created: directories.iter().map(|d| d.path.clone()).collect(),
+        environment: BASE_ENV.iter().map(|(_, v)| (*v).to_owned()).collect(),
     };
 
     let exe = setup.exe.clone();

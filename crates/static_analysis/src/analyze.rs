@@ -18,7 +18,7 @@ use crate::yara::Rules;
 
 /// Version of the analysis. A stored report from an older version is
 /// recomputed. Bump it whenever detectors or rules change.
-pub const ANALYZER_VERSION: i32 = 5;
+pub const ANALYZER_VERSION: i32 = 6;
 
 /// Bounds on the work done for one archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -240,12 +240,27 @@ fn scan_files(
     includes
 }
 
-/// A finding for every included file that holds binary content.
+/// Whether data starts like an executable: ELF, PE or `Mach-O`.
+fn looks_executable(data: &[u8]) -> bool {
+    const MAGIC: [&[u8]; 5] = [
+        b"\x7fELF",
+        b"MZ",
+        b"\xcf\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xca\xfe\xba\xbe",
+    ];
+
+    MAGIC.iter().any(|m| data.starts_with(m))
+}
+
+/// A finding for every included file that holds binary content, and the
+/// ones among them that include an executable.
 fn included_binaries(
     contents: &Files,
     includes: Vec<(String, CodeContext, Include)>,
-) -> Vec<Finding> {
+) -> (Vec<Finding>, Vec<Finding>) {
     let mut found = Vec::new();
+    let mut executables = Vec::new();
 
     for (file, context, include) in includes {
         let Some(target) = include_target(&file, &include.target) else {
@@ -278,9 +293,50 @@ fn included_binaries(
             cfg: include.cfg,
             evidence: evidence(&format!("{target} ({} bytes)", data.len())),
         });
+
+        if looks_executable(data)
+            && let Some(f) = found.last()
+        {
+            executables.push(f.clone());
+        }
     }
 
-    found
+    (found, executables)
+}
+
+/// Build time code that embeds an executable and starts programs: the
+/// shape of a dropper, which writes the executable out and runs it.
+fn dropper_pattern(findings: &[Finding], executables: &[Finding]) -> Option<Finding> {
+    let payload = executables
+        .iter()
+        .find(|f| f.context.runs_at_build_time())?;
+
+    let start = findings.iter().find(|f| {
+        f.context.runs_at_build_time()
+            && matches!(
+                f.kind,
+                FindingKind::ProcessSpawn | FindingKind::ShellCommand | FindingKind::WindowsApi
+            )
+    })?;
+
+    Some(Finding {
+        kind: FindingKind::DropperPattern,
+        severity: Severity::High,
+        file: payload.file.clone(),
+        line: payload.line,
+        context: payload.context,
+        cfg: payload.cfg.clone(),
+        platform: payload.platform,
+        evidence: evidence(&format!(
+            "{} at {}:{} with {} at {}:{}",
+            payload.evidence,
+            payload.file,
+            payload.line.unwrap_or(0),
+            start.evidence,
+            start.file,
+            start.line.unwrap_or(0)
+        )),
+    })
 }
 
 /// A build time file set that reaches the network and also runs programs
@@ -393,13 +449,15 @@ pub fn analyze(
         platforms: BTreeMap::new(),
     };
 
-    // The order of the findings decides which ones the downloader pattern
-    // is built from and how equal ones sort.
+    // The order of the findings decides which ones the downloader and
+    // dropper patterns are built from and how equal ones sort.
     let includes = scan_files(&contents, rules, limits, &mut report);
+    let (included, executables) = included_binaries(&contents, includes);
+    report.findings.extend(included);
+    report.findings.extend(downloader_pattern(&report.findings));
     report
         .findings
-        .extend(included_binaries(&contents, includes));
-    report.findings.extend(downloader_pattern(&report.findings));
+        .extend(dropper_pattern(&report.findings, &executables));
     report.findings.extend(manifest_findings(&report.manifest));
     report.platforms = platform_counts(&report.findings);
     report.findings.sort_by(|a, b| {
@@ -495,6 +553,35 @@ mod tests {
         assert!(kinds.contains(&"yara_match".to_owned()));
         assert_eq!(report.library_platform, Platform::Windows);
         assert!(!report.has_build_time_code());
+    }
+
+    #[test]
+    fn a_build_script_that_embeds_and_starts_an_executable_is_a_dropper() {
+        let mut elf = b"\x7fELF".to_vec();
+        elf.extend([0_u8; 100]);
+        let script = b"use std::process::Command;\n\
+            static HELPER: &[u8] = include_bytes!(\"helper/linux\");\n\
+            fn main() {\n    Command::new(\"/tmp/h\").spawn().ok();\n}\n";
+        let crate_with = |data: &[u8]| {
+            let tar = fixture(&[
+                (
+                    "Cargo.toml",
+                    b"[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n",
+                ),
+                ("build.rs", script),
+                ("helper/linux", data),
+            ]);
+
+            kinds(&analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap())
+        };
+
+        assert!(crate_with(&elf).contains(&"dropper_pattern".to_owned()));
+
+        // Binary data that is no executable, such as a font, is not.
+        let kinds = crate_with(&[0_u8, 1, 2, 3]);
+
+        assert!(kinds.contains(&"included_binary".to_owned()), "{kinds:?}");
+        assert!(!kinds.contains(&"dropper_pattern".to_owned()));
     }
 
     #[test]
