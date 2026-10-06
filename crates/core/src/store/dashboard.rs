@@ -1,7 +1,9 @@
 //! Read queries for the dashboard.
 
+use super::verdicts::needs_rescore;
 use super::{Store, StoreError};
 use crate::job::{JobId, JobState};
+use crate::verdict::ANALYZER_VERSION;
 
 /// A row in the inbox or a job list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,6 +41,8 @@ pub struct JobFilter {
     pub review: Option<String>,
     /// Only confirmed jobs without a recorded report.
     pub unreported: bool,
+    /// Only jobs whose verdict waits for the current analyzer.
+    pub rescore: bool,
     /// Job state name.
     pub state: Option<String>,
 }
@@ -83,15 +87,22 @@ const ROW: &str = "j.id, j.crate_name, j.version, j.state, v.score, v.level, v.r
 const UNREPORTED: &str = "v.review = 'confirmed'
      AND NOT EXISTS (SELECT 1 FROM disclosures d WHERE d.job_id = j.id)";
 
-/// The job list's filters but the state, as `$1` to `$4`.
+/// The job list's filters but the state, as `$1` to `$6`.
 fn filtered() -> String {
     format!(
         "FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
          WHERE ($1::text IS NULL OR j.canonical_name LIKE $1)
            AND ($2::text IS NULL OR v.level = $2)
            AND ($3::text IS NULL OR v.review = $3)
-           AND (NOT $4 OR ({UNREPORTED}))"
+           AND (NOT $4 OR ({UNREPORTED}))
+           AND (NOT $5 OR ({}))",
+        needs_rescore("$6")
     )
+}
+
+/// The current analyzer version, as the database stores it.
+fn analyzer_version() -> i32 {
+    i32::try_from(ANALYZER_VERSION).unwrap_or(i32::MAX)
 }
 
 /// A crate name prefix as a `LIKE` pattern on the canonical name.
@@ -305,8 +316,8 @@ impl Store {
                     "SELECT {ROW} FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
                      WHERE j.id IN (
                          SELECT j.id {}
-                           AND ($5::text IS NULL OR j.state = $5)
-                         ORDER BY j.id DESC LIMIT $6 OFFSET $7)
+                           AND ($7::text IS NULL OR j.state = $7)
+                         ORDER BY j.id DESC LIMIT $8 OFFSET $9)
                      ORDER BY j.id DESC",
                     filtered()
                 ),
@@ -315,6 +326,8 @@ impl Store {
                     &filter.level,
                     &filter.review,
                     &filter.unreported,
+                    &filter.rescore,
+                    &analyzer_version(),
                     &filter.state,
                     &limit,
                     &offset,
@@ -324,6 +337,26 @@ impl Store {
             .iter()
             .map(job_row)
             .collect()
+    }
+
+    /// How many verdicts wait for the current analyzer.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn rescore_backlog(&self) -> Result<i64, StoreError> {
+        let row = self
+            .client
+            .query_one(
+                &format!(
+                    "SELECT count(*) FROM jobs j JOIN verdicts v ON v.job_id = j.id WHERE {}",
+                    needs_rescore("$1")
+                ),
+                &[&analyzer_version()],
+            )
+            .await?;
+
+        Ok(row.try_get(0)?)
     }
 
     /// Jobs matching `filter` per state, every state in pipeline order. The
@@ -342,6 +375,8 @@ impl Store {
                     &filter.level,
                     &filter.review,
                     &filter.unreported,
+                    &filter.rescore,
+                    &analyzer_version(),
                 ],
             )
             .await?;

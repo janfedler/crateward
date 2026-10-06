@@ -183,6 +183,11 @@ pub struct Evidence {
     pub location: Option<String>,
 }
 
+/// The version of the analyzer's scoring (`crateward_analyzer::score`).
+/// Bumped whenever scoring changes, so old verdicts are recomputed. The
+/// dashboard reads it to show which verdicts wait for that.
+pub const ANALYZER_VERSION: u32 = 4;
+
 /// The analyzer's judgment of one version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Verdict {

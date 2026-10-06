@@ -167,6 +167,12 @@ pub struct JobsPage {
     pub reviews: Vec<(&'static str, &'static str)>,
     /// The state filter.
     pub state: String,
+    /// Only verdicts waiting for the current analyzer.
+    pub rescore: bool,
+    /// How many verdicts wait for the current analyzer.
+    pub backlog: i64,
+    /// The job list of those verdicts.
+    pub backlog_href: String,
 }
 
 /// One piece of evidence as shown.

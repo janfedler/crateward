@@ -258,6 +258,9 @@ pub struct JobsQuery {
     review: String,
     #[serde(default)]
     state: String,
+    /// `rescore`: only verdicts waiting for the current analyzer.
+    #[serde(default)]
+    verdict: String,
     /// Page number, from 1.
     page: Option<i64>,
     /// Jobs per page, one of [`PER_PAGE`].
@@ -271,6 +274,10 @@ const PER_PAGE: [i64; 4] = [10, 25, 50, 100];
 const DEFAULT_PER_PAGE: i64 = 10;
 
 const LEVELS: [&str; 5] = ["none", "low", "medium", "high", "critical"];
+
+/// The verdict filter's value for verdicts waiting for the current
+/// analyzer.
+const RESCORE: &str = "rescore";
 
 /// The review filter's values and labels. `unreported` is a confirmed job
 /// whose report was not recorded yet.
@@ -295,6 +302,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
         .iter()
         .map(|s| s.name())
         .find(|s| *s == q.state);
+    let rescore = q.verdict == RESCORE;
     let filter = JobFilter {
         name: (!name.is_empty()).then(|| name.clone()),
         level: level.clone(),
@@ -302,6 +310,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             .map(|r| if r == "unreported" { "confirmed" } else { r })
             .map(str::to_owned),
         unreported: review == Some("unreported"),
+        rescore,
         state: job_state.map(str::to_owned),
     };
 
@@ -319,6 +328,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
     let page = q.page.unwrap_or(1).clamp(1, pages);
     let offset = (page - 1) * per;
     let rows = state.reader.jobs(&filter, offset, per).await?;
+    let backlog = state.reader.rescore_backlog().await?;
 
     let review = review.unwrap_or_default();
     let level = level.unwrap_or_default();
@@ -337,6 +347,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             ("name", &name),
             ("level", &level),
             ("review", review),
+            ("verdict", if rescore { RESCORE } else { "" }),
             ("state", state),
             ("per", &per),
             ("page", &page),
@@ -377,6 +388,9 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             review: review.to_owned(),
             reviews: REVIEWS.to_vec(),
             state: state_name.to_owned(),
+            rescore,
+            backlog,
+            backlog_href: jobs_href(&[("verdict", RESCORE)]),
         }
         .render()?,
     ))

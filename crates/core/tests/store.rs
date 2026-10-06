@@ -13,11 +13,11 @@ use crateward_core::failure::FailureClass;
 use crateward_core::job::{JobEvent, JobId, JobState, Stage, Triage};
 use crateward_core::name::CrateName;
 use crateward_core::store::{
-    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, NewJob, PauseReason, Review, Store,
-    StoreError,
+    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, JobFilter, NewJob, PauseReason,
+    Review, Store, StoreError,
 };
 use crateward_core::testing::{TestDb, policies};
-use crateward_core::verdict::{Coverage, RiskLevel, Verdict};
+use crateward_core::verdict::{ANALYZER_VERSION, Coverage, RiskLevel, Verdict};
 
 fn new_job(name: &str, version: &str, priority: i16) -> NewJob {
     NewJob {
@@ -816,10 +816,32 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
     db.drop().await;
 }
 
+/// The jobs waiting for the current analyzer: the analyzer's queue, the
+/// dashboard's filter and its count.
 async fn outdated(store: &Store) -> Vec<JobId> {
-    let jobs = store.outdated_verdicts(2, 10).await.unwrap();
+    let queue: Vec<JobId> = store
+        .outdated_verdicts(ANALYZER_VERSION, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|j| j.id)
+        .collect();
+    let filter = JobFilter {
+        rescore: true,
+        ..JobFilter::default()
+    };
+    let listed: Vec<JobId> = store
+        .jobs(&filter, 0, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
 
-    jobs.into_iter().map(|j| j.id).collect()
+    assert_eq!(listed, queue);
+    assert_eq!(store.rescore_backlog().await.unwrap(), queue.len() as i64);
+
+    queue
 }
 
 #[tokio::test]
@@ -864,7 +886,7 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
                 evidence: Vec::new(),
                 profile: Vec::new(),
                 new_behavior: Vec::new(),
-                analyzer_version: 2,
+                analyzer_version: ANALYZER_VERSION,
             },
         )
         .await

@@ -38,8 +38,7 @@ use crateward_static_analysis::analyze::StaticReport;
 use crateward_static_analysis::diff::VersionDiff;
 use crateward_static_analysis::findings::{Finding, FindingKind, Severity};
 
-/// Bumped whenever scoring changes, so old verdicts can be recomputed.
-pub const ANALYZER_VERSION: u32 = 4;
+pub use crateward_core::verdict::ANALYZER_VERSION;
 
 /// Everything scoring reads about one version.
 #[derive(Debug, Clone, Copy)]

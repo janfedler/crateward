@@ -45,6 +45,23 @@ impl Review {
     }
 }
 
+/// Finished jobs whose verdict an older analyzer produced, or that were
+/// scored before their static report was last written: the static analyzer
+/// refreshes outdated reports on its own schedule, so a verdict recomputed
+/// before that would otherwise keep the old findings. Jobs with trimmed
+/// runs keep their verdict (see `retention`). `version` is the SQL for the
+/// current analyzer version, over `jobs j` and `verdicts v`.
+pub(super) fn needs_rescore(version: &str) -> String {
+    format!(
+        "j.state = 'Done'
+         AND (v.analyzer_version < {version}
+              OR EXISTS (SELECT 1 FROM static_reports s
+                         WHERE s.sha256 = j.cksum AND s.analyzed_at > v.scored_at))
+         AND NOT EXISTS (SELECT 1 FROM job_runs r
+                         WHERE r.job_id = j.id AND r.trimmed_at IS NOT NULL)"
+    )
+}
+
 fn corrupt(id: i64, reason: impl Into<String>) -> StoreError {
     StoreError::Corrupt {
         id,
@@ -164,9 +181,6 @@ impl Store {
 
     /// Finished jobs whose verdict an older analyzer produced, or that were
     /// scored before their static report was last written, oldest first.
-    /// The static analyzer refreshes outdated reports on its own schedule,
-    /// so a verdict recomputed before that would otherwise keep the old
-    /// findings. Jobs with trimmed runs keep their verdict (see `retention`).
     ///
     /// # Errors
     ///
@@ -182,15 +196,9 @@ impl Store {
             .query(
                 &format!(
                     "SELECT {} FROM jobs j JOIN verdicts v ON v.job_id = j.id
-                     WHERE j.state = 'Done'
-                       AND (v.analyzer_version < $1
-                            OR EXISTS (SELECT 1 FROM static_reports s
-                                       WHERE s.sha256 = j.cksum
-                                         AND s.analyzed_at > v.scored_at))
-                       AND NOT EXISTS (SELECT 1 FROM job_runs r
-                                       WHERE r.job_id = j.id AND r.trimmed_at IS NOT NULL)
-                     ORDER BY v.scored_at LIMIT $2",
-                    super::COLUMNS_J
+                     WHERE {} ORDER BY v.scored_at LIMIT $2",
+                    super::COLUMNS_J,
+                    needs_rescore("$1")
                 ),
                 &[&version, &limit],
             )
