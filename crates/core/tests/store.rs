@@ -549,7 +549,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
     assert_eq!(store.breakers().await.unwrap()[&Stage::Fetch], open);
     assert_eq!(
         store.breakers().await.unwrap()[&Stage::Sandbox],
-        BreakerState::Closed
+        BreakerState::default()
     );
     assert!(
         store

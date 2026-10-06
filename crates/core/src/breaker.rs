@@ -7,7 +7,9 @@
 //! When failures dominate, it opens and the stage stops claiming jobs. The
 //! other stages keep draining their queues. After a cooldown it lets jobs
 //! through again (half open): the first completion closes it, the first
-//! failure opens it again with a longer cooldown.
+//! failure opens it again with a longer cooldown. A closed breaker counts
+//! only results since it closed, so failures from before a fix or a
+//! manual close cannot open it again.
 //!
 //! This module only decides. The supervisor reads the counts from the job
 //! events, stores the state, and raises the alert when a breaker opens.
@@ -38,7 +40,11 @@ pub struct BreakerPolicy {
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum BreakerState {
     /// Jobs flow.
-    Closed,
+    Closed {
+        /// When it closed. Counting starts here if that is later than the
+        /// window's start. 0 for a stage whose breaker never changed.
+        since: i64,
+    },
     /// The stage claims nothing.
     Open {
         /// When it opened.
@@ -55,12 +61,19 @@ pub enum BreakerState {
     },
 }
 
+impl Default for BreakerState {
+    /// The breaker of a stage that has no stored state.
+    fn default() -> Self {
+        Self::Closed { since: 0 }
+    }
+}
+
 impl BreakerState {
     /// Name stored in the database.
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
-            Self::Closed => "closed",
+            Self::Closed { .. } => "closed",
             Self::Open { .. } => "open",
             Self::HalfOpen { .. } => "half_open",
         }
@@ -106,9 +119,22 @@ impl BreakerPolicy {
             .min(self.max_cooldown)
     }
 
-    /// The next state. `window` counts over the sliding window ending now.
-    /// `since_change` counts since the state's `since` (used while half
-    /// open).
+    /// Where counting for `state` starts: the window's start, or when a
+    /// closed breaker closed if that is later.
+    #[must_use]
+    pub fn counting_start(&self, state: BreakerState, now: i64) -> i64 {
+        let window_start =
+            now.saturating_sub(i64::try_from(self.window.as_secs()).unwrap_or(i64::MAX));
+
+        match state {
+            BreakerState::Closed { since } => since.max(window_start),
+            BreakerState::Open { .. } | BreakerState::HalfOpen { .. } => window_start,
+        }
+    }
+
+    /// The next state. `window` counts from [`Self::counting_start`] to
+    /// now. `since_change` counts since the state's `since` (used while
+    /// half open).
     #[must_use]
     pub fn evaluate(
         &self,
@@ -118,7 +144,7 @@ impl BreakerPolicy {
         now: i64,
     ) -> (BreakerState, Option<Change>) {
         match state {
-            BreakerState::Closed => {
+            BreakerState::Closed { .. } => {
                 let total = u64::from(window.failures) + u64::from(window.completions);
                 let dominant = total > 0
                     && u64::from(window.failures) * 100 >= u64::from(self.failure_percent) * total;
@@ -158,7 +184,7 @@ impl BreakerPolicy {
                         Some(Change::Reopened),
                     )
                 } else if since_change.completions > 0 {
-                    (BreakerState::Closed, Some(Change::Closed))
+                    (BreakerState::Closed { since: now }, Some(Change::Closed))
                 } else {
                     (state, None)
                 }
@@ -188,7 +214,7 @@ mod tests {
 
     #[test]
     fn opens_only_when_failures_dominate() {
-        let closed = BreakerState::Closed;
+        let closed = BreakerState::default();
         let none = Counts::default();
 
         assert_eq!(POLICY.evaluate(closed, counts(4, 0), none, 0).1, None);
@@ -243,8 +269,34 @@ mod tests {
         let (closed, change) = POLICY.evaluate(half, none, counts(0, 1), 600);
         assert_eq!(
             (closed, change),
-            (BreakerState::Closed, Some(Change::Closed))
+            (BreakerState::Closed { since: 600 }, Some(Change::Closed))
         );
+    }
+
+    #[test]
+    fn a_closed_breaker_counts_only_since_it_closed() {
+        let now = 10_000;
+        let window_start = now - 900;
+
+        assert_eq!(
+            POLICY.counting_start(BreakerState::default(), now),
+            window_start
+        );
+        assert_eq!(
+            POLICY.counting_start(BreakerState::Closed { since: now - 60 }, now),
+            now - 60
+        );
+        assert_eq!(
+            POLICY.counting_start(BreakerState::Closed { since: now - 5000 }, now),
+            window_start
+        );
+
+        let open = BreakerState::Open {
+            since: now - 60,
+            reopened: 0,
+        };
+
+        assert_eq!(POLICY.counting_start(open, now), window_start);
     }
 
     #[test]

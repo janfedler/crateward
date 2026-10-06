@@ -612,8 +612,11 @@ async fn breaker_close_closes_the_named_stage() {
         .expect(0, "breaker of sandbox closed\n", "");
     let breakers = db.store.breakers().await.unwrap();
 
-    assert_eq!(breakers[&Stage::Sandbox], BreakerState::Closed);
-    assert_ne!(breakers[&Stage::Fetch], BreakerState::Closed);
+    assert!(matches!(breakers[&Stage::Sandbox], BreakerState::Closed { since } if since >= now));
+    assert!(!matches!(
+        breakers[&Stage::Fetch],
+        BreakerState::Closed { .. }
+    ));
 
     db.drop().await;
 }

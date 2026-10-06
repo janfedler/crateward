@@ -235,10 +235,7 @@ async fn status(store: Store) -> Result<(), CliError> {
 
     let breakers = store.breakers().await?;
     for stage in Stage::ALL {
-        let state = breakers
-            .get(&stage)
-            .copied()
-            .unwrap_or(BreakerState::Closed);
+        let state = breakers.get(&stage).copied().unwrap_or_default();
         out!("breaker {:<16} {}", stage.name(), state.name());
     }
 
@@ -272,7 +269,10 @@ fn breaker_close(config: &Path, stage: &str) -> Result<(), CliError> {
         .ok_or_else(|| CliError::UnknownStage(stage.to_owned()))?;
 
     with_store(&Config::load(config)?, |store| async move {
-        store.set_breaker(stage, BreakerState::Closed).await?;
+        let since = store.now_epoch().await?;
+        store
+            .set_breaker(stage, BreakerState::Closed { since })
+            .await?;
         out!("breaker of {} closed", stage.name());
         Ok(())
     })

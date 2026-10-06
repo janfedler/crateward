@@ -183,7 +183,7 @@ impl Store {
             .await?;
         let mut out: HashMap<Stage, BreakerState> = Stage::ALL
             .into_iter()
-            .map(|s| (s, BreakerState::Closed))
+            .map(|s| (s, BreakerState::default()))
             .collect();
         for row in rows {
             let name: String = row.try_get(0)?;
@@ -192,7 +192,7 @@ impl Store {
             let since: i64 = row.try_get(2)?;
             let reopened = u32::try_from(row.try_get::<_, i32>(3)?).unwrap_or(0);
             let value = match state.as_str() {
-                "closed" => BreakerState::Closed,
+                "closed" => BreakerState::Closed { since },
                 "open" => BreakerState::Open { since, reopened },
                 "half_open" => BreakerState::HalfOpen { since, reopened },
                 other => return Err(corrupt(format!("breaker state {other}"))),
@@ -211,9 +211,9 @@ impl Store {
     /// Fails on database errors.
     pub async fn set_breaker(&self, stage: Stage, state: BreakerState) -> Result<(), StoreError> {
         let (since, reopened) = match state {
-            BreakerState::Closed => (None, 0),
+            BreakerState::Closed { since } => (since, 0),
             BreakerState::Open { since, reopened } | BreakerState::HalfOpen { since, reopened } => {
-                (Some(since), reopened)
+                (since, reopened)
             }
         };
 
@@ -221,9 +221,9 @@ impl Store {
         self.client
             .execute(
                 "INSERT INTO stage_breakers (stage, state, since, reopened)
-                 VALUES ($1, $2, COALESCE(to_timestamp($3::bigint), now()), $4)
+                 VALUES ($1, $2, to_timestamp($3::bigint), $4)
                  ON CONFLICT (stage) DO UPDATE
-                 SET state = $2, since = COALESCE(to_timestamp($3::bigint), now()),
+                 SET state = $2, since = to_timestamp($3::bigint),
                      reopened = $4, updated_at = now()",
                 &[&stage.name(), &state.name(), &since, &reopened],
             )

@@ -36,7 +36,6 @@ use axum::routing::{get, post};
 use axum::{Router, middleware};
 use crateward_core::app::{self, ComponentError, Stop, fatal};
 use crateward_core::attack;
-use crateward_core::breaker::BreakerState;
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::job::{JobId, JobState, Stage};
@@ -189,7 +188,7 @@ async fn overview_data(store: &Store) -> Result<OverviewData, StoreError> {
         breakers: Stage::ALL
             .iter()
             .map(|s| {
-                let state = breakers.get(s).copied().unwrap_or(BreakerState::Closed);
+                let state = breakers.get(s).copied().unwrap_or_default();
                 (s.name().to_owned(), state.name().to_owned())
             })
             .collect(),

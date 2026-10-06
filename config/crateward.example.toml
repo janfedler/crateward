@@ -160,7 +160,8 @@ interval_secs = 30
 # A stage's breaker opens when, within the window, at least min_failures
 # infrastructure failures happened and they make up failure_percent of the
 # stage's results. It lets jobs through again after the cooldown, which
-# doubles after each failed probe up to the maximum.
+# doubles after each failed probe up to the maximum. After it closes, the
+# window starts at the close.
 breaker_window_secs = 900
 breaker_min_failures = 5
 breaker_failure_percent = 50

@@ -23,8 +23,9 @@ failed for an infrastructure problem.
 3. Sandbox stage: check `journalctl -u crateward-orchestrator` and the KVM
    section below.
 4. Fix the cause. The breaker probes again by itself after its cooldown.
-   To resume at once, run `crateward breaker close <stage>`. Queued jobs
-   resume by priority.
+   To resume at once, run `crateward breaker close <stage>`. A closed
+   breaker counts only failures after it closed, so the failures before
+   the fix do not open it again. Queued jobs resume by priority.
 
 ## Disk usage above threshold
 

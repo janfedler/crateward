@@ -39,7 +39,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crateward_core::app::{self, ComponentError, Stop, fatal};
-use crateward_core::breaker::{Change, Counts};
+use crateward_core::breaker::{BreakerState, Change};
 use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::escalation::HumanEscalation;
@@ -109,18 +109,26 @@ impl Supervisor<'_> {
     async fn breakers(&mut self) -> Result<(), StoreError> {
         let policy = self.config.supervisor.breaker_policy();
         let now = self.store.now_epoch().await?;
-        let window_start = now - i64::try_from(policy.window.as_secs()).unwrap_or(i64::MAX);
+        let window_start = policy.counting_start(BreakerState::default(), now);
         let window = self.store.stage_counts(window_start).await?;
 
         for (stage, state) in self.store.breakers().await? {
-            let since = match state {
-                crateward_core::breaker::BreakerState::HalfOpen { since, .. } => {
-                    self.store.stage_counts(since).await?.get(&stage).copied()
-                }
-                _ => None,
+            let start = policy.counting_start(state, now);
+            let counts = if start == window_start {
+                window.get(&stage).copied()
+            } else {
+                self.store.stage_counts(start).await?.get(&stage).copied()
             }
             .unwrap_or_default();
-            let counts = window.get(&stage).copied().unwrap_or(Counts::default());
+
+            let since = match state {
+                BreakerState::HalfOpen { since, .. } => {
+                    self.store.stage_counts(since).await?.get(&stage).copied()
+                }
+                BreakerState::Closed { .. } | BreakerState::Open { .. } => None,
+            }
+            .unwrap_or_default();
+
             let (next, change) = policy.evaluate(state, counts, since, now);
             let Some(change) = change else { continue };
             self.store.set_breaker(stage, next).await?;
