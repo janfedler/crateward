@@ -289,6 +289,13 @@ impl FirecrackerBackend {
         self.config.uid_base + slot
     }
 
+    /// The subordinate UID the base snapshot's VM runs as: the slot after
+    /// the last job slot.
+    #[must_use]
+    pub const fn boot_uid(config: &FirecrackerConfig) -> u32 {
+        config.uid_base + config.slots
+    }
+
     /// Boots a clean VM in a jail, waits for its agent and writes a full
     /// snapshot to `out`: the base every job restores (ADR 0006, from a
     /// fresh boot, never from a VM that ran crate code). With
