@@ -1,9 +1,10 @@
 //! Runs every fuzz target in `fuzz/` for a fixed time.
 //!
 //! The package has its own workspace and toolchain file (a pinned nightly,
-//! which the sanitizer flags of `cargo fuzz` need). CI runs each target
-//! briefly from an empty corpus as a smoke test. Before a release every
-//! target runs for at least 150 seconds from the seed corpus (TESTING.md).
+//! which the sanitizer flags of `cargo fuzz` need). `cargo xtask ci` type
+//! checks the targets, and `cargo xtask fuzz` runs each briefly from an
+//! empty corpus. Before a release every target runs for at least 150
+//! seconds from the seed corpus (TESTING.md).
 
 use std::path::Path;
 
