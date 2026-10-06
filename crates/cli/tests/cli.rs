@@ -302,6 +302,32 @@ fn an_unreachable_database_exits_1() {
 }
 
 #[test]
+fn the_manifest_is_readable_by_other_users_under_a_strict_umask() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let site = Site::new("postgresql://nobody@127.0.0.1:1/none");
+    let tool = site.path("bin/crateward");
+    let ran = run(
+        "sh",
+        Some(&site.config),
+        &[
+            "-c",
+            "umask 077 && exec \"$0\" \"$@\"",
+            &tool.display().to_string(),
+            "integrity",
+            "record",
+        ],
+    );
+    let mode = std::fs::metadata(site.manifest())
+        .unwrap()
+        .permissions()
+        .mode();
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(mode & 0o777, 0o644);
+}
+
+#[test]
 fn the_manifest_is_recorded_and_checked() {
     let site = Site::new("postgresql://nobody@127.0.0.1:1/none");
     let manifest = site.manifest();

@@ -1,5 +1,6 @@
 //! `crateward integrity`: record and check the host manifest (ADR 0008).
 
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 
 use clap::Subcommand;
@@ -35,6 +36,10 @@ fn record_manifest(config: &Config, manifest: &Path) -> Result<(), CliError> {
     let text = integrity::record(&files)?;
     let temporary = manifest.with_extension("tmp");
     std::fs::write(&temporary, text).map_err(io(&temporary))?;
+    // The supervisor checks the manifest under its own user, whatever umask
+    // the recording ran with. It holds hashes only.
+    std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644))
+        .map_err(io(&temporary))?;
     std::fs::rename(&temporary, manifest).map_err(io(manifest))?;
     out!("recorded {} files in {}", files.len(), manifest.display());
 
