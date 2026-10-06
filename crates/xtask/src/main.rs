@@ -370,15 +370,24 @@ fn guest_agent() -> Result<(), TaskError> {
     }
 }
 
-/// Runs the soak test in a systemd user scope with `Delegate=yes`, which
-/// gives it a cgroup subtree for the slot limits. Needs `/dev/kvm`, the
-/// guest images and subordinate IDs, so it only runs on the server.
+/// Runs the soak test. Needs the same environment as [`vm_test`].
 fn soak(jobs: u32) -> Result<(), TaskError> {
-    let jobs = jobs.to_string();
+    vm_test("soak", &[("CRATEWARD_SOAK_JOBS", &jobs.to_string())])
+}
 
+/// Runs an ignored microVM test of the orchestrator in a systemd user scope
+/// with `Delegate=yes`, which gives it a cgroup subtree for the slot limits,
+/// and under the units' `UMask=0027`, so a file a VM cannot open fails here
+/// as it would in production. Needs `/dev/kvm`, the guest images and
+/// subordinate IDs, so it only runs on the server.
+fn vm_test(test: &str, env: &[(&str, &str)]) -> Result<(), TaskError> {
     run(
-        "systemd-run",
+        "sh",
         &[
+            "-c",
+            "umask 0027 && exec \"$@\"",
+            "sh",
+            "systemd-run",
             "--user",
             "--scope",
             "--quiet",
@@ -391,12 +400,12 @@ fn soak(jobs: u32) -> Result<(), TaskError> {
             "--package",
             "crateward_orchestrator",
             "--test",
-            "soak",
+            test,
             "--",
             "--ignored",
             "--nocapture",
         ],
-        &[("CRATEWARD_SOAK_JOBS", jobs.as_str())],
+        env,
     )
 }
 
@@ -412,7 +421,7 @@ fn musl_cc() -> &'static str {
 
 /// Runs the canary test: a fixture crate that steals a honeytoken inside a
 /// microVM must be caught. Builds the static fake internet first. Needs the
-/// same environment as the soak test.
+/// same environment as [`vm_test`].
 fn canary() -> Result<(), TaskError> {
     run(
         "cargo",
@@ -431,28 +440,7 @@ fn canary() -> Result<(), TaskError> {
         &[("CC_x86_64_unknown_linux_musl", musl_cc())],
     )?;
 
-    run(
-        "systemd-run",
-        &[
-            "--user",
-            "--scope",
-            "--quiet",
-            "-p",
-            "Delegate=yes",
-            "cargo",
-            "test",
-            "--release",
-            "--locked",
-            "--package",
-            "crateward_orchestrator",
-            "--test",
-            "canary",
-            "--",
-            "--ignored",
-            "--nocapture",
-        ],
-        &[],
-    )
+    vm_test("canary", &[])
 }
 
 fn vendor() -> Result<(), TaskError> {
