@@ -728,8 +728,10 @@ impl Sandbox {
         remove_file(&files.network).map_err(Failure::infrastructure)?;
         let stats = build_payload(&self.setup, &self.blobs, spec, &files.payload).await?;
         make_scratch(self.setup.scratch_mib, &files.scratch).await?;
-        crate::jail::acl::grant_user(&files.scratch, self.backend.slot_uid(self.slot))
-            .map_err(Failure::infrastructure)?;
+        let uid = self.backend.slot_uid(self.slot);
+        for drive in [&files.payload, &files.scratch] {
+            crate::jail::acl::grant_user(drive, uid).map_err(Failure::infrastructure)?;
+        }
 
         Ok(stats)
     }

@@ -152,7 +152,7 @@ async fn boot(config: &Config) -> Result<Booted, ComponentError> {
     let work = config.instance.run_dir.join(host::ORCHESTRATOR_WORK);
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(fatal)?;
-    let drives = placeholders(&work, FirecrackerBackend::boot_uid(&fc))?;
+    let drives = FirecrackerBackend::placeholders(&fc, &work).map_err(fatal)?;
     let boot = boot_spec(sandbox, kernel, rootfs, drives)?;
     let leftovers = FirecrackerBackend::new(fc.clone(), cgroups.clone(), placeholder_snapshot());
     let reconciled = leftovers.reconcile().await.map_err(fatal)?;
@@ -238,24 +238,6 @@ fn check_host(sandbox: &SandboxConfig) -> Result<(), ComponentError> {
     }
 
     Ok(())
-}
-
-/// Empty files that stand in for the job drives in the base snapshot. The
-/// VM that makes the snapshot runs as `uid` and opens the scratch drive for
-/// writing, so each file grants it access like a job's drives do.
-fn placeholders(work: &Path, uid: u32) -> Result<JobDrives, ComponentError> {
-    let drives = JobDrives {
-        payload: work.join("placeholder-payload.img"),
-        scratch: work.join("placeholder-scratch.img"),
-        warm: work.join("placeholder-warm.img"),
-    };
-
-    for file in [&drives.payload, &drives.scratch, &drives.warm] {
-        std::fs::File::create(file).map_err(fatal)?;
-        jail::acl::grant_user(file, uid).map_err(fatal)?;
-    }
-
-    Ok(drives)
 }
 
 fn boot_spec(

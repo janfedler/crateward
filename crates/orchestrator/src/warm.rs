@@ -555,6 +555,10 @@ async fn pack(
     ));
 
     std::fs::rename(&staging, &named).map_err(image_io(&staging))?;
+    sandbox
+        .backend
+        .grant_shared(&named)
+        .map_err(image_io(&named))?;
 
     Ok(named)
 }

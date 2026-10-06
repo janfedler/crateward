@@ -27,7 +27,7 @@ use crateward_core::paths::{build, guest};
 use crateward_orchestrator::backend::{FirecrackerBackend, FirecrackerConfig};
 use crateward_orchestrator::canary;
 use crateward_orchestrator::cgroup::{CgroupTree, SlotLimits};
-use crateward_orchestrator::firecracker::vm::{BootSpec, JobDrives};
+use crateward_orchestrator::firecracker::vm::BootSpec;
 use crateward_orchestrator::honeytokens::Honeytokens;
 use crateward_orchestrator::worker::{JobFiles, RunPlan, Sandbox, WorkerSetup};
 
@@ -67,14 +67,6 @@ async fn canaries_give_their_known_results() {
         authority: Some(root().join(build::AUTHORITY)),
     };
 
-    for placeholder in [
-        "placeholder-payload.img",
-        "placeholder-scratch.img",
-        "placeholder-warm.img",
-    ] {
-        std::fs::File::create(work.join(placeholder)).unwrap();
-    }
-
     let boot = BootSpec {
         kernel,
         rootfs: root().join(build::ROOTFS_IMAGE),
@@ -85,11 +77,7 @@ async fn canaries_give_their_known_results() {
         ),
         vcpus: 1,
         memory_mib: 2048,
-        drives: Some(JobDrives {
-            payload: work.join("placeholder-payload.img"),
-            scratch: work.join("placeholder-scratch.img"),
-            warm: work.join("placeholder-warm.img"),
-        }),
+        drives: Some(FirecrackerBackend::placeholders(&config, &work).unwrap()),
         network: true,
     };
 

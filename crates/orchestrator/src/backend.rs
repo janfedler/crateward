@@ -14,7 +14,7 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -289,11 +289,46 @@ impl FirecrackerBackend {
         self.config.uid_base + slot
     }
 
-    /// The subordinate UID the base snapshot's VM runs as: the slot after
-    /// the last job slot.
-    #[must_use]
-    pub const fn boot_uid(config: &FirecrackerConfig) -> u32 {
-        config.uid_base + config.slots
+    /// Every subordinate UID a VM runs as: the job slots and the slot after
+    /// them, which makes the base snapshot.
+    fn vm_uids(config: &FirecrackerConfig) -> Vec<u32> {
+        (0..=config.slots)
+            .map(|slot| config.uid_base + slot)
+            .collect()
+    }
+
+    /// Grants every VM access to a drive file they share, such as the warm
+    /// image. A file a VM opens needs an ACL entry for its UID, since the
+    /// units' umask leaves nothing for other users.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the ACL cannot be set.
+    pub fn grant_shared(&self, path: &Path) -> std::io::Result<()> {
+        crate::jail::acl::grant_users(path, &Self::vm_uids(&self.config))
+    }
+
+    /// Creates the empty files in `work` that stand in for the job drives
+    /// in the base snapshot. The VM that makes the snapshot opens them, and
+    /// a job without a warm image mounts the warm placeholder, so each
+    /// grants every VM access.
+    ///
+    /// # Errors
+    ///
+    /// Fails if a file cannot be created or its ACL not set.
+    pub fn placeholders(config: &FirecrackerConfig, work: &Path) -> std::io::Result<JobDrives> {
+        let drives = JobDrives {
+            payload: work.join("placeholder-payload.img"),
+            scratch: work.join("placeholder-scratch.img"),
+            warm: work.join("placeholder-warm.img"),
+        };
+
+        for file in [&drives.payload, &drives.scratch, &drives.warm] {
+            std::fs::File::create(file)?;
+            crate::jail::acl::grant_users(file, &Self::vm_uids(config))?;
+        }
+
+        Ok(drives)
     }
 
     /// Boots a clean VM in a jail, waits for its agent and writes a full
@@ -310,7 +345,7 @@ impl FirecrackerBackend {
     pub async fn create_base_snapshot(
         config: &FirecrackerConfig,
         boot: &BootSpec,
-        out: &std::path::Path,
+        out: &Path,
     ) -> Result<Snapshot, BackendError> {
         let launch = Self::launch(config, config.slots, None, None);
         let vm = Vm::boot(&launch, boot).await?;
@@ -593,7 +628,7 @@ pub fn classify_exit(status: Option<std::process::ExitStatus>, detail: &str) -> 
 }
 
 /// The last 2 KiB of a VM's log, rendered with escapes.
-fn console_tail(path: &std::path::Path) -> String {
+fn console_tail(path: &Path) -> String {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else {
         return "unavailable".into();

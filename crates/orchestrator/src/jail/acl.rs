@@ -25,20 +25,23 @@ const UNDEFINED_ID: u32 = u32::MAX;
 /// Read, write and search permission.
 const RWX: u16 = 0o7;
 
-/// Encodes an access ACL: the owner and `uid` get full access. The owning
-/// group and everybody else get none.
+/// Encodes an access ACL: the owner and each of `uids` get full access.
+/// The owning group and everybody else get none.
 #[must_use]
-pub fn owner_and_user_only(uid: u32) -> Vec<u8> {
+pub fn owner_and_users_only(uids: &[u32]) -> Vec<u8> {
     // Entries must be sorted by tag, then ID.
-    let entries = [
-        (ACL_USER_OBJ, RWX, UNDEFINED_ID),
-        (ACL_USER, RWX, uid),
-        (ACL_GROUP_OBJ, 0, UNDEFINED_ID),
-        (ACL_MASK, RWX, UNDEFINED_ID),
-        (ACL_OTHER, 0, UNDEFINED_ID),
-    ];
+    let mut users = uids.to_vec();
+    users.sort_unstable();
+    users.dedup();
+    let entries = std::iter::once((ACL_USER_OBJ, RWX, UNDEFINED_ID))
+        .chain(users.into_iter().map(|uid| (ACL_USER, RWX, uid)))
+        .chain([
+            (ACL_GROUP_OBJ, 0, UNDEFINED_ID),
+            (ACL_MASK, RWX, UNDEFINED_ID),
+            (ACL_OTHER, 0, UNDEFINED_ID),
+        ]);
 
-    let mut out = Vec::with_capacity(4 + entries.len() * 8);
+    let mut out = Vec::with_capacity(4 + (uids.len() + 4) * 8);
     out.extend_from_slice(&VERSION.to_le_bytes());
 
     for (tag, perm, id) in entries {
@@ -50,17 +53,27 @@ pub fn owner_and_user_only(uid: u32) -> Vec<u8> {
     out
 }
 
-/// Sets the access ACL of `path` to [`owner_and_user_only`].
+/// Sets the access ACL of `path` to [`owner_and_users_only`] for one UID.
 ///
 /// # Errors
 ///
 /// Fails if the filesystem does not support ACLs or the caller does not own
 /// the file.
 pub fn grant_user(path: &Path, uid: u32) -> std::io::Result<()> {
+    grant_users(path, &[uid])
+}
+
+/// Sets the access ACL of `path` to [`owner_and_users_only`].
+///
+/// # Errors
+///
+/// Fails if the filesystem does not support ACLs or the caller does not own
+/// the file.
+pub fn grant_users(path: &Path, uids: &[u32]) -> std::io::Result<()> {
     rustix::fs::setxattr(
         path,
         "system.posix_acl_access",
-        &owner_and_user_only(uid),
+        &owner_and_users_only(uids),
         rustix::fs::XattrFlags::empty(),
     )
     .map_err(std::io::Error::from)
@@ -72,7 +85,7 @@ mod tests {
 
     #[test]
     fn encoding_matches_the_kernel_layout() {
-        let bytes = owner_and_user_only(160_000);
+        let bytes = owner_and_users_only(&[160_000]);
 
         assert_eq!(bytes.len(), 4 + 5 * 8);
         assert_eq!(bytes[..4], 2_u32.to_le_bytes());
@@ -81,6 +94,19 @@ mod tests {
         assert_eq!(bytes[12..14], ACL_USER.to_le_bytes());
         assert_eq!(bytes[14..16], 7_u16.to_le_bytes());
         assert_eq!(bytes[16..20], 160_000_u32.to_le_bytes());
+    }
+
+    #[test]
+    fn several_users_are_sorted_and_deduplicated() {
+        let bytes = owner_and_users_only(&[160_002, 160_000, 160_002]);
+        let ids: Vec<u32> = bytes[4..]
+            .chunks(8)
+            .filter(|e| e[..2] == ACL_USER.to_le_bytes())
+            .map(|e| u32::from_le_bytes([e[4], e[5], e[6], e[7]]))
+            .collect();
+
+        assert_eq!(ids, [160_000, 160_002]);
+        assert_eq!(bytes.len(), 4 + 6 * 8);
     }
 
     #[test]
