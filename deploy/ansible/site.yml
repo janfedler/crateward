@@ -212,6 +212,8 @@
         mode: "{{ item.mode }}"
       loop:
         - { path: /etc/crateward, mode: "0750" }
+        # Debian's nftables package does not create it.
+        - { path: /etc/nftables.d, group: root, mode: "0755" }
         - { path: /usr/local/lib/crateward, group: root, mode: "0755" }
         - { path: /usr/local/lib/crateward/bin, group: root, mode: "0755" }
         - { path: /usr/local/lib/crateward/guest, group: crateward, mode: "0750" }
