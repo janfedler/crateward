@@ -33,14 +33,18 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectClock=yes
-ProtectHostname=yes
+# Private, not yes: the jail names its own UTS namespace, and yes blocks
+# sethostname there too.
+ProtectHostname=private
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
 # The service holds no capabilities. The bounding set limits what setuid
-# programs gain, and newuidmap and newgidmap need these three to write the
-# ID maps of a jail. The other setuid programs are hidden.
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE
+# programs gain. newuidmap and newgidmap run as root and open the ID maps
+# of a jail owned by the service user, and the kernel accepts a map only
+# from a writer with CAP_SETUID or CAP_SETGID and CAP_SYS_ADMIN. The other
+# setuid programs are hidden.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE CAP_SYS_ADMIN
 AmbientCapabilities=
 InaccessiblePaths=-/usr/bin/su -/usr/bin/sudo -/usr/bin/mount -/usr/bin/umount
 InaccessiblePaths=-/usr/bin/passwd -/usr/bin/chsh -/usr/bin/chfn -/usr/bin/gpasswd

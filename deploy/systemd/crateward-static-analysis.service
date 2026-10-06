@@ -31,7 +31,8 @@ ProtectHostname=yes
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
-MemoryDenyWriteExecute=yes
+# No MemoryDenyWriteExecute: YARA-X runs its rules as WebAssembly with the
+# wasmtime JIT, which needs executable memory.
 SystemCallArchitectures=native
 CapabilityBoundingSet=
 AmbientCapabilities=
