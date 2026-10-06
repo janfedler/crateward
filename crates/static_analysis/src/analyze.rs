@@ -16,9 +16,7 @@ use crate::manifest::{self, ManifestFacts};
 use crate::rust::{self, Include};
 use crate::yara::Rules;
 
-/// Version of the analysis. A stored report from an older version is
-/// recomputed. Bump it whenever detectors or rules change.
-pub const ANALYZER_VERSION: i32 = 6;
+pub use crateward_core::verdict::STATIC_ANALYZER_VERSION as ANALYZER_VERSION;
 
 /// Bounds on the work done for one archive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

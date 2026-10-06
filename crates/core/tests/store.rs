@@ -17,7 +17,9 @@ use crateward_core::store::{
     Review, Store, StoreError,
 };
 use crateward_core::testing::{TestDb, policies};
-use crateward_core::verdict::{ANALYZER_VERSION, Coverage, RiskLevel, Verdict};
+use crateward_core::verdict::{
+    ANALYZER_VERSION, Coverage, RiskLevel, STATIC_ANALYZER_VERSION, Verdict,
+};
 
 fn new_job(name: &str, version: &str, priority: i16) -> NewJob {
     NewJob {
@@ -818,7 +820,9 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
 
 /// The jobs waiting for the current analyzer: the analyzer's queue, the
 /// dashboard's filter and its count.
-async fn outdated(store: &Store) -> Vec<JobId> {
+/// The verdicts the analyzer rescores now, and the jobs the dashboard
+/// lists as waiting, which also wait for a static report refresh.
+async fn outdated(store: &Store) -> (Vec<JobId>, Vec<JobId>) {
     let queue: Vec<JobId> = store
         .outdated_verdicts(ANALYZER_VERSION, 10)
         .await
@@ -838,10 +842,10 @@ async fn outdated(store: &Store) -> Vec<JobId> {
         .map(|r| r.id)
         .collect();
 
-    assert_eq!(listed, queue);
-    assert_eq!(store.rescore_backlog().await.unwrap(), queue.len() as i64);
+    assert!(queue.iter().all(|id| listed.contains(id)));
+    assert_eq!(store.rescore_backlog().await.unwrap(), listed.len() as i64);
 
-    queue
+    (queue, listed)
 }
 
 #[tokio::test]
@@ -873,24 +877,19 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
         .unwrap();
     let report = serde_json::json!({"findings": []});
     store
-        .record_static_report(&sha, 1, true, None, &report)
+        .record_static_report(&sha, STATIC_ANALYZER_VERSION - 1, true, None, &report)
         .await
         .unwrap();
-    store
-        .record_verdict(
-            job,
-            &Verdict {
-                score: 0,
-                level: RiskLevel::None,
-                coverage: Coverage::DynamicLinux,
-                evidence: Vec::new(),
-                profile: Vec::new(),
-                new_behavior: Vec::new(),
-                analyzer_version: ANALYZER_VERSION,
-            },
-        )
-        .await
-        .unwrap();
+    let verdict = Verdict {
+        score: 0,
+        level: RiskLevel::None,
+        coverage: Coverage::DynamicLinux,
+        evidence: Vec::new(),
+        profile: Vec::new(),
+        new_behavior: Vec::new(),
+        analyzer_version: ANALYZER_VERSION,
+    };
+    store.record_verdict(job, &verdict).await.unwrap();
     db.admin()
         .batch_execute(&format!(
             "SET search_path TO {}; UPDATE jobs SET state = 'Done';
@@ -901,15 +900,20 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
         .await
         .unwrap();
 
-    assert!(outdated(&store).await.is_empty());
+    // The report waits for a refresh before the verdict is rescored.
+    assert_eq!(outdated(&store).await, (vec![], vec![job]));
 
     // The static analyzer refreshed the report after the verdict.
     store
-        .record_static_report(&sha, 2, true, Some("high"), &report)
+        .record_static_report(&sha, STATIC_ANALYZER_VERSION, true, Some("high"), &report)
         .await
         .unwrap();
 
-    assert_eq!(outdated(&store).await, [job]);
+    assert_eq!(outdated(&store).await, (vec![job], vec![job]));
+
+    store.record_verdict(job, &verdict).await.unwrap();
+
+    assert_eq!(outdated(&store).await, (vec![], vec![]));
 
     db.drop().await;
 }

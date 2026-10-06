@@ -14,7 +14,7 @@
   </select>
   <select name="verdict">
     <option value="">any verdict</option>
-    <option value="rescore"{% if rescore %} selected{% endif %}>waiting for re-scoring</option>
+    <option value="rescore"{% if rescore %} selected{% endif %}>waiting for re-processing</option>
   </select>
   <select name="state">
     <option value="">any state</option>
@@ -27,7 +27,7 @@
   {% for s in states %}<a href="{{ s.href }}"{% if s.selected %} class="selected"{% endif %}>{{ s.name }} <span class="muted">{{ s.n }}</span></a>
   {% endfor %}
 </p>
-{% if backlog > 0 %}<p class="muted">{{ backlog }} verdicts wait for re-scoring by the current analyzer. <a href="{{ backlog_href }}">Show them</a>.</p>{% endif %}
+{% if backlog > 0 %}<p class="muted">{{ backlog }} finished jobs wait for re-processing by the current static analysis or scoring. <a href="{{ backlog_href }}">Show them</a>.</p>{% endif %}
 <p class="muted">{{ total }} matching, newest first.{% if first > 0 %} Showing {{ first }} to {{ last }}.{% endif %}</p>
 {% include "rows.html" %}
 <nav class="pager" aria-label="pages">

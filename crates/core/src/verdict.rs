@@ -188,6 +188,11 @@ pub struct Evidence {
 /// dashboard reads it to show which verdicts wait for that.
 pub const ANALYZER_VERSION: u32 = 4;
 
+/// The version of the static analysis (`crateward_static_analysis::analyze`).
+/// Bumped whenever detectors or rules change, so old reports are recomputed
+/// and the verdicts built on them after that.
+pub const STATIC_ANALYZER_VERSION: i32 = 6;
+
 /// The analyzer's judgment of one version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Verdict {

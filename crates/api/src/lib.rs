@@ -258,7 +258,8 @@ pub struct JobsQuery {
     review: String,
     #[serde(default)]
     state: String,
-    /// `rescore`: only verdicts waiting for the current analyzer.
+    /// `rescore`: only finished jobs waiting for the current static analysis
+    /// or scoring.
     #[serde(default)]
     verdict: String,
     /// Page number, from 1.

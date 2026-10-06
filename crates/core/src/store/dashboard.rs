@@ -1,9 +1,9 @@
 //! Read queries for the dashboard.
 
-use super::verdicts::needs_rescore;
+use super::verdicts::needs_reprocessing;
 use super::{Store, StoreError};
 use crate::job::{JobId, JobState};
-use crate::verdict::ANALYZER_VERSION;
+use crate::verdict::{ANALYZER_VERSION, STATIC_ANALYZER_VERSION};
 
 /// A row in the inbox or a job list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +41,7 @@ pub struct JobFilter {
     pub review: Option<String>,
     /// Only confirmed jobs without a recorded report.
     pub unreported: bool,
-    /// Only jobs whose verdict waits for the current analyzer.
+    /// Only jobs that wait for the current analyzer or static analysis.
     pub rescore: bool,
     /// Job state name.
     pub state: Option<String>,
@@ -87,7 +87,7 @@ const ROW: &str = "j.id, j.crate_name, j.version, j.state, v.score, v.level, v.r
 const UNREPORTED: &str = "v.review = 'confirmed'
      AND NOT EXISTS (SELECT 1 FROM disclosures d WHERE d.job_id = j.id)";
 
-/// The job list's filters but the state, as `$1` to `$6`.
+/// The job list's filters but the state, as `$1` to `$7`.
 fn filtered() -> String {
     format!(
         "FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
@@ -96,7 +96,7 @@ fn filtered() -> String {
            AND ($3::text IS NULL OR v.review = $3)
            AND (NOT $4 OR ({UNREPORTED}))
            AND (NOT $5 OR ({}))",
-        needs_rescore("$6")
+        needs_reprocessing("$6", "$7")
     )
 }
 
@@ -316,8 +316,8 @@ impl Store {
                     "SELECT {ROW} FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
                      WHERE j.id IN (
                          SELECT j.id {}
-                           AND ($7::text IS NULL OR j.state = $7)
-                         ORDER BY j.id DESC LIMIT $8 OFFSET $9)
+                           AND ($8::text IS NULL OR j.state = $8)
+                         ORDER BY j.id DESC LIMIT $9 OFFSET $10)
                      ORDER BY j.id DESC",
                     filtered()
                 ),
@@ -328,6 +328,7 @@ impl Store {
                     &filter.unreported,
                     &filter.rescore,
                     &analyzer_version(),
+                    &STATIC_ANALYZER_VERSION,
                     &filter.state,
                     &limit,
                     &offset,
@@ -339,7 +340,8 @@ impl Store {
             .collect()
     }
 
-    /// How many verdicts wait for the current analyzer.
+    /// How many finished jobs wait for the current analyzer or static
+    /// analysis.
     ///
     /// # Errors
     ///
@@ -350,9 +352,9 @@ impl Store {
             .query_one(
                 &format!(
                     "SELECT count(*) FROM jobs j JOIN verdicts v ON v.job_id = j.id WHERE {}",
-                    needs_rescore("$1")
+                    needs_reprocessing("$1", "$2")
                 ),
-                &[&analyzer_version()],
+                &[&analyzer_version(), &STATIC_ANALYZER_VERSION],
             )
             .await?;
 
@@ -377,6 +379,7 @@ impl Store {
                     &filter.unreported,
                     &filter.rescore,
                     &analyzer_version(),
+                    &STATIC_ANALYZER_VERSION,
                 ],
             )
             .await?;

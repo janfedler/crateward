@@ -53,14 +53,31 @@ impl Review {
 /// current analyzer version, over `jobs j` and `verdicts v`.
 pub(super) fn needs_rescore(version: &str) -> String {
     format!(
-        "j.state = 'Done'
+        "{FINISHED}
          AND (v.analyzer_version < {version}
               OR EXISTS (SELECT 1 FROM static_reports s
-                         WHERE s.sha256 = j.cksum AND s.analyzed_at > v.scored_at))
-         AND NOT EXISTS (SELECT 1 FROM job_runs r
-                         WHERE r.job_id = j.id AND r.trimmed_at IS NOT NULL)"
+                         WHERE s.sha256 = j.cksum AND s.analyzed_at > v.scored_at))"
     )
 }
+
+/// Like [`needs_rescore`], and also jobs whose static report an older static
+/// analysis wrote: they are rescored once it is refreshed. `static_version`
+/// is the SQL for the current static analysis version.
+pub(super) fn needs_reprocessing(version: &str, static_version: &str) -> String {
+    format!(
+        "{FINISHED}
+         AND (v.analyzer_version < {version}
+              OR EXISTS (SELECT 1 FROM static_reports s
+                         WHERE s.sha256 = j.cksum
+                           AND (s.analyzed_at > v.scored_at
+                                OR s.analyzer_version < {static_version})))"
+    )
+}
+
+/// Finished jobs whose runs are kept.
+const FINISHED: &str = "j.state = 'Done'
+     AND NOT EXISTS (SELECT 1 FROM job_runs r
+                     WHERE r.job_id = j.id AND r.trimmed_at IS NOT NULL)";
 
 fn corrupt(id: i64, reason: impl Into<String>) -> StoreError {
     StoreError::Corrupt {
