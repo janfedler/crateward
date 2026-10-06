@@ -302,6 +302,7 @@ fn ci() -> Result<(), TaskError> {
     )?;
     guest_agent()?;
     guest_ebpf::run(&workspace_root())?;
+    fuzz::check(&workspace_root())?;
     docs_lint()?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;

@@ -11,6 +11,16 @@ use crateward_core::paths::repo;
 
 use crate::{TaskError, io, nested_cargo, run_command};
 
+/// Type checks every target. The package is its own workspace, so the
+/// workspace checks do not build it.
+///
+/// # Errors
+///
+/// Fails if a target does not compile.
+pub fn check(root: &Path) -> Result<(), TaskError> {
+    run_command(nested_cargo(&root.join(repo::FUZZ)).args(["check", "--locked", "--bins"]))
+}
+
 /// Runs each target for `seconds`.
 ///
 /// # Errors
