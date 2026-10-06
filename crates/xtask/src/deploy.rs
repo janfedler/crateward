@@ -282,4 +282,11 @@ mod tests {
     fn the_firewall_includes_the_variables_file() {
         assert!(read(repo::FIREWALL).contains(host::NFTABLES_VARS));
     }
+
+    #[test]
+    fn the_playbook_writes_the_known_hosts_the_export_reads() {
+        let playbook = read("deploy/ansible/site.yml");
+
+        assert!(playbook.contains(&format!("dest: {}", host::EXPORT_KNOWN_HOSTS)));
+    }
 }

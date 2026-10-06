@@ -13,6 +13,11 @@ pub mod host {
     /// The firewall's variables, written by Ansible.
     pub const NFTABLES_VARS: &str = "/etc/crateward/nftables-vars.nft";
 
+    /// GitHub's host key for the site export, written by Ansible. `ssh`
+    /// takes the home directory from the user database, not from `HOME`,
+    /// so the export names this file.
+    pub const EXPORT_KNOWN_HOSTS: &str = "/var/lib/crateward/api/.ssh/known_hosts";
+
     /// The content addressed blob store, in `instance.data_dir`.
     pub const BLOBS: &str = "cas";
 

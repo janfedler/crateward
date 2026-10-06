@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use askama::Template;
 use crateward_core::config::ExportConfig;
+use crateward_core::paths::host;
 use crateward_core::store::{PublicStats, PublishedFinding, Store, StoreError};
 
 /// The site's domain, written to `CNAME` for GitHub Pages.
@@ -210,8 +211,10 @@ pub fn write(dir: &Path, files: &[(String, Vec<u8>)]) -> std::io::Result<()> {
 async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportError> {
     let step = args.first().copied().unwrap_or_default();
     let ssh = format!(
-        "ssh -i {} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes",
-        key.display()
+        "ssh -i {} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+         -o UserKnownHostsFile={}",
+        key.display(),
+        host::EXPORT_KNOWN_HOSTS
     );
 
     let output = tokio::process::Command::new("git")
