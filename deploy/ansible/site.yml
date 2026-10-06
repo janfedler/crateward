@@ -82,6 +82,14 @@
         content: "w /sys/kernel/mm/ksm/run - - - - 0\n"
         mode: "0644"
 
+    # createcluster.conf includes this directory, but postgresql-common
+    # does not create it.
+    - name: Directory for the PostgreSQL cluster defaults
+      ansible.builtin.file:
+        path: /etc/postgresql-common/createcluster.d
+        state: directory
+        mode: "0755"
+
     - name: Data checksums for every new PostgreSQL cluster
       ansible.builtin.copy:
         dest: /etc/postgresql-common/createcluster.d/crateward.conf
