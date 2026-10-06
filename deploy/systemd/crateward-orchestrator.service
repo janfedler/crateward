@@ -33,9 +33,10 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectClock=yes
-# Private, not yes: the jail names its own UTS namespace, and yes blocks
-# sethostname there too.
-ProtectHostname=private
+# No ProtectHostname: it blocks sethostname in every UTS namespace,
+# including the one the jail names. The service holds no capabilities, so
+# it cannot rename the host either way.
+ProtectHostname=no
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
