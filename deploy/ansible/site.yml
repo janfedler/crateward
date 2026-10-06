@@ -293,6 +293,16 @@
 
     # Software (a release bundle from `cargo xtask release`)
 
+    # The supervisor compares the installed files with the manifest of the
+    # previous deploy. It stays stopped from here until the new manifest is
+    # recorded, so a check in between does not quarantine the pipeline.
+    # Status 5: the unit is not installed yet.
+    - name: Stop the integrity check while files change
+      ansible.builtin.command: systemctl stop crateward-supervisor.service
+      register: supervisor_stop
+      failed_when: supervisor_stop.rc not in [0, 5]
+      changed_when: supervisor_stop.rc == 0
+
     - name: Crateward binaries
       ansible.builtin.copy:
         src: "{{ crateward_release_dir }}/bin/"

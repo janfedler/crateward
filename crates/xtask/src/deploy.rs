@@ -284,6 +284,19 @@ mod tests {
     }
 
     #[test]
+    fn the_supervisor_is_stopped_while_the_deploy_changes_files() {
+        let playbook = read("deploy/ansible/site.yml");
+        let at = |task: &str| {
+            playbook
+                .find(&format!("- name: {task}"))
+                .unwrap_or_else(|| panic!("no task {task}"))
+        };
+
+        assert!(at("Stop the integrity check while files change") < at("Crateward binaries"));
+        assert!(at("Record the integrity manifest of this deploy (ADR 0008)") < at("Services"));
+    }
+
+    #[test]
     fn the_playbook_writes_the_known_hosts_the_export_reads() {
         let playbook = read("deploy/ansible/site.yml");
 
