@@ -96,6 +96,38 @@
         content: "initdb_options = '--data-checksums'\n"
         mode: "0644"
 
+    # Installing systemd-resolved replaces /etc/resolv.conf with its stub
+    # and keeps the old file as a backup. A host without networkd or DHCP
+    # then has no upstream name server, so the old servers move to the
+    # resolver's configuration.
+    - name: Find the host's name servers
+      ansible.builtin.stat:
+        path: /etc/resolv.conf
+        follow: false
+      register: resolv_conf
+
+    - name: Read the host's name servers
+      ansible.builtin.slurp:
+        src: "{{ '/etc/.resolv.conf.systemd-resolved.bak' if resolv_conf.stat.islnk else '/etc/resolv.conf' }}"
+      register: resolv_file
+      failed_when: false
+
+    - name: Directory for the resolver configuration
+      ansible.builtin.file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: Upstream name servers for systemd-resolved
+      vars:
+        servers: "{{ (resolv_file.content | default('') | b64decode) | regex_findall('(?m)^nameserver\\s+(\\S+)') | reject('match', '^127\\.') | list }}"
+      ansible.builtin.copy:
+        dest: /etc/systemd/resolved.conf.d/crateward.conf
+        content: "[Resolve]\nDNS={{ servers | join(' ') }}\n"
+        mode: "0644"
+      when: servers | length > 0
+      register: resolved_servers
+
     - name: Packages
       ansible.builtin.apt:
         update_cache: true
@@ -120,6 +152,16 @@
           - uidmap
           - unattended-upgrades
           - xz-utils
+
+    - name: Restart the resolver with its upstream servers
+      ansible.builtin.systemd_service:
+        name: systemd-resolved
+        state: restarted
+      when: resolved_servers is changed
+
+    - name: Names resolve
+      ansible.builtin.command: getent hosts static.crates.io
+      changed_when: false
 
     - name: Data checksums are on
       ansible.builtin.command: psql --no-psqlrc --tuples-only --command "SHOW data_checksums"
