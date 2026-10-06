@@ -37,8 +37,15 @@ ProtectHostname=yes
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native
-CapabilityBoundingSet=
+# The service holds no capabilities. The bounding set limits what setuid
+# programs gain, and newuidmap and newgidmap need these three to write the
+# ID maps of a jail. The other setuid programs are hidden.
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID CAP_DAC_OVERRIDE
 AmbientCapabilities=
+InaccessiblePaths=-/usr/bin/su -/usr/bin/sudo -/usr/bin/mount -/usr/bin/umount
+InaccessiblePaths=-/usr/bin/passwd -/usr/bin/chsh -/usr/bin/chfn -/usr/bin/gpasswd
+InaccessiblePaths=-/usr/bin/newgrp -/usr/bin/at -/usr/lib/openssh/ssh-keysign
+InaccessiblePaths=-/usr/lib/dbus-1.0/dbus-daemon-launch-helper
 # AF_PACKET: the capture of frames the proxies do not see (ADR 0006).
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
 DeviceAllow=/dev/kvm rw
