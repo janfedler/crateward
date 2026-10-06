@@ -18,6 +18,7 @@ fuzz_target!(|data: &[u8]| {
             tokens: vec!["cioTOKEN".into()],
             planted: vec!["/work/home/.cargo/credentials.toml".into()],
             created: Vec::new(),
+            environment: vec!["/work/home".into()],
         };
 
         let _ = scan(&fs, &spec);
