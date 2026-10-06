@@ -53,6 +53,10 @@ const MIGRATIONS: &[(i32, &str)] = &[
         10,
         include_str!("../migrations/0010_removed_before_report.sql"),
     ),
+    (
+        11,
+        include_str!("../migrations/0011_shared_finding_pages.sql"),
+    ),
 ];
 
 /// The server's message for database errors, which the error's own

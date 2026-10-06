@@ -70,7 +70,8 @@ asks not to be the first recipient.
    [the template](findings/TEMPLATE.md) into the site repository as
    `findings/<slug>/index.html`, then run
    `crateward disclosure publish <job> --slug <slug>`. The database refuses
-   to publish a finding that was not reported and resolved. The next export
+   to publish a finding that was not reported and resolved. Versions of one
+   crate may share a page: publish each with the same slug. The next export
    lists it on crateward.com with its dates and a link to the page.
 7. **Record.** `crateward disclosure show <job>` and the job page on the
    dashboard show the timeline: reported, reference, resolved, published.

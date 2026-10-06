@@ -13,7 +13,7 @@ use crateward_core::failure::FailureClass;
 use crateward_core::job::{JobEvent, JobId, JobState, Stage, Triage};
 use crateward_core::name::CrateName;
 use crateward_core::store::{
-    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, NewJob, PauseReason, Review,
+    AlertOutcome, CrateFile, DisclosureKind, DisclosureRefusal, NewJob, PauseReason, Review, Store,
     StoreError,
 };
 use crateward_core::testing::{TestDb, policies};
@@ -41,7 +41,7 @@ async fn migrations_are_idempotent() {
     let mut store = db.store().await;
     assert_eq!(
         store.migrate().await.unwrap(),
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     );
     assert!(store.migrate().await.unwrap().is_empty());
 
@@ -816,6 +816,82 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
     db.drop().await;
 }
 
+async fn outdated(store: &Store) -> Vec<JobId> {
+    let jobs = store.outdated_verdicts(2, 10).await.unwrap();
+
+    jobs.into_iter().map(|j| j.id).collect()
+}
+
+#[tokio::test]
+async fn a_verdict_older_than_its_static_report_is_outdated() {
+    let Some(db) = TestDb::new("test").await else {
+        return;
+    };
+
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let job = store
+        .enqueue(&new_job("lib", "1.0.0", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    let sha = "ab".repeat(32).parse().unwrap();
+    store
+        .record_crate_file(&CrateFile {
+            sha256: sha,
+            name: "lib".into(),
+            version: "1.0.0".into(),
+            blake3: None,
+            compressed_bytes: 1,
+            unpacked_bytes: 1,
+            stored_bytes: Some(1),
+            report: serde_json::json!({}),
+        })
+        .await
+        .unwrap();
+    let report = serde_json::json!({"findings": []});
+    store
+        .record_static_report(&sha, 1, true, None, &report)
+        .await
+        .unwrap();
+    store
+        .record_verdict(
+            job,
+            &Verdict {
+                score: 0,
+                level: RiskLevel::None,
+                coverage: Coverage::DynamicLinux,
+                evidence: Vec::new(),
+                profile: Vec::new(),
+                new_behavior: Vec::new(),
+                analyzer_version: 2,
+            },
+        )
+        .await
+        .unwrap();
+    db.admin()
+        .batch_execute(&format!(
+            "SET search_path TO {}; UPDATE jobs SET state = 'Done';
+             UPDATE static_reports SET analyzed_at = now() - interval '2 minutes';
+             UPDATE verdicts SET scored_at = now() - interval '1 minute'",
+            db.schema()
+        ))
+        .await
+        .unwrap();
+
+    assert!(outdated(&store).await.is_empty());
+
+    // The static analyzer refreshed the report after the verdict.
+    store
+        .record_static_report(&sha, 2, true, Some("high"), &report)
+        .await
+        .unwrap();
+
+    assert_eq!(outdated(&store).await, [job]);
+
+    db.drop().await;
+}
+
 #[tokio::test]
 async fn findings_are_reported_resolved_and_only_then_published() {
     let Some(db) = TestDb::new("test").await else {
@@ -923,6 +999,26 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         Err(DisclosureRefusal::SlugTaken)
     );
     assert!(store.disclosure(JobId(i64::MAX)).await.unwrap().is_none());
+
+    // Another version of the same crate may share the page.
+    let next = store
+        .enqueue(&new_job("evil", "0.1.1", 0))
+        .await
+        .unwrap()
+        .unwrap();
+    store.record_verdict(next, &verdict).await.unwrap();
+    store
+        .set_review(next, Review::Confirmed, None)
+        .await
+        .unwrap();
+    assert_eq!(report(next).await, Ok(()));
+    store.mark_resolved(next, None).await.unwrap().unwrap();
+
+    assert_eq!(
+        store.publish_finding(next, "evil-0-1-0").await.unwrap(),
+        Ok(())
+    );
+    assert_eq!(store.published_findings().await.unwrap().len(), 2);
 
     // crates.io removed a crate before it was reported: no report, but
     // resolved, so it may be published. Only a confirmed verdict counts.

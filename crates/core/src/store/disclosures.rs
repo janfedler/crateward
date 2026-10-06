@@ -50,7 +50,7 @@ pub enum DisclosureRefusal {
     /// The slug must be lowercase letters, digits and dashes.
     #[error("the page name must be 1 to 64 lowercase letters, digits or dashes")]
     BadSlug,
-    /// Another finding uses the slug.
+    /// A finding about another crate uses the slug.
     #[error("another finding uses this page name")]
     SlugTaken,
 }
@@ -224,6 +224,7 @@ impl Store {
     }
 
     /// Marks a resolved finding as published under `findings/<slug>/`.
+    /// Versions of one crate may share a page.
     ///
     /// # Errors
     ///
@@ -255,7 +256,10 @@ impl Store {
         let taken = self
             .client
             .query_opt(
-                "SELECT 1 FROM disclosures WHERE slug = $1 AND job_id <> $2",
+                "SELECT 1 FROM disclosures d
+                 JOIN jobs o ON o.id = d.job_id
+                 JOIN jobs j ON j.id = $2
+                 WHERE d.slug = $1 AND o.canonical_name <> j.canonical_name",
                 &[&slug, &job.0],
             )
             .await?

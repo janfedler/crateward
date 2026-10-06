@@ -162,8 +162,11 @@ impl Store {
         Ok(updated == 1)
     }
 
-    /// Finished jobs whose verdict an older analyzer produced, oldest first.
-    /// Jobs with trimmed runs keep their verdict (see `retention`).
+    /// Finished jobs whose verdict an older analyzer produced, or that were
+    /// scored before their static report was last written, oldest first.
+    /// The static analyzer refreshes outdated reports on its own schedule,
+    /// so a verdict recomputed before that would otherwise keep the old
+    /// findings. Jobs with trimmed runs keep their verdict (see `retention`).
     ///
     /// # Errors
     ///
@@ -179,7 +182,11 @@ impl Store {
             .query(
                 &format!(
                     "SELECT {} FROM jobs j JOIN verdicts v ON v.job_id = j.id
-                     WHERE j.state = 'Done' AND v.analyzer_version < $1
+                     WHERE j.state = 'Done'
+                       AND (v.analyzer_version < $1
+                            OR EXISTS (SELECT 1 FROM static_reports s
+                                       WHERE s.sha256 = j.cksum
+                                         AND s.analyzed_at > v.scored_at))
                        AND NOT EXISTS (SELECT 1 FROM job_runs r
                                        WHERE r.job_id = j.id AND r.trimmed_at IS NOT NULL)
                      ORDER BY v.scored_at LIMIT $2",
