@@ -240,7 +240,8 @@
 
     # PostgreSQL: one role, reached over the socket by every service user
 
-    - name: Service users map to the crateward role
+    # The operator runs the crateward CLI as root (deploy/README.md).
+    - name: Service users and root map to the crateward role
       ansible.builtin.blockinfile:
         path: "/etc/postgresql/{{ postgresql_version }}/main/pg_ident.conf"
         marker: "# {mark} crateward"
@@ -249,6 +250,7 @@
           crateward {{ user.name }} crateward
           {% endfor %}
           crateward postgres postgres
+          crateward root crateward
       notify: Restart postgresql
 
     - name: Peer authentication through the map
