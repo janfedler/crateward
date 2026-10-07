@@ -216,6 +216,7 @@ impl Lab {
                 json!({ "name": name, "version": version, "checksum": sha(name, version).to_string() })
             })
             .collect();
+
         self.record_packages(job, &Value::Array(list)).await;
     }
 
@@ -223,6 +224,7 @@ impl Lab {
         let record = self
             .store
             .record_fetch(job.id, Some("# lockfile"), None, packages);
+
         record.await.unwrap();
     }
 
@@ -333,6 +335,7 @@ async fn no_lockfile_means_unresolved_dependencies() {
     let record = lab
         .store
         .record_fetch(failed.id, None, Some("no matching package"), &none);
+
     record.await.unwrap();
 
     assert_eq!(lab.decide(&failed).await, expected);
@@ -447,6 +450,7 @@ async fn familiar_dependencies_and_the_diff_base() {
         .iter()
         .map(|(n, v)| json!({ "name": n, "version": v, "checksum": sha(n, v).to_string() }))
         .collect();
+
     list.push(json!({ "name": "bad", "version": "1.0.0", "checksum": "zz" }));
     lab.record_packages(&job, &Value::Array(list)).await;
 
@@ -480,6 +484,7 @@ async fn familiar_dependencies_and_the_diff_base() {
     ]
     .map(str::to_owned)
     .into();
+
     let before = BTreeSet::from(["old".to_owned()]);
     let expected = diff(&report, &previous, "1.5.0", &current, &before);
     let recorded = lab.recorded_diff(&job).await.unwrap();
@@ -732,6 +737,7 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
     let unscored = lab
         .publish("lib", "1.0.0", &tar_of("lib", "1.0.0", false))
         .await;
+
     let broken = lab
         .publish(
             "bad",
@@ -799,6 +805,7 @@ async fn an_archive_without_a_manifest_fails_the_job_after_the_others_are_record
     let dep = lab
         .publish("dep", "1.0.0", &tar_of("dep", "1.0.0", false))
         .await;
+
     lab.lock(&job, &[("app", "1.0.0"), ("dep", "1.0.0")]).await;
     let failure = lab.failure(&job).await;
 

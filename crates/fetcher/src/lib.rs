@@ -130,6 +130,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let reaper = Store::connect(config.database.url.expose_secret())
             .await
             .map_err(fatal)?;
+
         tokio::spawn(app::reap_loop(
             reaper,
             fetcher.policies.clone(),

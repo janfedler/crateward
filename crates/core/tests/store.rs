@@ -112,6 +112,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
         .await
         .unwrap()
         .unwrap();
+
     let high = store
         .enqueue(&new_job("high", "1.0.0", 9))
         .await
@@ -133,6 +134,7 @@ async fn claims_follow_priority_stage_and_skip_locked_rows() {
         .await
         .unwrap()
         .unwrap();
+
     let second = other
         .claim(Stage::Fetch, "w2", LEASE)
         .await
@@ -165,6 +167,7 @@ async fn complete_advances_releases_and_records() {
         .await
         .unwrap()
         .unwrap();
+
     store
         .claim(Stage::Fetch, "fetcher-1", LEASE)
         .await
@@ -249,6 +252,7 @@ async fn a_transient_failure_backs_off() {
         .await
         .unwrap()
         .unwrap();
+
     store
         .claim(Stage::Fetch, "w", LEASE)
         .await
@@ -289,6 +293,7 @@ async fn expired_leases_are_reaped_and_cost_an_attempt() {
         .await
         .unwrap()
         .unwrap();
+
     store
         .claim(Stage::Fetch, "dead-worker", Duration::from_millis(100))
         .await
@@ -326,6 +331,7 @@ async fn sandbox_start_keeps_the_lease_for_the_run() {
         .await
         .unwrap()
         .unwrap();
+
     let p = policies();
     store.claim(Stage::Fetch, "f", LEASE).await.unwrap();
     store
@@ -375,11 +381,13 @@ async fn static_reports_fetches_and_popularity_round_trip() {
         .await
         .unwrap()
         .unwrap();
+
     let new = store
         .enqueue(&new_job("lib", "1.1.0", 0))
         .await
         .unwrap()
         .unwrap();
+
     let packages = serde_json::json!([{"name": "cc", "version": "1.0.0", "checksum": "00"}]);
     store
         .record_fetch(old, Some("lock"), None, &packages)
@@ -444,6 +452,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
         )
         .await
         .unwrap();
+
     popular.sort();
 
     assert_eq!(
@@ -473,6 +482,7 @@ async fn a_suspected_compromise_quarantines_everything_until_lifted() {
         .await
         .unwrap()
         .unwrap();
+
     store
         .enqueue(&new_job("b", "1.0.0", 0))
         .await
@@ -581,6 +591,7 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
         .await
         .unwrap()
         .unwrap();
+
     store
         .complete(
             job.id,
@@ -668,11 +679,13 @@ async fn verdicts_are_stored_reviewed_and_found_for_the_previous_version() {
         .await
         .unwrap()
         .unwrap();
+
     let new = store
         .enqueue(&new_job("demo", "1.10.0", 0))
         .await
         .unwrap()
         .unwrap();
+
     let verdict = |score, profile: &[&str]| Verdict {
         score,
         level: RiskLevel::from_score(score),
@@ -753,6 +766,7 @@ async fn old_unflagged_runs_lose_their_raw_data_only() {
             .await
             .unwrap()
             .unwrap();
+
         store
             .record_run(job, "check", "Built", &report)
             .await
@@ -830,10 +844,12 @@ async fn outdated(store: &Store) -> (Vec<JobId>, Vec<JobId>) {
         .into_iter()
         .map(|j| j.id)
         .collect();
+
     let filter = JobFilter {
         rescore: true,
         ..JobFilter::default()
     };
+
     let listed: Vec<JobId> = store
         .jobs(&filter, 0, 10)
         .await
@@ -861,6 +877,7 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
         .await
         .unwrap()
         .unwrap();
+
     let sha = "ab".repeat(32).parse().unwrap();
     store
         .record_crate_file(&CrateFile {
@@ -889,6 +906,7 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
         new_behavior: Vec::new(),
         analyzer_version: ANALYZER_VERSION,
     };
+
     store.record_verdict(job, &verdict).await.unwrap();
     db.admin()
         .batch_execute(&format!(
@@ -931,11 +949,13 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         .await
         .unwrap()
         .unwrap();
+
     let other = store
         .enqueue(&new_job("worse", "0.2.0", 0))
         .await
         .unwrap()
         .unwrap();
+
     let verdict = Verdict {
         score: 90,
         level: RiskLevel::from_score(90),
@@ -1032,6 +1052,7 @@ async fn findings_are_reported_resolved_and_only_then_published() {
         .await
         .unwrap()
         .unwrap();
+
     store.record_verdict(next, &verdict).await.unwrap();
     store
         .set_review(next, Review::Confirmed, None)

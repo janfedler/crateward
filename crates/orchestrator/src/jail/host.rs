@@ -128,14 +128,17 @@ pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child
         .kill_on_drop(true)
         .spawn()
         .map_err(io("starting the jail launcher"))?;
+
     let handshake = async {
         let pid = child
             .id()
             .ok_or_else(|| JailError::Launcher("exited immediately".into()))?;
+
         let mut stdin = child
             .stdin
             .take()
             .ok_or_else(|| JailError::Launcher("no stdin".into()))?;
+
         let mut stdout = BufReader::new(
             child
                 .stdout

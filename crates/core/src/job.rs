@@ -1008,6 +1008,7 @@ mod tests {
             let claimable = Stage::ALL
                 .iter()
                 .any(|stage| stage.claimable_states().contains(&state));
+
             let expected = !state.is_terminal() && state != JobState::Running;
 
             assert_eq!(claimable, expected, "{state}");

@@ -114,6 +114,7 @@ mod tests {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/acl-tests")
             .join(std::process::id().to_string());
+
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         grant_user(&dir, 160_000).unwrap();
@@ -121,6 +122,7 @@ mod tests {
             .args(["--numeric", "--omit-header"])
             .arg(&dir)
             .output();
+
         std::fs::remove_dir_all(&dir).unwrap();
 
         // getfacl is optional on developer machines.

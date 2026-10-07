@@ -145,11 +145,13 @@ fn a_resolution_child_that_does_not_exist_is_an_error() {
         allow_plain_http: false,
     })
     .unwrap();
+
     let work = Path::new(env!("CARGO_TARGET_TMPDIR")).join("resolve-no-child");
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
+
     let error = runtime
         .block_on(resolve_in_sandbox(
             Path::new("/nonexistent/fetcher"),
@@ -190,6 +192,7 @@ fn resolve(name: &str, script: &str, mode: u32) -> Option<(PathBuf, Output)> {
         .stdin(Stdio::null())
         .output()
         .unwrap();
+
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() && sandbox::unavailable(&stderr) {
         return None;

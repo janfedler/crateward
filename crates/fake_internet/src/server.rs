@@ -367,6 +367,7 @@ fn terminate(
 fn handle(mut stream: TcpStream, log: &Shared, tls: Option<&Arc<rustls::ServerConfig>>) {
     let dst = rustix::net::sockopt::ip_original_dst(&stream)
         .map_or_else(|_| "unknown".to_owned(), |a| a.to_string());
+
     let deadline = Instant::now() + CONNECTION_DEADLINE;
     let timeouts = stream.try_clone();
     let (data, total) = read_request(
@@ -422,6 +423,7 @@ fn serve_tcp(listener: &TcpListener, log: &Shared, tls: Option<&Arc<rustls::Serv
             active.fetch_sub(1, Ordering::SeqCst);
             let dst = rustix::net::sockopt::ip_original_dst(&stream)
                 .map_or_else(|_| "unknown".to_owned(), |a| a.to_string());
+
             emit(log, EventKind::Refused { dst });
             continue;
         }

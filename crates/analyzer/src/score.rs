@@ -233,6 +233,7 @@ fn top_directory(path: &str) -> String {
         .into_iter()
         .find_map(|base| Some((base, path.strip_prefix(base)?.strip_prefix('/')?)))
         .unwrap_or(("", path));
+
     let first = rest.split('/').next().unwrap_or(rest);
 
     format!("{base}/{first}")
@@ -1047,6 +1048,7 @@ mod tests {
                 "tokens_on_disk": [{"kind": "github_token_env", "via": OUTPUT}],
                 "scratch": scratch,
             }));
+
             r.trace.processes.truncate(2);
             score(&inputs(&[r]))
         };
@@ -1079,6 +1081,7 @@ mod tests {
             "tokens_on_disk": [{"kind": "github_token_env", "via": OUTPUT}],
             "scratch": scratch(&[OUTPUT], &[]),
         }));
+
         r.trace.processes[2].exe = "/tmp/code-helper".into();
         let runs = [r];
         let finding = |kind, file: &str| Finding {
@@ -1091,6 +1094,7 @@ mod tests {
             platform: crateward_static_analysis::findings::Platform::Any,
             evidence: "e".into(),
         };
+
         let report = StaticReport {
             analyzer_version: 6,
             manifest: crateward_static_analysis::manifest::ManifestFacts::default(),
@@ -1136,6 +1140,7 @@ mod tests {
     fn network_data_the_search_missed_needs_review() {
         let flooded = run(json!({"network": {"dns": [], "connections": [],
             "udp_datagrams": 0, "refused": 0, "truncated": true, "cut": 3}}));
+
         let v = score(&inputs(&[flooded]));
         let missed: Vec<_> = v
             .evidence
@@ -1169,6 +1174,7 @@ mod tests {
             "/work/home/.cache/ort.pyke.io/dfbin",
             "/tmp/left",
         ])}));
+
         let v = score(&inputs(&[r]));
         let left: Vec<_> = v
             .evidence
@@ -1195,6 +1201,7 @@ mod tests {
             "network": {"dns": ["index.crates.io", "index.crates.io.0.2.2", "x.0.2.2"],
                         "connections": [], "udp_datagrams": 0, "refused": 0, "truncated": false}
         }));
+
         r.trace.processes.truncate(2);
         r.trace.tamper.push(
             serde_json::from_value(json!({"pid": 2, "what": "ptrace 1 mode 0xd", "ms": 5}))
@@ -1365,6 +1372,7 @@ mod tests {
             "started_ms": 0, "became_root": false
         }))
         .unwrap();
+
         let map: HashMap<u32, &Process> = [(9, &rustc)].into();
 
         assert_eq!(package_of(9, &map).as_deref(), Some("my-macro"));
@@ -1376,6 +1384,7 @@ mod tests {
     fn a_run_is_scored_group_by_group() {
         let entry =
             |path: &str| json!({"path": path, "kind": "file", "size": 1, "mode": 420, "uid": 1000});
+
         let file = |pid: u32, exe: &str, path: &str| json!({"pid": pid, "exe": exe, "path": path, "flags": 0, "ms": 3});
         let other = "/work/target/debug/build/other-0123456789abcdef/build-script-build";
         let mut first = run(json!({
@@ -1472,6 +1481,7 @@ mod tests {
                 )
             })
             .collect();
+
         let dep_key = "/work/target/debug/build/dep-0123456789abcdef/out/k";
 
         assert_eq!(

@@ -71,6 +71,7 @@ impl Analyzer {
         else {
             return Ok(false);
         };
+
         let event = match self.analyze(&job).await {
             Ok(escalate) => JobEvent::Scored { escalate },
             Err(AnalyzeError::Store(error)) => {
@@ -144,6 +145,7 @@ impl Analyzer {
         let verdict = self.score_job(job).await?;
         let escalate =
             job.job.run_kind == RunKind::Check && !job.job.escalated && should_escalate(&verdict);
+
         tracing::info!(
             job = job.id.0, name = %job.name, version = %job.version,
             score = verdict.score, level = verdict.level.name(), escalate,
@@ -172,11 +174,13 @@ impl Analyzer {
         for (kind, value) in self.store.job_runs(job.id).await? {
             let run: RunReport =
                 serde_json::from_value(value).map_err(|e| data(&format!("{kind} run"), e))?;
+
             runs.push(run);
         }
 
         let version = semver::Version::parse(&job.version)
             .map_err(|e| AnalyzeError::Data(format!("version: {e}")))?;
+
         let canonical = job.name.to_ascii_lowercase().replace('-', "_");
         let previous = self.store.previous_profile(&canonical, &version).await?;
 
@@ -203,6 +207,7 @@ impl Analyzer {
         else {
             return Ok(false);
         };
+
         let needs_review = self
             .store
             .verdict(job.id)

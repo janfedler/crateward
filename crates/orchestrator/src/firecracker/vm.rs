@@ -564,6 +564,7 @@ impl Vm {
                 },
             )
             .await?;
+
         if let Some(drives) = drives {
             for (id, host, name) in [
                 ("payload", &drives.payload, PAYLOAD),

@@ -109,6 +109,7 @@ proptest! {
                 .filter_map(|event| job.apply(*event, &LIMITS).ok())
                 .map(|transition| transition.job)
                 .collect();
+
             prop_assert!(!valid.is_empty(), "no valid event in {:?}", job.state);
             job = valid[choice % valid.len()];
             steps += 1;
@@ -175,6 +176,7 @@ fn done_jobs_carry_an_honest_coverage_label() {
             .apply(JobEvent::StaticAnalysisCompleted { triage }, &LIMITS)
             .unwrap()
             .job;
+
         while let Some(event) = progress_event(&job) {
             job = job.apply(event, &LIMITS).unwrap().job;
         }

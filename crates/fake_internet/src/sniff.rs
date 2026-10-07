@@ -176,12 +176,14 @@ fn sni(data: &[u8]) -> Option<Option<String>> {
 
     while let (Some(kind), Some(len)) = (e.u16(), e.u16()) {
         let ext = e.take(len)?;
+
         if kind != 0 {
             continue;
         }
 
         let mut s = Reader { data: ext, at: 0 };
         s.u16()?; // list length
+
         if s.u8()? == 0 {
             let name_len = s.u16()?;
             return Some(Some(printable(s.take(name_len)?)));

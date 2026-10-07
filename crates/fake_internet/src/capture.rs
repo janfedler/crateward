@@ -107,6 +107,7 @@ pub fn describe(frame: &[u8]) -> Option<String> {
             else {
                 return Some("ipv6 (truncated)".into());
             };
+
             let src: [u8; 16] = src.try_into().ok()?;
             let dst: [u8; 16] = dst.try_into().ok()?;
             let (src, dst) = (std::net::Ipv6Addr::from(src), std::net::Ipv6Addr::from(dst));

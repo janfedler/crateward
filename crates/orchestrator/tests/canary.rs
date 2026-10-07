@@ -39,6 +39,7 @@ async fn canaries_give_their_known_results() {
     let work = root()
         .join("target/canary")
         .join(std::process::id().to_string());
+
     let _ = std::fs::remove_dir_all(&work);
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
@@ -84,8 +85,10 @@ async fn canaries_give_their_known_results() {
     let snapshot = FirecrackerBackend::create_base_snapshot(&config, &boot, &work.join("snapshot"))
         .await
         .unwrap();
+
     let cgroups =
         CgroupTree::own().expect("run through `cargo xtask canary` for a delegated cgroup");
+
     let sandbox = Sandbox {
         backend: Arc::new(FirecrackerBackend::new(config, cgroups, snapshot)),
         slot: 0,
@@ -117,6 +120,7 @@ async fn canaries_give_their_known_results() {
             .execute(1, spec, &tokens, &files, &plan)
             .await
             .unwrap();
+
         let problems = canary.check(&report);
 
         assert!(

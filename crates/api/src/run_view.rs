@@ -282,6 +282,7 @@ fn process_rows(trace: &Value) -> Vec<ProcessRow> {
     for p in processes {
         let parent =
             u64_of(p, "ppid").filter(|pp| pids.contains(pp) && Some(*pp) != u64_of(p, "pid"));
+
         children.entry(parent).or_default().push(p);
     }
 
@@ -320,6 +321,7 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
         .skip(1)
         .map(|a| a.as_str().unwrap_or_default().to_owned())
         .collect();
+
     let started = u64_of(p, "started_ms").unwrap_or(0);
     let exe = str_of(p, "exe");
     let name = exe.rsplit('/').next().unwrap_or_default();
@@ -371,6 +373,7 @@ fn end_text(raw: &str) -> String {
         .filter(|c| *c != '_')
         .collect::<String>()
         .to_ascii_lowercase();
+
     let label = match name.as_str() {
         "finished" => "agent reported the end",
         "hosttimeout" => "host time limit",
@@ -470,6 +473,7 @@ fn network(view: &mut RunView, net: &Value) {
         .iter()
         .map(connection_row)
         .collect();
+
     if let Some(n) = u64_of(net, "udp_datagrams").filter(|n| *n > 0) {
         view.network_notes
             .push(format!("{n} UDP datagrams other than DNS"));
@@ -558,6 +562,7 @@ fn trace(view: &mut RunView, trace: &Value) {
             )
         })
         .collect();
+
     for t in &view.tamper {
         view.alerts
             .push(format!("Process {} tried to tamper: {}", t.1, t.2));

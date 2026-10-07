@@ -68,6 +68,7 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .collect();
+
     paths.sort();
 
     for path in paths {
@@ -93,6 +94,7 @@ fn collect(dir: &Path, out: &mut Vec<(PathBuf, Kind)>, nested: bool) -> Result<(
             .parent()
             .and_then(Path::file_name)
             .is_some_and(|parent| parent == "config");
+
         let kind = match path.extension().and_then(|e| e.to_str()) {
             Some("md") => Some(Kind::Markdown),
             Some("rs") if nested => Some(Kind::RustComments),
@@ -133,6 +135,7 @@ fn lint_text(path: &Path, text: &str, kind: Kind) -> Vec<Violation> {
                 .chars()
                 .take_while(|c| *c == '`' || *c == '~')
                 .collect();
+
             fence = Some(marker);
             continue;
         }
@@ -335,6 +338,7 @@ fn has_semicolon(prose: &str) -> bool {
             .rsplit_once('&')
             .map_or("", |(_, name)| name)
             .trim_start_matches('#');
+
         name.is_empty() || !name.chars().all(char::is_alphanumeric)
     })
 }

@@ -162,6 +162,7 @@ impl Store {
             .iter()
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect::<Result<_, StoreError>>()?;
+
         let levels = self
             .client
             .query(
@@ -172,6 +173,7 @@ impl Store {
             .iter()
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect::<Result<_, StoreError>>()?;
+
         let row = self
             .client
             .query_one(
@@ -209,6 +211,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         let pairs = |rows: Vec<tokio_postgres::Row>| {
             rows.iter()
                 .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
@@ -383,6 +386,7 @@ impl Store {
                 ],
             )
             .await?;
+
         let counts = rows
             .iter()
             .map(|r| Ok((r.try_get::<_, String>(0)?, r.try_get::<_, i64>(1)?)))

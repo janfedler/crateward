@@ -120,6 +120,7 @@ pub fn converse<S: Read + Write>(
 pub fn serve(port: u32) -> Result<(), AgentError> {
     let listener = VsockListener::bind_with_cid_port(VMADDR_CID_ANY, port)
         .map_err(AgentError::io("binding the vsock port"))?;
+
     let options = RunOptions {
         identity: Some((BUILDER_UID, BUILDER_GID)),
     };

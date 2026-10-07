@@ -99,6 +99,7 @@ impl Integrity {
                         .watches
                         .get(&event.wd())
                         .map_or_else(|| "a decoy".to_owned(), |p| p.display().to_string());
+
                     findings.push(format!("{path}: {:?}", event.events()));
 
                     if event.events().contains(inotify::ReadFlags::IGNORED) {
@@ -138,6 +139,7 @@ impl Integrity {
                 .create_new(true)
                 .mode(0o644)
                 .open(path)?;
+
             file.write_all(DECOY)?;
         }
 
@@ -147,6 +149,7 @@ impl Integrity {
             | inotify::WatchFlags::ATTRIB
             | inotify::WatchFlags::DELETE_SELF
             | inotify::WatchFlags::MOVE_SELF;
+
         let wd = inotify::add_watch(&self.inotify, path, flags)?;
         self.watches.insert(wd, path.to_path_buf());
         tracing::info!(path = %path.display(), "decoy watched");
@@ -161,6 +164,7 @@ impl Integrity {
         let stray: HashSet<i32> = checks::stray_processes(&processes, slot_uids)
             .into_iter()
             .collect();
+
         let findings = processes
             .iter()
             .filter(|p| stray.contains(&p.pid) && self.stray_before.contains(&p.pid))
@@ -172,6 +176,7 @@ impl Integrity {
                 )
             })
             .collect();
+
         self.stray_before = stray;
 
         findings

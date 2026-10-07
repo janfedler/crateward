@@ -346,6 +346,7 @@ mod tests {
         let error = publish(&dir.join("build"), &out, "1")
             .unwrap_err()
             .to_string();
+
         let image = dir.join("build/arch/x86/boot/bzImage");
 
         assert_eq!(error, format!("{} is missing", image.display()));
@@ -372,6 +373,7 @@ mod tests {
                 .join("crateward.config"),
         )
         .unwrap();
+
         let reqs = requirements(&text);
 
         assert!(reqs.contains(&Requirement::Unset("CONFIG_MODULES".into())));

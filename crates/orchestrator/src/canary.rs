@@ -209,6 +209,7 @@ fn bad_traffic(report: &RunReport, p: &mut Vec<String>) {
     );
     let leaked =
         |kind: &str, via: &str| report.leaked.iter().any(|l| l.kind == kind && l.via == via);
+
     expect(
         p,
         leaked("cargo_registry_token", &format!("http://{EXFIL_HOST}")),
@@ -227,6 +228,7 @@ fn bad_trace(trace: &TraceSummary, p: &mut Vec<String>) {
         .processes
         .iter()
         .find(|x| x.role == Role::BuildScript && x.exe.contains(KNOWN_BAD.name));
+
     let Some(script) = script else {
         p.push("the build script is not in the trace".into());
         return;
@@ -264,6 +266,7 @@ fn bad_trace(trace: &TraceSummary, p: &mut Vec<String>) {
         .processes
         .iter()
         .find(|x| x.ppid == Some(script.pid) && x.exe.ends_with("/curl"));
+
     expect(
         p,
         curl.is_some_and(|c| opened(c.pid, "/.aws/credentials")),

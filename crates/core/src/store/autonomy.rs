@@ -181,6 +181,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         let mut out: HashMap<Stage, BreakerState> = Stage::ALL
             .into_iter()
             .map(|s| (s, BreakerState::default()))
@@ -249,6 +250,7 @@ impl Store {
                 &[&since],
             )
             .await?;
+
         let mut out: HashMap<Stage, Counts> = HashMap::new();
 
         for row in rows {
@@ -321,6 +323,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         rows.iter()
             .map(|row| {
                 let reason: String = row.try_get(0)?;
@@ -359,6 +362,7 @@ impl Store {
                 &[&limit],
             )
             .await?;
+
         rows.iter()
             .map(|row| {
                 let id: i64 = row.try_get(0)?;
@@ -367,6 +371,7 @@ impl Store {
                         id,
                         reason: format!("alert: {e}"),
                     })?;
+
                 Ok(PendingAlert {
                     id,
                     dedup_key: row.try_get(1)?,
@@ -463,6 +468,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         rows.iter()
             .map(|row| Ok((row.try_get(0)?, row.try_get(1)?, row.try_get(2)?)))
             .collect()
@@ -495,6 +501,7 @@ impl Store {
                 &[&JobState::ReadyForSandbox.name(), &deadline, &worker],
             )
             .await?;
+
         let mut expired = 0;
 
         for row in rows {

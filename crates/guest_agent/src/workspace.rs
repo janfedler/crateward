@@ -134,6 +134,7 @@ fn overlay_options(options: Option<&str>) -> Result<Overlay<'_>, WorkspaceError>
         let (key, value) = option
             .split_once('=')
             .ok_or_else(|| WorkspaceError::OverlayOption(option.into()))?;
+
         let slot = match key {
             "lowerdir" => &mut lower,
             "upperdir" => &mut upper,
@@ -238,6 +239,7 @@ fn write_file(spec: &FileSpec) -> Result<(), WorkspaceError> {
         .mode(spec.path.mode)
         .open(path)
         .map_err(failed("create", path))?;
+
     file.write_all(&spec.contents)
         .map_err(failed("write", path))?;
 

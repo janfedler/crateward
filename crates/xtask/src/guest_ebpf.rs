@@ -77,6 +77,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
         .join("bpfel-unknown-none")
         .join("release")
         .join("crateward-guest-ebpf");
+
     let object = std::fs::read(&built).map_err(io(&built))?;
     check_license(&object)
         .map_err(|message| TaskError::Check(format!("{}: {message}", built.display())))?;

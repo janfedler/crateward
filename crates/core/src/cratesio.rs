@@ -313,6 +313,7 @@ pub fn find_version(
         .filter(|l| !l.trim().is_empty())
         .nth(position)
         .unwrap_or_default();
+
     let raw = serde_json::from_str(line).map_err(|e| ParseError::IndexLine {
         line: position + 1,
         reason: e.to_string(),
@@ -580,6 +581,7 @@ mod tests {
 <item><crates:name>novers</crates:name></item>
 <item><crates:name>badvers</crates:name><crates:version>one</crates:version></item>
 </channel></rss>"#;
+
         let feed = parse_feed(xml).unwrap();
 
         assert_eq!(feed.items.len(), 2);

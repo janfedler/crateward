@@ -123,6 +123,7 @@ impl Notifier {
             .body(body)
             .send()
             .await?;
+
         let status = response.status();
         if !status.is_success() {
             return Err(NotifyError::Refused(status));

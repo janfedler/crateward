@@ -120,6 +120,7 @@ impl AgentConnection {
         let mut stream = UnixStream::connect(uds)
             .await
             .map_err(|e| AgentError::NotReady(e.to_string()))?;
+
         handshake(&mut stream, port).await?;
         let mut connection = Self {
             stream,

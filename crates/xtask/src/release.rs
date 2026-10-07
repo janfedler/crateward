@@ -335,6 +335,7 @@ fn sums(dir: &Path) -> Result<String, TaskError> {
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .into_owned();
+
                 out.insert(relative, crate::images::sha256_file(&path)?);
             }
         }
@@ -432,12 +433,14 @@ fn package_components(root: &Path) -> Result<Vec<Value>, TaskError> {
 
     let metadata: Metadata = serde_json::from_str(&metadata)
         .map_err(|e| TaskError::Check(format!("cargo metadata: {e}")))?;
+
     let lock: Lock = read_toml(root, "Cargo.lock")?;
     let checksums: BTreeMap<(String, String), String> = lock
         .package
         .into_iter()
         .filter_map(|p| Some(((p.name, p.version), p.checksum?)))
         .collect();
+
     let mut components: Vec<Value> = metadata
         .packages
         .iter()
@@ -448,6 +451,7 @@ fn package_components(root: &Path) -> Result<Vec<Value>, TaskError> {
         })
         .map(|p| package_component(p, checksums.get(&(p.name.clone(), p.version.clone()))))
         .collect();
+
     components.sort_by_key(|c| c["purl"].as_str().map(str::to_owned));
 
     Ok(components)

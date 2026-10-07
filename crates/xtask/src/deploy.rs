@@ -26,6 +26,7 @@ fn check(command: &mut Command, what: &str) -> Result<String, TaskError> {
     let out = command
         .output()
         .map_err(|e| TaskError::Command(format!("cannot start {what}: {e}")))?;
+
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
@@ -100,6 +101,7 @@ fn check_units(units: &Path) -> Result<(), TaskError> {
         .filter_map(Result::ok)
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
+
     names.sort();
 
     for name in &names {
@@ -117,6 +119,7 @@ fn verify_unit(units: &Path, name: &str) -> Result<(), TaskError> {
         .args(["verify", "--man=no", &format!("./{name}")])
         .output()
         .map_err(|e| TaskError::Command(format!("cannot start systemd-analyze: {e}")))?;
+
     let stderr = String::from_utf8_lossy(&out.stderr);
     let problems = unit_problems(&stderr);
     if problems.is_empty() {
@@ -149,6 +152,7 @@ fn check_firewall(root: &Path) -> Result<(), TaskError> {
     let text = std::fs::read_to_string(&rules)
         .map_err(io(&rules))?
         .replace(host::NFTABLES_VARS, &vars.to_string_lossy());
+
     std::fs::write(&test, text).map_err(io(&test))?;
 
     // In a new user and network namespace, so no privilege is needed and
@@ -194,6 +198,7 @@ mod tests {
             .iter()
             .find(|c| c["dir"].as_str() == Some("cargo"))
             .unwrap();
+
         let playbook = read("deploy/ansible/site.yml");
         let url = cargo["url"].as_str().unwrap();
         let sha256 = cargo["sha256"].as_str().unwrap();
@@ -214,6 +219,7 @@ mod tests {
     fn the_orchestrator_may_finish_a_full_build_when_stopped() {
         let config =
             crateward_core::config::Config::from_toml(&read(repo::CONFIG_EXAMPLE)).unwrap();
+
         let unit = read("deploy/systemd/crateward-orchestrator.service");
         let minutes: u64 = unit
             .lines()

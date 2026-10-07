@@ -516,6 +516,7 @@ mod tests {
             ),
             ("src/lib.rs", b"pub fn f() {}\n"),
         ]);
+
         let report = analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap();
         let kinds = kinds(&report);
 
@@ -560,6 +561,7 @@ mod tests {
         let script = b"use std::process::Command;\n\
             static HELPER: &[u8] = include_bytes!(\"helper/linux\");\n\
             fn main() {\n    Command::new(\"/tmp/h\").spawn().ok();\n}\n";
+
         let crate_with = |data: &[u8]| {
             let tar = fixture(&[
                 (
@@ -595,6 +597,7 @@ mod tests {
                   panic!(\"install NASM from https://nasm.us please\");\n}\n",
             ),
         ]);
+
         let report = analyze(&tar, &Rules::builtin().unwrap(), &AnalyzeLimits::default()).unwrap();
 
         assert!(!kinds(&report).contains(&"downloader_pattern".to_owned()));

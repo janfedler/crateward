@@ -87,6 +87,7 @@ fn each_row<R: Read, const N: usize>(
     let mut csv = csv::ReaderBuilder::new()
         .has_headers(true)
         .from_reader(reader);
+
     let headers = csv.headers().map_err(csv_error(file))?.clone();
     let mut indexes = [0; N];
     for (index, name) in indexes.iter_mut().zip(columns) {
@@ -317,6 +318,7 @@ mod tests {
             .into_iter()
             .map(|s| (s.name, s.downloads, s.reverse_dependencies))
             .collect();
+
         stats.sort();
 
         stats

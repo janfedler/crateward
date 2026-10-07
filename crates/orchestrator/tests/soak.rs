@@ -119,9 +119,11 @@ async fn sequential_jobs_leave_nothing_behind() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(50);
+
     let work = root()
         .join("target/soak")
         .join(std::process::id().to_string());
+
     let _ = std::fs::remove_dir_all(&work);
     let slots_dir = work.join("slots");
     std::fs::create_dir_all(&slots_dir).unwrap();
@@ -162,12 +164,14 @@ async fn sequential_jobs_leave_nothing_behind() {
         .agent(Instant::now() + Duration::from_secs(20))
         .await
         .unwrap();
+
     agent.ping().await.unwrap();
     drop(agent);
     let snapshot = vm
         .snapshot(&base, &spec.rootfs, &work.join("snapshot"))
         .await
         .unwrap();
+
     vm.destroy().await.unwrap();
 
     let mut config_with_base_slot = config.clone();
@@ -239,9 +243,11 @@ async fn sequential_jobs_leave_nothing_behind() {
     let crashed_cgroup = cgroups.create_slot("2", config.limits).unwrap();
     let crashed =
         FirecrackerBackend::launch(&config, 2, Some(crashed_cgroup.path().to_path_buf()), None);
+
     let orphan = Vm::restore(&crashed, &backend_snapshot(&work), None)
         .await
         .unwrap();
+
     std::mem::forget(orphan);
     std::mem::forget(crashed_cgroup);
     let reconciled = backend.reconcile().await.unwrap();

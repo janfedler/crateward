@@ -94,6 +94,7 @@ impl CgroupTree {
             .find_map(|line| line.strip_prefix("0::"))
             .unwrap_or("/")
             .trim_start_matches('/');
+
         let mut root = Path::new(host::CGROUPS).join(relative);
 
         // A restarted orchestrator may already sit in its supervisor leaf.

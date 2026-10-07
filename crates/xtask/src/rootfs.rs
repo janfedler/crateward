@@ -89,6 +89,7 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
     let manifest_text = read(&root.join(repo::ROOTFS_PIN))?;
     let manifest: Manifest = toml::from_str(&manifest_text)
         .map_err(|e| TaskError::Check(format!("{}: {e}", repo::ROOTFS_PIN)))?;
+
     let hook_text = read(&root.join(repo::ROOTFS_HOOK))?;
     let epoch = manifest.image.source_date_epoch.to_string();
 
@@ -503,10 +504,12 @@ pub fn bump_snapshot(root: &Path) -> Result<(), TaskError> {
         .args(["--utc", "+%Y%m%dT000000Z"])
         .output()
         .map_err(|e| TaskError::Command(format!("date: {e}")))?;
+
     let today = String::from_utf8_lossy(&out.stdout).trim().to_owned();
 
     let (updated, old) = with_snapshot(&text, &today)
         .ok_or_else(|| TaskError::Check(format!("{}: no snapshot line", path.display())))?;
+
     std::fs::write(&path, updated).map_err(io(&path))?;
 
     eprintln!("xtask: Debian snapshot {old} -> {today}");
@@ -618,6 +621,7 @@ mod stage_tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
+
         left.sort();
 
         assert_eq!(

@@ -445,6 +445,7 @@ impl SandboxWorker {
         let spec = canary
             .payload(&self.sandbox.blobs)
             .map_err(Failure::infrastructure)?;
+
         let tokens = Honeytokens::generate(&mut rand::rng(), guest::BUILDER_UID);
         let plan = RunPlan::check(setup.check_timeout);
         let files = JobFiles::named(setup, canary.name);
@@ -467,6 +468,7 @@ impl SandboxWorker {
         else {
             return Ok(false);
         };
+
         self.store
             .complete(
                 job.id,
@@ -557,6 +559,7 @@ impl SandboxWorker {
             .sandbox
             .execute(job.id.0, spec, &tokens, files, &plan)
             .await?;
+
         report.missing_packages = missing;
 
         if !report.leaked.is_empty() {
@@ -585,6 +588,7 @@ impl SandboxWorker {
             .fetch_lockfile(job.id)
             .await?
             .ok_or_else(|| Failure::permanent("the job has no lockfile"))?;
+
         let (packages, missing) = self.stored_packages(job).await?;
         let spec = PayloadSpec {
             name,
@@ -611,6 +615,7 @@ impl SandboxWorker {
             .await?
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
+
         let mut packages = Vec::new();
         let mut missing = Vec::new();
 
@@ -749,6 +754,7 @@ impl Sandbox {
             .run_job(self.slot, input, plan.timeout + HOST_MARGIN)
             .await
             .map_err(Failure::infrastructure)?;
+
         let ended = Ended::try_from(&run.end)?;
         let (network, leaked) = analyze_network(&files.network, &tokens.tokens);
         let scratch = scan_scratch(&self.setup, files, &directories, tokens).await;
@@ -1366,6 +1372,7 @@ mod tests {
         .into_iter()
         .map(line)
         .collect();
+
         let path = network_log("summary", lines.join("\n").as_bytes());
         let (summary, leaked) = analyze_network(&path, &tokens());
         std::fs::remove_file(&path).unwrap();
@@ -1422,6 +1429,7 @@ mod tests {
             })
             .map(line)
             .collect();
+
         let path = network_log("bounded", lines.join("\n").as_bytes());
         let (summary, leaked) = analyze_network(&path, &tokens());
         std::fs::remove_file(&path).unwrap();
@@ -1487,6 +1495,7 @@ mod tests {
             inner: None,
             decrypted: None,
         });
+
         let mut log = vec![padding; 600];
         log.push(line(tcp(
             "1.2.3.4:80",
@@ -1528,6 +1537,7 @@ mod tests {
         .into_iter()
         .map(line)
         .collect();
+
         let path = network_log("cut", lines.join("\n").as_bytes());
         let (summary, _) = analyze_network(&path, &tokens());
         std::fs::remove_file(&path).unwrap();

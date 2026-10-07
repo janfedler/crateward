@@ -293,6 +293,7 @@ fn state_machine(command: &StateMachineCommand) {
                 let owner = state
                     .stage()
                     .map_or("none (terminal)", |stage| stage.name());
+
                 out!("{:<20} {owner}", state.name());
             }
         }

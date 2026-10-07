@@ -507,6 +507,7 @@ async fn stop_slot(
     }
 
     let decoy = vm.jail_root().map(crate::jail::decoy::inspect);
+
     if let Err(error) = vm.remove().await {
         cleanup.push(error.into());
     }

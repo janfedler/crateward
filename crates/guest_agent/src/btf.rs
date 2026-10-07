@@ -313,6 +313,7 @@ impl Btf {
             .get(name)
             .and_then(|&id| self.get(id))
             .ok_or_else(|| BtfError::NoStruct(name.into()))?;
+
         let bits = self
             .find(ty, member, 0)
             .ok_or_else(|| BtfError::NoMember(name.into(), member.into()))?;

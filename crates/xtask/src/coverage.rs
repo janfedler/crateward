@@ -116,6 +116,7 @@ fn per_crate(export: &Export) -> BTreeMap<String, Lines> {
         let Some((_, rest)) = file.filename.split_once("/crates/") else {
             continue;
         };
+
         let Some((name, _)) = rest.split_once('/') else {
             continue;
         };
@@ -134,6 +135,7 @@ fn table(crates: &BTreeMap<String, Lines>) -> String {
         "{:<20} {:>8} {:>8} {:>7}\n",
         "crate", "lines", "covered", "percent"
     );
+
     let mut total = Lines::default();
 
     for (name, lines) in crates {

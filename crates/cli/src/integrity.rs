@@ -36,6 +36,7 @@ fn record_manifest(config: &Config, manifest: &Path) -> Result<(), CliError> {
     let text = integrity::record(&files)?;
     let temporary = manifest.with_extension("tmp");
     std::fs::write(&temporary, text).map_err(io(&temporary))?;
+
     // The supervisor checks the manifest under its own user, whatever umask
     // the recording ran with. It holds hashes only.
     std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o644))

@@ -399,6 +399,7 @@ pub enum ProtocolError {
 pub fn encode<T: Serialize>(message: &T) -> Result<Vec<u8>, ProtocolError> {
     let payload =
         postcard::to_allocvec(message).map_err(|e| ProtocolError::Malformed(e.to_string()))?;
+
     let len = u32::try_from(payload.len()).unwrap_or(u32::MAX);
     if len > MAX_FRAME_LEN {
         return Err(ProtocolError::FrameTooLarge {
@@ -460,6 +461,7 @@ impl<T: DeserializeOwned> Decoder<T> {
         self.bytes = self
             .bytes
             .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+
         if self.bytes > self.limits.max_total_bytes {
             return Err(ProtocolError::BudgetExceeded("bytes"));
         }

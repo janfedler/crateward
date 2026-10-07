@@ -49,6 +49,7 @@ fn scratch(name: &str) -> PathBuf {
     let dir = root()
         .join("target/vm-tests")
         .join(format!("{name}-{}", std::process::id()));
+
     let _ = std::fs::remove_dir_all(&dir);
 
     dir
@@ -108,6 +109,7 @@ async fn boot_run_shutdown(jailed: bool) {
         .agent(Instant::now() + Duration::from_secs(20))
         .await
         .unwrap();
+
     let boot_time = started.elapsed();
 
     if jailed {
@@ -148,6 +150,7 @@ async fn boot_run_shutdown(jailed: bool) {
         ]))
         .await
         .unwrap();
+
     let entries = String::from_utf8_lossy(&outcome.stdout);
     let bound = entries
         .lines()
@@ -191,6 +194,7 @@ async fn snapshot_and_restore_twice(jailed: bool) {
         .agent(Instant::now() + Duration::from_secs(20))
         .await
         .unwrap();
+
     agent.ping().await.unwrap();
     drop(agent);
     let snapshot = vm.snapshot(&base, &spec.rootfs, &snap_dir).await.unwrap();
@@ -207,6 +211,7 @@ async fn snapshot_and_restore_twice(jailed: bool) {
             .agent(Instant::now() + Duration::from_secs(10))
             .await
             .unwrap();
+
         let restore_time = started.elapsed();
 
         // A file written by one restored VM must not exist in the next one.
@@ -291,10 +296,12 @@ async fn guest_cpu_mitigations_are_not_weaker_than_the_host() {
         .agent(Instant::now() + Duration::from_secs(20))
         .await
         .unwrap();
+
     let outcome = agent
         .run(job(&["/bin/sh", "-c", &format!("cd {dir} && grep . *")]))
         .await
         .unwrap();
+
     drop(agent);
     vm.destroy().await.unwrap();
     let guest: std::collections::BTreeMap<String, String> =
@@ -314,10 +321,12 @@ async fn guest_cpu_mitigations_are_not_weaker_than_the_host() {
             .unwrap()
             .trim()
             .to_owned();
+
         let in_guest = guest
             .get(&name)
             .cloned()
             .unwrap_or_else(|| "missing".into());
+
         eprintln!("{name:28} host: {host:60} guest: {in_guest}");
 
         if !host.starts_with("Vulnerable") && in_guest.starts_with("Vulnerable") {

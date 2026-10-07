@@ -335,6 +335,7 @@ impl Selection {
         } else {
             String::new()
         };
+
         let per = if per == DEFAULT_PER_PAGE {
             String::new()
         } else {
@@ -366,6 +367,7 @@ impl Paging {
         let per = per
             .filter(|p| PER_PAGE.contains(p))
             .unwrap_or(DEFAULT_PER_PAGE);
+
         let pages = ((total + per - 1) / per).max(1);
         let page = page.unwrap_or(1).clamp(1, pages);
 
@@ -388,11 +390,13 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
         .filter(|(s, _)| selection.state.is_empty() || s == selection.state)
         .map(|(_, n)| n)
         .sum();
+
     let paging = Paging::new(total, q.page, q.per);
     let rows = state
         .reader
         .jobs(&filter, paging.offset, paging.per)
         .await?;
+
     let backlog = state.reader.rescore_backlog().await?;
 
     let at = |page: i64| selection.href(selection.state, page, paging.per);
@@ -471,6 +475,7 @@ fn page_numbers(page: i64, pages: i64) -> Vec<Option<i64>> {
             2 => out.push(Some(p - 1)),
             _ => out.push(None),
         }
+
         out.push(Some(p));
         prev = p;
     }
@@ -486,6 +491,7 @@ fn pager(page: i64, pages: i64, at: &dyn Fn(i64) -> String) -> Vec<PageLink> {
         href: if enabled { at(to) } else { String::new() },
         class: if enabled { "" } else { "disabled" },
     };
+
     let numbers = page_numbers(page, pages).into_iter().map(|p| match p {
         Some(p) if p == page => PageLink {
             label: p.to_string(),
@@ -675,6 +681,7 @@ fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, Str
     let secs = now
         .duration_since(e.at)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+
     let kind = e.event.get("kind").and_then(serde_json::Value::as_str);
 
     (
@@ -747,6 +754,7 @@ async fn job(
         .as_ref()
         .map(|r| findings(r, &job.name, &job.version))
         .unwrap_or_default();
+
     let disclosure = store.disclosure(job.id).await?;
     let events = store.events(job.id).await?;
     let runs = store.job_runs(job.id).await?;
@@ -791,6 +799,7 @@ async fn run_report(
     else {
         return Ok((StatusCode::NOT_FOUND, "no such run").into_response());
     };
+
     let body = serde_json::to_vec_pretty(&report).unwrap_or_default();
 
     // The kind is one of the orchestrator's own names, but keep the header

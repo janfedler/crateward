@@ -149,6 +149,7 @@ impl Child {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(ChildError::io(name, "starting"))?;
+
         let stderr = process
             .stderr
             .take()

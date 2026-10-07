@@ -114,6 +114,7 @@ pub fn plan(
             // real dependency elsewhere, and the other way round.
             && !built.contains(&own)
             && deps.iter().all(|(k, _)| !stubbed.contains(k));
+
         let (Ok(name), Ok(version)) = (CrateName::parse(&s.name), s.version.parse()) else {
             continue;
         };
@@ -296,6 +297,7 @@ pub async fn plan_from_store(
             .into_iter()
             .map(|l| ((l.name, l.version), l.checksum))
             .collect();
+
         checksums.extend(locked.iter().map(|(_, c)| c.clone()));
         samples.push(Sample {
             name,
@@ -310,6 +312,7 @@ pub async fn plan_from_store(
         .filter_map(|c| c.parse::<Sha256Digest>().ok())
         .map(|d| d.as_bytes().to_vec())
         .collect();
+
     let age = config.min_age_hours.saturating_mul(3600) as f64;
     let eligible: HashSet<String> = store
         .warm_eligible(&digests, age)
@@ -317,6 +320,7 @@ pub async fn plan_from_store(
         .into_iter()
         .map(|(sha, _)| hex(&sha))
         .collect();
+
     let blobs: HashMap<String, String> = store
         .crate_blobs(&digests)
         .await?
@@ -535,6 +539,7 @@ async fn pack(
         .iter()
         .filter_map(|dir| dir.rsplit_once('-').map(|(name, _)| name.to_owned()))
         .collect();
+
     excluded.push("crateward-probe".into());
     tokio::task::spawn_blocking(move || {
         crate::scratch::export_to_erofs(&exe, &disk, &out, &excluded)
@@ -599,6 +604,7 @@ async fn promotion_check(sandbox: &Sandbox, plan: &Plan, image: &Path) -> Result
         .scratch
         .as_ref()
         .map_or(usize::MAX, |s| s.units.len());
+
     tracing::info!(
         outcome = ?report.outcome,
         run_ms = report.run_ms,
@@ -702,6 +708,7 @@ mod tests {
             "../../../config/crateward.example.toml"
         ))
         .unwrap();
+
         let warm = config.sandbox.warm.take().unwrap();
 
         // Three slots of 1 vCPU, 4 GiB and a 4 GiB scratch disk: 24 GiB,
@@ -759,6 +766,7 @@ mod tests {
 
         let blobs: HashMap<String, String> =
             [("sum-serde-1.0.0".to_owned(), "b".to_owned())].into();
+
         let all: HashSet<String> = blobs.keys().cloned().collect();
 
         assert!(plan(&samples, &all, &blobs, 2, 10).probes.is_empty());

@@ -145,6 +145,7 @@ impl BlobStore {
             .take(max_bytes.saturating_add(1))
             .read_to_end(&mut tar)
             .map_err(|_| BlobError::Corrupt(digest.to_owned()))?;
+
         if u64::try_from(tar.len()).unwrap_or(u64::MAX) > max_bytes
             || blake3::hash(&tar).to_hex().as_str() != digest
         {
@@ -169,6 +170,7 @@ mod tests {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/blob-tests")
             .join(format!("{name}-{}", std::process::id()));
+
         let _ = std::fs::remove_dir_all(&dir);
 
         BlobStore::open(&dir).unwrap()

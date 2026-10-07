@@ -143,6 +143,7 @@ pub fn render(sets: &[(&'static str, BTreeSet<IpAddr>)]) -> String {
                 .iter()
                 .map(|a| format!("{a} timeout {ELEMENT_TIMEOUT}"))
                 .collect();
+
             let set = format!("inet crateward {role}_{family}");
             let _ = writeln!(out, "destroy element {set} {{ {} }}", plain.join(", "));
             let _ = writeln!(out, "add element {set} {{ {} }}", timed.join(", "));

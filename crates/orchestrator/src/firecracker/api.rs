@@ -254,8 +254,10 @@ impl Api {
                     path: self.socket.clone(),
                     source,
                 })?;
+
         let (mut sender, connection) =
             hyper::client::conn::http1::handshake(TokioIo::new(stream)).await?;
+
         let driver = tokio::spawn(connection);
         let request = Request::builder()
             .method(method.clone())
@@ -265,6 +267,7 @@ impl Api {
             .header(CONTENT_TYPE, "application/json")
             .body(Full::new(Bytes::from(json)))
             .map_err(|e| ApiError::Transport(e.to_string()))?;
+
         let response = sender.send_request(request).await;
         let result = match response {
             Ok(response) => {
@@ -280,6 +283,7 @@ impl Api {
                     let message = serde_json::from_slice::<Fault>(&body)
                         .map(|f| f.fault_message)
                         .unwrap_or_else(|_| String::from_utf8_lossy(&body).into_owned());
+
                     Err(ApiError::Rejected {
                         method,
                         path: path.to_owned(),

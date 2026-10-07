@@ -653,6 +653,7 @@ mod tests {
                 .iter()
                 .map(|(name, data)| (name.as_str(), R, data.as_slice(), "", 0o644))
                 .collect();
+
             archive(&entries)
         };
 

@@ -267,9 +267,11 @@ fn state_machine_states_lists_the_stage_that_owns_each_state() {
             let owner = state
                 .stage()
                 .map_or("none (terminal)", |stage| stage.name());
+
             format!("{:<20} {owner}\n", state.name())
         })
         .collect();
+
     ran.expect(0, &expected, "");
 
     assert!(ran.out.starts_with("Discovered           fetch\n"));
@@ -318,6 +320,7 @@ fn the_manifest_is_readable_by_other_users_under_a_strict_umask() {
             "record",
         ],
     );
+
     let mode = std::fs::metadata(site.manifest())
         .unwrap()
         .permissions()
@@ -343,6 +346,7 @@ fn the_manifest_is_recorded_and_checked() {
         .chain([site.path("bin/crateward")])
         .map(|path| path.display().to_string())
         .collect();
+
     expected.sort();
     let recorded: Vec<&str> = text
         .lines()
@@ -431,6 +435,7 @@ impl Db {
             .split_whitespace()
             .map(|p| format!("{p}&"))
             .collect();
+
         let url = format!(
             "postgresql:///?{pairs}options=-c%20search_path%3D{}",
             db.schema()

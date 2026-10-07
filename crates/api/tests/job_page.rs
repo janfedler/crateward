@@ -486,6 +486,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
 
     let compromise =
         "T1195.001 Supply Chain Compromise: Compromise Software Dependencies and Development Tools";
+
     let first = attack.find(compromise).unwrap();
 
     assert!(first < attack.find("T1041 Exfiltration Over C2 Channel").unwrap());
@@ -628,6 +629,7 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
     let reported = db
         .store
         .record_report(job, kind, "the maintainer", None, None);
+
     reported.await.unwrap().unwrap();
     let day = db
         .store
@@ -712,12 +714,15 @@ async fn the_job_list_counts_states_and_pages() {
             priority: 0,
             index_entry: json!({}),
         };
+
         db.store.enqueue(&new).await.unwrap().unwrap();
     }
+
     let fail = format!(
         "UPDATE {}.jobs SET state = 'Failed' WHERE id = 7",
         db.db.schema()
     );
+
     db.db.admin().execute(&fail, &[]).await.unwrap();
 
     let link = |id: i64| format!("<a href=\"/jobs/{id}\">");
@@ -828,11 +833,13 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
     let recorded = db
         .store
         .record_static_report(&cksum, 4, true, None, &report);
+
     recorded.await.unwrap();
 
     let html = db.page(job).await;
     let evidence = &html
         [html.find("<h2>Evidence</h2>").unwrap()..html.find("<h2>Static findings</h2>").unwrap()];
+
     let viewer = "https://crates.io/crates/evil/0.1.0/code/build.rs";
 
     assert!(evidence.contains(&format!("<a href=\"{viewer}#L3\"")));

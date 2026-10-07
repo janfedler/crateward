@@ -120,6 +120,7 @@ fn serve_slot(args: &[String]) -> Result<(), Box<dyn Error>> {
         .get(2)
         .and_then(|a| a.parse().ok())
         .ok_or("usage: slot <uid>")?;
+
     let capture = capture::open().map_err(|e| format!("opening the packet socket: {e}"))?;
 
     // Still single threaded, so the switch covers every thread started

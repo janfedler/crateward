@@ -297,6 +297,7 @@ impl Store {
                 &[&job.0],
             )
             .await?;
+
         row.map(|r| {
             let kind: String = r.try_get(0)?;
             Ok(Disclosure {
@@ -355,6 +356,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         rows.iter()
             .map(|r| {
                 let kind: String = r.try_get(2)?;

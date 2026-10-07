@@ -84,6 +84,7 @@ async fn serve(config: &Config) -> Result<(), ComponentError> {
     let mut store = Store::connect(config.database.url.expose_secret())
         .await
         .map_err(fatal)?;
+
     store.migrate().await.map_err(fatal)?;
     let policies = Policies::from_config(&config.stages).map_err(fatal)?;
 
@@ -164,6 +165,7 @@ async fn boot(config: &Config) -> Result<Booted, ComponentError> {
     let snapshot = FirecrackerBackend::create_base_snapshot(&fc, &boot, &work.join("snapshot"))
         .await
         .map_err(fatal)?;
+
     tracing::info!(ms = started.elapsed().as_millis(), "base snapshot ready");
     let backend = FirecrackerBackend::new(fc.clone(), cgroups.clone(), snapshot);
 

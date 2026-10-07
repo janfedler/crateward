@@ -116,6 +116,7 @@ fn first_line(data: &[u8], rule: &yara_x::Rule<'_, '_>) -> Option<u32> {
         .flat_map(|p| p.matches())
         .map(|m| m.range().start)
         .min()?;
+
     let breaks = data.get(..offset)?.iter().filter(|&&b| b == b'\n').count();
 
     u32::try_from(breaks + 1).ok()

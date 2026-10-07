@@ -36,6 +36,7 @@ pub fn is_static(bytes: &[u8]) -> Result<bool, &'static str> {
             .checked_mul(usize::from(phentsize))
             .and_then(|offset| offset.checked_add(phoff))
             .ok_or(truncated)?;
+
         let kind = u32_le(bytes, entry).ok_or("truncated program header table")?;
         if kind == PT_INTERP {
             return Ok(false);

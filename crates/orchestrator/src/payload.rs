@@ -284,6 +284,7 @@ impl<W: Write> TarWriter<W> {
                 package: dir.clone(),
                 source,
             })?;
+
         let mut archive = tar::Archive::new(tar.as_slice());
         for entry in archive.entries().map_err(io(format!("reading {dir}")))? {
             let entry = entry.map_err(io(format!("reading {dir}")))?;
@@ -313,6 +314,7 @@ impl<W: Write> TarWriter<W> {
             .map_err(io(format!("reading {dir}")))?
             .to_string_lossy()
             .into_owned();
+
         let Some(rest) = path.strip_prefix(dir).and_then(|r| r.strip_prefix('/')) else {
             return Err(PayloadError::Mismatch(dir.to_owned()));
         };
@@ -327,6 +329,7 @@ impl<W: Write> TarWriter<W> {
         entry
             .read_to_end(&mut data)
             .map_err(io(format!("reading {path}")))?;
+
         if stub {
             return self.stub_files(dir, &path, &data);
         }
@@ -578,6 +581,7 @@ mod tests {
                 ("dep-0.3.0/README.md", b"read me", 0o644),
             ]))
             .unwrap();
+
         spec.packages.push(Package {
             name: "dep".into(),
             version: "0.3.0".into(),
@@ -613,6 +617,7 @@ mod tests {
 
         let checksum =
             |digit: &str| format!("{{\"files\":{{}},\"package\":\"{}\"}}", digit.repeat(32));
+
         let expected = [
             format!("probe/Cargo.toml 644 {}", probe("demo", "1.0.0")),
             "probe/Cargo.lock 644 # lock\n".to_owned(),
@@ -691,6 +696,7 @@ cc = "1"
 default = ["std"]
 std = []
 "#;
+
         let stub: toml::Table = stub_manifest(original).unwrap().parse().unwrap();
         let package = stub["package"].as_table().unwrap();
 

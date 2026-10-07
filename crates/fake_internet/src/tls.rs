@@ -143,6 +143,7 @@ fn pem_der(pem: &str) -> Option<CertificateDer<'static>> {
         .skip(1)
         .take_while(|l| !l.starts_with("-----END"))
         .collect();
+
     let der = base64_decode(&body).filter(|der| !der.is_empty())?;
 
     Some(CertificateDer::from(der))
@@ -165,6 +166,7 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
         .strip_suffix(b"==")
         .or_else(|| clean.strip_suffix(b"="))
         .unwrap_or(&clean);
+
     let mut out = Vec::with_capacity(trimmed.len() * 3 / 4);
     let mut acc = 0_u32;
     let mut bits = 0;
@@ -210,6 +212,7 @@ pub fn split_pem(text: &str) -> Option<(String, String)> {
             .get(end..)?
             .find('\n')
             .map_or(rest.len(), |n| end + n + 1);
+
         rest.get(..close).map(str::to_owned)
     };
 

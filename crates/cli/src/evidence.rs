@@ -80,6 +80,7 @@ async fn documents(
         .into_iter()
         .map(event_json)
         .collect();
+
     let verdict = store.verdict(job).await?;
     let runs = store.job_runs(job).await?;
 
@@ -179,6 +180,7 @@ fn copy_original(data_dir: &Path, stored: &StoredJob, dir: &Path) -> Option<Stri
     let original = data_dir
         .join(host::ORIGINALS)
         .join(format!("{}.crate", stored.cksum));
+
     let name = format!("{}-{}.crate", stored.name, stored.version);
 
     match std::fs::copy(&original, dir.join(&name)) {

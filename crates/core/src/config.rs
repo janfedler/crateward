@@ -1309,6 +1309,7 @@ mod tests {
         );
         let issues =
             issues_after(|c| c.supervisor.decoys = vec!["a".into(), "/b".into(), "c".into()]);
+
         let one = ("supervisor.decoys".to_owned(), ABSOLUTE.to_owned());
 
         assert_eq!(issues, [one.clone(), one]);
@@ -1328,6 +1329,7 @@ mod tests {
         rule(|c| c.ntfy = ntfy(http(), &topic), "ntfy.server_url", HTTPS);
         let message =
             "must be 32 to 64 characters of [A-Za-z0-9_-]; the topic name is the password";
+
         let secure = |c: &mut Config, topic: &str| {
             c.ntfy = ntfy(Url::parse("https://ntfy.sh").unwrap(), topic);
         };

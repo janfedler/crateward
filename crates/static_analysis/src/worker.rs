@@ -99,6 +99,7 @@ impl Analyzer {
         else {
             return Ok(false);
         };
+
         let beat = heartbeat(
             Arc::clone(&self.heartbeats),
             job.id,
@@ -156,6 +157,7 @@ impl Analyzer {
             .filter(|sha| !self.unrefreshable.contains(sha))
             .take(10)
             .collect();
+
         let reports = match self.ensure_reports(&outdated).await {
             Ok(reports) => reports,
             Err(failure) => {
@@ -206,6 +208,7 @@ impl Analyzer {
         let facts = self
             .dependency_facts(&dependencies, &reports, &history.seen)
             .await?;
+
         let version_diff =
             diff_to_previous(report, &reports, history.previous.as_ref(), &dependencies);
 
@@ -268,6 +271,7 @@ impl Analyzer {
             .await?
             .into_iter()
             .collect();
+
         let mut facts: Vec<Dependency> = dependencies
             .iter()
             .map(|(p, sha)| Dependency {
@@ -375,6 +379,7 @@ impl Analyzer {
             .await
             .map_err(Failure::infrastructure)?
             .map_err(Failure::infrastructure)?;
+
         let mut analyzed = Vec::new();
 
         for (sha, outcome) in shas.into_iter().zip(outcomes) {
@@ -453,6 +458,7 @@ fn earlier_versions(
             .map(|p| p.name)
             .filter(|n| n != &job.name)
             .collect();
+
         history.seen.extend(names.iter().cloned());
 
         if history.previous.as_ref().is_none_or(|p| other > p.version) {

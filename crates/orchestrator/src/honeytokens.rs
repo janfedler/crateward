@@ -224,6 +224,7 @@ mod tests {
                 (f.path.path.as_str(), f.path.owner, f.path.mode, text)
             })
             .collect();
+
         let ssh = format!(
             "-----BEGIN OPENSSH PRIVATE KEY-----\n\
              b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n\

@@ -126,6 +126,7 @@ impl Fetcher {
         else {
             return Ok(false);
         };
+
         let beat = heartbeat(
             Arc::clone(&self.heartbeats),
             job.id,
@@ -183,6 +184,7 @@ impl Fetcher {
         )
         .await
         .map_err(Failure::infrastructure)?;
+
         let (lockfile, error, packages) = match &resolution {
             Resolution::Locked(lock) => match locked_packages(lock) {
                 Ok(packages) => (Some(lock.as_str()), None, packages),
@@ -345,6 +347,7 @@ impl Fetcher {
         let exe = self.setup.exe.clone();
         let blobs = self.setup.blobs.clone();
         let (name, version) = (name.to_string(), version.to_string());
+
         tokio::task::spawn_blocking(move || {
             let report = validate_in_sandbox(&exe, &bytes, &name, &version)?;
             let blob = if report.is_storable() {

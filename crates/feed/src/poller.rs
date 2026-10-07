@@ -173,6 +173,7 @@ impl Feed {
             Fetched::Body { body, .. } => {
                 let json: serde_json::Value = serde_json::from_slice(&body)
                     .map_err(|e| FeedError::IndexConfig(e.to_string()))?;
+
                 json.get("dl")
                     .and_then(|v| v.as_str())
                     .map(str::to_owned)
@@ -356,6 +357,7 @@ impl Feed {
             .reverse_dependencies(&entry.name)
             .await?
             .is_some_and(|n| n >= self.popular_threshold);
+
         let job = NewJob {
             priority: priority(&entry, new_crate, popular),
             name: entry.name.clone(),

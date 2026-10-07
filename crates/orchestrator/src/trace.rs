@@ -287,6 +287,7 @@ impl TraceBuilder {
             .parents
             .remove(&pid)
             .map_or((None, ms), |(p, at)| (Some(p), at));
+
         self.index.insert(pid, self.summary.processes.len());
         self.summary.processes.push(Process {
             pid,

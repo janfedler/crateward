@@ -114,6 +114,7 @@ fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
                 .get(4..8)
                 .and_then(|b| b.try_into().ok())
                 .unwrap_or_default();
+
             SocketAddress::Ip((std::net::Ipv4Addr::from(ip), port()).into())
         }
         AF_INET6 if len >= 24 => {
@@ -121,6 +122,7 @@ fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
                 .get(8..24)
                 .and_then(|b| b.try_into().ok())
                 .unwrap_or_default();
+
             SocketAddress::Ip((std::net::Ipv6Addr::from(ip), port()).into())
         }
         AF_UNIX => {
@@ -336,10 +338,12 @@ fn load(object: &[u8], builder_uid: u32) -> Result<Ebpf, TraceError> {
         .as_raw_nonzero()
         .get()
         .cast_unsigned();
+
     let mut loader = EbpfLoader::new();
     loader
         .override_global("BUILDER_UID", &builder_uid, true)
         .override_global("AGENT_TGID", &agent, true);
+
     for (global, value) in &values {
         loader.override_global(global, value, true);
     }

@@ -44,6 +44,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let mut store = Store::connect(config.database.url.expose_secret())
             .await
             .map_err(fatal)?;
+
         store.migrate().await.map_err(fatal)?;
         let policies = Policies::from_config(&config.stages).map_err(fatal)?;
         let mut analyzer = Analyzer::new(

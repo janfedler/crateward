@@ -104,6 +104,7 @@ impl Store {
                 &[&job.0],
             )
             .await?;
+
         row.map(|r| Ok((r.try_get(0)?, r.try_get(1)?, r.try_get(2)?)))
             .transpose()
     }
@@ -121,6 +122,7 @@ impl Store {
                 &[&job.0],
             )
             .await?;
+
         rows.iter()
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect()
@@ -162,9 +164,11 @@ impl Store {
                 &[&job.0],
             )
             .await?;
+
         let Some(row) = row else { return Ok(None) };
         let verdict = serde_json::from_value(row.try_get(0)?)
             .map_err(|e| corrupt(job.0, format!("verdict: {e}")))?;
+
         let review: String = row.try_get(1)?;
         let review = Review::parse(&review).ok_or_else(|| corrupt(job.0, "review"))?;
 
@@ -243,6 +247,7 @@ impl Store {
                 &[&canonical_name],
             )
             .await?;
+
         let mut best: Option<(semver::Version, Value)> = None;
 
         for row in rows {

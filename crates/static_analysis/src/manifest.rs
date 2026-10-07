@@ -56,6 +56,7 @@ pub fn parse(manifest: &str, files: &BTreeSet<String>) -> ManifestFacts {
     let proc_macro = ["proc-macro", "proc_macro"]
         .iter()
         .any(|k| lib.and_then(|l| l.get(*k)).and_then(toml::Value::as_bool) == Some(true));
+
     let mut target_dependencies = BTreeMap::new();
 
     if let Some(targets) = value.get("target").and_then(toml::Value::as_table) {

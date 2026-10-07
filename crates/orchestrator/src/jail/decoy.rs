@@ -27,6 +27,7 @@ fn plant_at(path: &Path) -> std::io::Result<()> {
         .create_new(true)
         .mode(0o444)
         .open(path)?;
+
     file.write_all(b"[default]\naws_access_key_id = AKIACRATEWARDDECOY00\n")?;
 
     file.set_times(

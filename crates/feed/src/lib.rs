@@ -80,6 +80,7 @@ fn spawn_dump_refresh(config: &Config) -> Result<(), ComponentError> {
         allow_plain_http: false,
     })
     .map_err(fatal)?;
+
     let url = c.db_dump_url.to_string();
     let every = Duration::from_secs(c.db_dump_refresh_hours * 3600);
     let database = config.database.url.expose_secret().to_owned();

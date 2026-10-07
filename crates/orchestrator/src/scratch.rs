@@ -223,6 +223,7 @@ fn unit_name(relative: &str) -> Option<&str> {
                 .strip_prefix(on_scratch(dir))?
                 .strip_prefix("/debug/deps/")
         })?;
+
     let unit = !name.contains('/') && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e));
 
     unit.then_some(name)
@@ -255,6 +256,7 @@ impl Scanner<'_> {
             .map(String::len)
             .max()
             .unwrap_or(0);
+
         let mut window: Vec<u8> = Vec::new();
         let mut buffer = vec![0_u8; 64 * 1024];
         let mut read_total = 0_u64;
@@ -368,6 +370,7 @@ impl Scanner<'_> {
             let created = self.spec.created.contains(&item.path);
             let stray =
                 !(in_build_area(&relative) || is_cargo_state(&relative) || planted || created);
+
             let r = &mut self.report;
             if stray {
                 push(&mut r.outside_build, &mut r.omitted, item.clone());
@@ -486,6 +489,7 @@ pub fn scan_in_sandbox(
     let input = File::open(image).map_err(ChildError::io(SCAN_NAME, "opening the image"))?;
     let spec =
         serde_json::to_string(spec).map_err(ChildError::io(SCAN_NAME, "encoding the spec"))?;
+
     let mut command = child::command(exe);
     command
         .arg(SCAN)
@@ -758,6 +762,7 @@ fn enter_sandbox() -> Result<File, Box<dyn Error>> {
         .try_clone_to_owned()
         .map(File::from)
         .map_err(|e| format!("stdin: {e}"))?;
+
     sandbox::enter(LIMITS, &FsAccess::default())?;
 
     Ok(image)
@@ -789,6 +794,7 @@ fn serve_scan(spec: Option<&String>) -> Result<(), Box<dyn Error>> {
     let spec: ScanSpec = spec
         .and_then(|json| serde_json::from_str(json).ok())
         .ok_or("usage: sandbox-scratch <spec json> < image")?;
+
     let report = match load(enter_sandbox()?) {
         Ok(fs) => scan(&fs, &spec),
         Err(error) => ScratchReport {
@@ -851,6 +857,7 @@ mod tests {
             .stderr(Stdio::null())
             .status()
             .ok()?;
+
         let data = status.success().then(|| std::fs::read(&out).ok()).flatten();
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -1079,6 +1086,7 @@ mod tests {
             .links_outside
             .iter()
             .find(|e| e.path.ends_with("/abs"));
+
         let link = link.unwrap();
 
         assert_eq!(

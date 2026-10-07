@@ -238,6 +238,7 @@ fn command(spec: &JobSpec, program: &str, args: &[String], options: RunOptions) 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
+
     if let Some((uid, gid)) = options.identity {
         command.uid(uid).gid(gid);
     }

@@ -183,6 +183,7 @@ async fn resolve_in(
         .kill_on_drop(true)
         .output()
         .await;
+
     server.abort();
 
     let output = output.map_err(ChildError::io(CHILD, "running"))?;
@@ -227,6 +228,7 @@ version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 "#;
+
         let packages = locked_packages(lock).unwrap();
 
         assert_eq!(packages.len(), 1);

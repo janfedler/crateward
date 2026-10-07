@@ -83,8 +83,10 @@ pub fn stray_processes(
     let slot_uid = |p: &HostProcess| p.uids.iter().copied().find(|u| slot_uids.contains(u));
     let by_pid: std::collections::HashMap<i32, &HostProcess> =
         processes.iter().map(|p| (p.pid, p)).collect();
+
     let mut firecrackers: std::collections::HashMap<u32, Vec<i32>> =
         std::collections::HashMap::new();
+
     let mut sinks: std::collections::HashMap<u32, Vec<i32>> = std::collections::HashMap::new();
     let mut stray = Vec::new();
 
@@ -151,6 +153,7 @@ pub fn parse_status(pid: i32, text: &str) -> Option<HostProcess> {
                     .split_whitespace()
                     .filter_map(|u| u.parse().ok())
                     .collect();
+
                 uids = <[u32; 4]>::try_from(parsed).ok();
             }
             _ => {}
@@ -210,6 +213,7 @@ mod tests {
     fn status_files_parse() {
         let text = "Name:\tfake-internet\nUmask:\t0022\nState:\tS (sleeping)\nPPid:\t463533\n\
                     Uid:\t160012\t160012\t160012\t160012\nGid:\t1\t1\t1\t1\n";
+
         assert_eq!(
             parse_status(7, text),
             Some(process(7, 463_533, 160_012, "fake-internet"))

@@ -244,6 +244,7 @@ fn entropy(text: &str) -> f64 {
             *c += 1;
         }
     }
+
     #[allow(clippy::cast_precision_loss)]
     let len = text.len() as f64;
     counts
@@ -282,6 +283,7 @@ impl Scanner<'_> {
         let pushed = cfg_of(attrs)
             .inspect(|c| self.cfg.push(c.clone()))
             .is_some();
+
         f(self);
 
         if pushed {
@@ -295,9 +297,11 @@ impl Scanner<'_> {
         let syn::Expr::Call(call) = expr else {
             return None;
         };
+
         let syn::Expr::Path(func) = &*call.func else {
             return None;
         };
+
         let full = self.resolve(&func.path);
 
         (full.ends_with("env::vars") || full.ends_with("env::vars_os"))
@@ -324,6 +328,7 @@ impl Scanner<'_> {
         } else {
             first.clone()
         };
+
         std::iter::once(head)
             .chain(segments.into_iter().skip(1))
             .collect::<Vec<_>>()
@@ -379,6 +384,7 @@ impl Scanner<'_> {
             .last()
             .map(|s| s.ident.to_string())
             .unwrap_or_default();
+
         let span = path.span();
 
         // A pattern matches at the start or after a `::`, so a crate
@@ -777,6 +783,7 @@ fn main() {
     println!("{}", "https://discord.com/api/webhooks/1/abc");
 }
 "#;
+
         let scan = scan_file("build.rs", source, CodeContext::BuildScript);
         let k = kinds(&scan);
 
@@ -837,6 +844,7 @@ fn main() {
     let pairs = env::vars().filter(|(k, _)| k.len() > 3).map(|(_, v)| v);
 }
 "#;
+
         let scan = scan_file("build.rs", source, CodeContext::BuildScript);
         let found: Vec<_> = scan
             .findings
@@ -880,6 +888,7 @@ fn main() {
              static B: &[u8] = include_bytes!(\"payload.bin\");\n",
             numbers.join(",")
         );
+
         let scan = scan_file("src/lib.rs", &source, CodeContext::Library);
         let k = kinds(&scan);
 

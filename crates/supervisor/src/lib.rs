@@ -80,6 +80,7 @@ impl Supervisor<'_> {
             .triage
             .dynamic_deadline_hours
             .saturating_mul(3600);
+
         let expired = self
             .store
             .expire_waiting(deadline, &self.policies, WORKER)
@@ -275,6 +276,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         let mut store = Store::connect(config.database.url.expose_secret())
             .await
             .map_err(fatal)?;
+
         store.migrate().await.map_err(fatal)?;
         let client = reqwest::Client::builder()
             .user_agent(notify::USER_AGENT)
@@ -282,6 +284,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             .https_only(true)
             .build()
             .map_err(fatal)?;
+
         let mut supervisor = Supervisor {
             config,
             store,

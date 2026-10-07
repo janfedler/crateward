@@ -467,6 +467,7 @@ impl Store {
             )
             .await?
             .ok_or(StoreError::LeaseLost(id.0))?;
+
         let before = decode_job(id.0, row.try_get("job")?)?;
         let transition = before.apply(event, &policies.limits)?;
         let delay = policies.delay(&transition.effect).unwrap_or_default();
@@ -532,6 +533,7 @@ impl Store {
                 &[],
             )
             .await?;
+
         let mut reaped = 0;
 
         for row in expired {
@@ -582,6 +584,7 @@ impl Store {
                 &[&id.0],
             )
             .await?;
+
         rows.iter()
             .map(|r| {
                 Ok(StoredEvent {
@@ -640,6 +643,7 @@ impl Store {
                 &[&sha256.as_bytes().as_slice()],
             )
             .await?;
+
         row.map(|r| {
             Ok(CrateFile {
                 sha256: *sha256,
@@ -699,6 +703,7 @@ impl Store {
                 .iter()
                 .map(|s| s.0.to_ascii_lowercase().replace('-', "_"))
                 .collect();
+
             let downloads: Vec<i64> = chunk.iter().map(|s| s.1).collect();
             let reverse: Vec<i64> = chunk.iter().map(|s| s.2).collect();
             written += self
@@ -777,6 +782,7 @@ impl Store {
                 &[&analyzer_version, &limit],
             )
             .await?;
+
         rows.iter()
             .map(|r| {
                 let bytes: Vec<u8> = r.get(0);
@@ -853,6 +859,7 @@ impl Store {
                 &[&name.canonical(), &except.0],
             )
             .await?;
+
         rows.iter()
             .map(|r| {
                 let id: i64 = r.try_get(0)?;
@@ -888,6 +895,7 @@ impl Store {
             .iter()
             .map(|n| n.to_ascii_lowercase().replace('-', "_"))
             .collect();
+
         let rows = self
             .client
             .query(
@@ -922,6 +930,7 @@ impl Store {
                 &[&limit],
             )
             .await?;
+
         rows.iter()
             .map(|r| {
                 Ok((
@@ -953,6 +962,7 @@ impl Store {
                 &[&sha256],
             )
             .await?;
+
         rows.iter()
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect()
@@ -983,6 +993,7 @@ impl Store {
                 &[&sha256, &min_age_secs],
             )
             .await?;
+
         rows.iter()
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect()
@@ -1088,6 +1099,7 @@ impl Store {
             .client
             .query("SELECT state, count(*) FROM jobs GROUP BY state", &[])
             .await?;
+
         rows.iter()
             .map(|r| Ok((r.try_get(0)?, r.try_get(1)?)))
             .collect()

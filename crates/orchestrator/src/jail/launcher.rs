@@ -86,9 +86,11 @@ fn read_line<R: BufRead>(input: &mut R, limit: usize) -> Result<String, LaunchEr
     let mut limited = input
         .by_ref()
         .take(u64::try_from(limit).unwrap_or(u64::MAX));
+
     limited
         .read_line(&mut line)
         .map_err(step("reading from the orchestrator"))?;
+
     if !line.ends_with('\n') {
         return Err(LaunchError {
             step: "reading from the orchestrator",
@@ -185,6 +187,7 @@ fn open_host_files(spec: &JailSpec) -> Result<HostFiles, LaunchError> {
         .and_then(|sinks| sinks.authority.as_deref())
         .map(read_authority)
         .transpose()?;
+
     let events = spec
         .sinks
         .as_ref()
@@ -282,6 +285,7 @@ fn set_up_network(spec: &JailSpec) -> Result<(), LaunchError> {
         .map(|b| format!("{b:02x}"))
         .collect::<Vec<_>>()
         .join(":");
+
     run_ip(&["link", "set", "dev", tap, "address", &mac])?;
     run_ip(&["link", "set", "dev", tap, "addrgenmode", "none"])?;
     run_ip(&["link", "set", tap, "up"])?;
@@ -393,6 +397,7 @@ pub fn run() -> LaunchError {
         let mut input = std::io::stdin().lock();
         let spec: JailSpec = serde_json::from_str(&read_line(&mut input, MAX_SPEC_BYTES)?)
             .map_err(step("parsing the jail specification"))?;
+
         spec.validate()
             .map_err(step("validating the jail specification"))?;
 
@@ -430,6 +435,7 @@ pub fn run() -> LaunchError {
             .arg(&spec.id)
             .env_clear()
             .exec();
+
         Err(LaunchError {
             step: "executing firecracker",
             detail: error.to_string(),
