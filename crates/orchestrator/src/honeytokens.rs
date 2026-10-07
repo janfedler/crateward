@@ -43,6 +43,7 @@ fn random(rng: &mut impl rand::Rng, len: usize) -> String {
 
 fn upper(rng: &mut impl rand::Rng, len: usize) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
     (0..len)
         .map(|_| {
             let i = rng.random_range(0..CHARS.len());

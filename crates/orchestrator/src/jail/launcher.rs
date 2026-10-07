@@ -105,6 +105,7 @@ fn read_line<R: BufRead>(input: &mut R, limit: usize) -> Result<String, LaunchEr
 
 fn say(line: &str) -> Result<(), LaunchError> {
     let mut out = std::io::stdout().lock();
+
     writeln!(out, "{line}")
         .and_then(|()| out.flush())
         .map_err(step("writing to the orchestrator"))
@@ -131,6 +132,7 @@ fn mount_point(target: &Path, directory: bool) -> Result<(), LaunchError> {
 fn bind(source: &Path, target: &Path, flags: MountFlags) -> Result<(), LaunchError> {
     mount_point(target, source.is_dir())?;
     rustix::mount::mount_bind(source, target).map_err(step("bind mount"))?;
+
     rustix::mount::mount_remount(target, MountFlags::BIND | flags, "")
         .map_err(step("restricting a bind mount"))
 }

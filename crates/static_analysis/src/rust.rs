@@ -179,6 +179,7 @@ struct Scanner<'a> {
 /// Where a span starts, as line and column.
 fn position(span: Span) -> (usize, usize) {
     let start = span.start();
+
     (start.line, start.column)
 }
 

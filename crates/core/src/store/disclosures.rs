@@ -112,6 +112,7 @@ pub struct PublishedFinding {
 
 fn valid_slug(slug: &str) -> bool {
     let mut bytes = slug.bytes();
+
     (1..=64).contains(&slug.len())
         && bytes
             .next()

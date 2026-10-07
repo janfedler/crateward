@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod blank_lines;
 mod coverage;
 mod deploy;
 mod diagram;
@@ -36,6 +37,12 @@ enum Task {
     Ci,
     /// Check the writing style of all documentation.
     DocsLint,
+    /// Check the blank line rules of CONTRIBUTING.md in Rust code.
+    BlankLines {
+        /// Add the missing blank lines instead of checking.
+        #[arg(long)]
+        write: bool,
+    },
     /// Check or rewrite the generated state diagram in docs/ARCHITECTURE.md.
     StateDiagram {
         /// Rewrite the diagram instead of checking it.
@@ -113,6 +120,7 @@ fn main() -> ExitCode {
     let result = match Cli::parse().task {
         Task::Ci => ci(),
         Task::DocsLint => docs_lint(),
+        Task::BlankLines { write } => blank_lines::run(&workspace_root(), write),
         Task::StateDiagram { write } => diagram::run(&workspace_root(), write),
         Task::GuestAgent => guest_agent(),
         Task::GuestEbpf => guest_ebpf::run(&workspace_root()),
@@ -179,6 +187,7 @@ fn read_toml<T: DeserializeOwned>(root: &Path, path: &str) -> Result<T, TaskErro
 /// The workspace root, derived from this package's manifest directory.
 fn workspace_root() -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+
     manifest
         .ancestors()
         .nth(2)
@@ -304,6 +313,7 @@ fn ci() -> Result<(), TaskError> {
     guest_ebpf::run(&workspace_root())?;
     fuzz::check(&workspace_root())?;
     docs_lint()?;
+    blank_lines::run(&workspace_root(), false)?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;
 

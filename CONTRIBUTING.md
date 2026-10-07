@@ -79,7 +79,9 @@ existing one:
 
 Blank lines split a function into its steps, so the reader sees the
 structure before the details. `rustfmt` keeps blank lines but does not add
-them, so this is up to the author:
+them. `cargo xtask blank-lines` checks the rules below that a program can
+see, and `--write` adds the missing lines. Ordering the steps is up to the
+author:
 
 * Definitions come first, then the actions that use them, then loops, then
   the result.

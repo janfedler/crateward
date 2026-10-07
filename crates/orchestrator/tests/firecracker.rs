@@ -94,6 +94,7 @@ fn job(argv: &[&str]) -> JobSpec {
 /// A field of `/proc/<pid>/status`, readable for any process on the host.
 fn status_field(pid: u32, field: &str) -> String {
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+
     status
         .lines()
         .find_map(|line| line.strip_prefix(&format!("{field}:")))

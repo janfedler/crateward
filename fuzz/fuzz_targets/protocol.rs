@@ -20,6 +20,7 @@ fuzz_target!(|data: &[u8]| {
         }
 
         while let Ok(Some(_)) = guest.next_message() {}
+
         if host.push(piece).is_ok() {
             while let Ok(Some(_)) = host.next_message() {}
         }

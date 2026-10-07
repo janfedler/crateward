@@ -304,6 +304,7 @@ impl Launch {
     fn spawn_direct(&self, log: &Path) -> Result<Child, VmError> {
         let log = std::fs::File::create(log).map_err(io_error("creating the log"))?;
         let log_err = log.try_clone().map_err(io_error("duplicating the log"))?;
+
         Command::new(&self.firecracker)
             .arg("--api-sock")
             .arg(self.host_created(API))

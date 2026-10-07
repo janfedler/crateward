@@ -979,6 +979,7 @@ mod tests {
 
     fn mkfifo(path: &Path) -> io::Result<()> {
         let status = Command::new("mkfifo").arg(path).status()?;
+
         status
             .success()
             .then_some(())

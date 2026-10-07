@@ -285,6 +285,7 @@ fn mount_overlay(m: &MountSpec, flags: MountFlags) -> Result<(), WorkspaceError>
     )
     .map_err(failed("chmod", o.upper))?;
     let data = CString::new(m.options.as_deref().unwrap_or_default())?;
+
     mount(
         "overlay",
         m.target.as_str(),

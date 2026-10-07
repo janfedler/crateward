@@ -361,6 +361,7 @@ impl Analyzer {
 
     async fn read_blob(&self, blake3: String) -> Result<Vec<u8>, Failure> {
         let blobs = self.blobs.clone();
+
         tokio::task::spawn_blocking(move || blobs.get(&blake3, MAX_TAR_BYTES))
             .await
             .map_err(Failure::infrastructure)?

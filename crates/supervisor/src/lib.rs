@@ -198,6 +198,7 @@ impl Supervisor<'_> {
         self.store
             .pause(PauseReason::Quarantine, None, &detail)
             .await?;
+
         self.store
             .raise_alert(&HumanEscalation::SandboxEscapeIndicator { job: None })
             .await

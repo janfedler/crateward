@@ -347,6 +347,7 @@ fn has_semicolon(prose: &str) -> bool {
 /// to digits (`SHA-256`, `x86-64`) and leading hyphens (`--flag`) are fine.
 fn is_hyphenated_compound(word: &str) -> bool {
     let chars: Vec<char> = word.chars().collect();
+
     chars
         .windows(3)
         .any(|w| matches!(w, [a, '-', b] if a.is_alphabetic() && b.is_alphabetic()))

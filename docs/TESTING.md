@@ -90,7 +90,9 @@ cargo xtask ci
 runs formatting, clippy with warnings denied, all tests, rustdoc with
 warnings denied, the static musl build of the guest agent, the eBPF
 programs (format, clippy and build with the pinned nightly and
-`bpf-linker`), the documentation checks, `cargo deny` for both lockfiles,
+`bpf-linker`), the type check of the fuzz targets, the documentation
+checks, the blank line rules of
+[`CONTRIBUTING.md`](../CONTRIBUTING.md#blank-lines), `cargo deny` for both lockfiles,
 `cargo audit` and `cargo vet`, in the same order as CI.
 
 ## Coverage

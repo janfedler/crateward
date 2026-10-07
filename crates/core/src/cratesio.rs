@@ -599,6 +599,7 @@ mod tests {
 
     fn pairs(feed: &Feed) -> Vec<(&str, Option<String>)> {
         let version = |i: &FeedItem| i.version.as_ref().map(ToString::to_string);
+
         feed.items
             .iter()
             .map(|i| (i.name.as_str(), version(i)))

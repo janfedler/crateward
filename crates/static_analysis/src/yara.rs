@@ -128,6 +128,7 @@ mod tests {
 
     fn rules_matching(data: &[u8]) -> Vec<String> {
         let rules = Rules::builtin().unwrap();
+
         rules
             .scan("src/lib.rs", data, CodeContext::Library)
             .into_iter()

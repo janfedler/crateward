@@ -487,6 +487,7 @@ fn socket_event(kind: u32, socket: *const u8, address: *const u8, addr_len: u32)
         let sock_type =
             bpf_probe_read_kernel(socket.add(config_usize(&OFF_SOCKET_TYPE)).cast::<u16>())
                 .unwrap_or(0);
+
         addr_of_mut!((*record).sock_type).write(u32::from(sock_type));
         addr_of_mut!((*record).addr_len).write(addr_len);
         let addr = &mut *addr_of_mut!((*record).addr);

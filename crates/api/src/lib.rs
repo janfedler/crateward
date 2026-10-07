@@ -663,6 +663,7 @@ fn attach_links(
 
 fn disclosure_rows(d: Disclosure) -> Vec<(String, String)> {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
+
     [
         ("Kind", d.kind.name().to_owned()),
         ("Reported", d.reported()),
@@ -978,6 +979,7 @@ mod tests {
         }
         .render()
         .unwrap();
+
         let version = stylesheet_version();
 
         assert_eq!(version.len(), 12);

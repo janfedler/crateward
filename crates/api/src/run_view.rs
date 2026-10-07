@@ -628,6 +628,7 @@ fn scratch(view: &mut RunView, disk: &Value) {
 pub fn run_views(job: i64, runs: &[(String, Value)]) -> Vec<RunView> {
     let full = runs.iter().any(|(kind, _)| kind == "full");
     let check = runs.iter().any(|(kind, _)| kind == "check");
+
     runs.iter()
         .filter(|(kind, _)| !(full && kind == "check"))
         .map(|(kind, report)| {

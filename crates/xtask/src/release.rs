@@ -409,6 +409,7 @@ fn sbom(root: &Path, version: &str) -> Result<String, TaskError> {
 /// The string at `key` in `table`, or an empty string.
 fn text(table: Option<&toml::Table>, key: &str) -> String {
     let value = table.and_then(|t| t.get(key));
+
     value
         .and_then(toml::Value::as_str)
         .unwrap_or_default()

@@ -113,6 +113,7 @@ impl BreakerPolicy {
     #[must_use]
     pub fn cooldown(&self, reopened: u32) -> Duration {
         let factor = 1_u32.checked_shl(reopened.min(16)).unwrap_or(u32::MAX);
+
         self.cooldown
             .checked_mul(factor)
             .unwrap_or(self.max_cooldown)

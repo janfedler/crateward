@@ -501,6 +501,7 @@ impl Tracer {
 #[must_use]
 pub fn monotonic_ns() -> u64 {
     let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+
     u64::try_from(now.tv_sec)
         .unwrap_or(0)
         .saturating_mul(1_000_000_000)

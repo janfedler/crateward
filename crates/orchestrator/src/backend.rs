@@ -361,6 +361,7 @@ impl FirecrackerBackend {
             Ok(vm.snapshot(&launch, &boot.rootfs, out).await?)
         }
         .await;
+
         vm.destroy().await?;
 
         snapshot

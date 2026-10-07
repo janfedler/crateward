@@ -227,6 +227,7 @@ fn render_address(address: &SocketAddress) -> String {
 /// that opened it: every Rust program reads its own `/proc/<pid>/maps`.
 fn is_sensitive(path: &str, pid: u32) -> bool {
     let home = |rest: &str| path.strip_prefix(HOME).is_some_and(|p| p.starts_with(rest));
+
     home("/.cargo/credentials")
         || home("/.ssh/")
         || home("/.aws/")
