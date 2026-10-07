@@ -31,7 +31,7 @@ use crateward_core::job::BuildOutcome;
 use crateward_core::paths::guest;
 use crateward_core::verdict::{Coverage, Evidence, EvidenceSource, RiskLevel, Verdict};
 use crateward_orchestrator::firecracker::vm::GUEST_ADDRESS;
-use crateward_orchestrator::scratch::Entry;
+use crateward_orchestrator::scratch::{Entry, ScratchReport};
 use crateward_orchestrator::trace::{Process, Role};
 use crateward_orchestrator::worker::{Leak, RunReport};
 use crateward_static_analysis::analyze::StaticReport;
@@ -408,7 +408,8 @@ fn score_diff(inputs: &Inputs<'_>, groups: &mut Groups) {
 
 fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     let processes: Processes<'_> = run.trace.processes.iter().map(|p| (p.pid, p)).collect();
-    score_theft(run, groups, profile);
+    score_leaks(run, groups, profile);
+    score_copies(run, groups, profile);
     score_integrity(run, &processes, groups, profile);
     score_files(run, &processes, groups, profile);
     score_disk(run, groups, profile);
@@ -416,8 +417,8 @@ fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String
     score_execution(run, &processes, groups, profile);
 }
 
-/// Honeytokens that left the VM, and honeytokens copied inside it.
-fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
+/// Honeytokens that left the VM, and traffic the search for them missed.
+fn score_leaks(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     for leak in &run.leaked {
         profile.insert(format!("leak:{}", leak.kind));
         groups.add(
@@ -433,6 +434,29 @@ fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Stri
         );
     }
 
+    let unsearched = run.network.unsearched();
+    if !unsearched.is_empty() {
+        profile.insert("net:unsearched".into());
+        groups.add(
+            Group::Theft,
+            Evidence {
+                signal: "network_unsearched".into(),
+                points: 50,
+                source: EvidenceSource::Network,
+                summary: format!(
+                    "The guest sent more than the honeytoken search could see: {}.",
+                    unsearched.join(", ")
+                ),
+                package: None,
+                location: None,
+            },
+        );
+    }
+}
+
+/// Honeytokens copied inside the VM, and build scripts that wrote the whole
+/// environment with them.
+fn score_copies(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     for leak in run.tokens_on_disk.iter().filter(|l| dumped(run, l)) {
         profile.insert("dump:environment".into());
         groups.add(
@@ -464,25 +488,6 @@ fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Stri
                 summary: format!("The planted {} was copied inside the VM.", leak.kind),
                 package: build_dir_package(&leak.via),
                 location: Some(leak.via.clone()),
-            },
-        );
-    }
-
-    let unsearched = run.network.unsearched();
-    if !unsearched.is_empty() {
-        profile.insert("net:unsearched".into());
-        groups.add(
-            Group::Theft,
-            Evidence {
-                signal: "network_unsearched".into(),
-                points: 50,
-                source: EvidenceSource::Network,
-                summary: format!(
-                    "The guest sent more than the honeytoken search could see: {}.",
-                    unsearched.join(", ")
-                ),
-                package: None,
-                location: None,
             },
         );
     }
@@ -616,6 +621,13 @@ fn score_files(
 fn score_disk(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     let Some(scratch) = &run.scratch else { return };
 
+    score_left_behind(scratch, groups, profile);
+    score_special_files(scratch, groups, profile);
+}
+
+/// Entries outside the build areas: persistence locations each, the rest
+/// once per top directory.
+fn score_left_behind(scratch: &ScratchReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     let (lasting, other): (Vec<_>, Vec<_>) = scratch
         .outside_build
         .iter()
@@ -666,7 +678,14 @@ fn score_disk(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Strin
             },
         );
     }
+}
 
+/// Executables outside the target directory and set ID files.
+fn score_special_files(
+    scratch: &ScratchReport,
+    groups: &mut Groups,
+    profile: &mut BTreeSet<String>,
+) {
     for e in &scratch.executables_outside_target {
         profile.insert("disk:executable".into());
         groups.add(
@@ -707,30 +726,9 @@ fn score_network(
     groups: &mut Groups,
     profile: &mut BTreeSet<String>,
 ) {
-    let senders: BTreeSet<String> = run
-        .trace
-        .sockets
-        .iter()
-        .filter(|s| !s.address.starts_with("unix:"))
-        .filter_map(|s| package_of(s.pid, processes))
-        .collect();
-    let sender = if senders.len() == 1 {
-        senders.into_iter().next()
-    } else {
-        None
-    };
+    let sender = sender(run, processes);
 
-    // Guests without a host name looked up every name a second time with
-    // the domain of their address appended.
-    let (_, domain) = GUEST_ADDRESS.split_once('.').unwrap_or_default();
-    let names = run.network.dns.iter().filter(|name| {
-        !name
-            .strip_suffix(domain)
-            .and_then(|n| n.strip_suffix('.'))
-            .is_some_and(|bare| run.network.dns.iter().any(|d| d == bare))
-    });
-
-    for name in names {
+    for name in looked_up(&run.network.dns) {
         profile.insert(format!("net:{name}"));
         groups.add(
             Group::Network,
@@ -774,6 +772,37 @@ fn score_network(
             },
         );
     }
+}
+
+/// The one package that used network sockets, if only one did.
+fn sender(run: &RunReport, processes: &Processes<'_>) -> Option<String> {
+    let senders: BTreeSet<String> = run
+        .trace
+        .sockets
+        .iter()
+        .filter(|s| !s.address.starts_with("unix:"))
+        .filter_map(|s| package_of(s.pid, processes))
+        .collect();
+
+    if senders.len() == 1 {
+        senders.into_iter().next()
+    } else {
+        None
+    }
+}
+
+/// The names looked up. Guests without a host name looked up every name a
+/// second time with the domain of their address appended, and those
+/// repeats are left out.
+fn looked_up(dns: &[String]) -> impl Iterator<Item = &String> {
+    let (_, domain) = GUEST_ADDRESS.split_once('.').unwrap_or_default();
+
+    dns.iter().filter(move |name| {
+        !name
+            .strip_suffix(domain)
+            .and_then(|n| n.strip_suffix('.'))
+            .is_some_and(|bare| dns.iter().any(|d| d == bare))
+    })
 }
 
 /// Programs that the build wrote and ran, and programs that build scripts

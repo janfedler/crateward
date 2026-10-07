@@ -219,15 +219,7 @@ impl NetworkLog<'_> {
                 inner,
                 decrypted,
             } => {
-                let via = route(&dst, &sniffed);
-                let data = unhex(&data).unwrap_or_default();
-                self.leak(&data, &via);
-                self.cut_if(bytes > data.len() as u64);
-
-                if let Some(plain) = decrypted.as_deref().and_then(unhex) {
-                    self.leak(&plain, &via.replacen("tls://", "https://", 1));
-                    self.cut_if(plain.len() >= MAX_CAPTURE);
-                }
+                self.search_tcp(&dst, &sniffed, bytes, &data, decrypted.as_deref());
 
                 if self.summary.connections.len() < MAX_LISTED {
                     let connection = Connection {
@@ -262,6 +254,26 @@ impl NetworkLog<'_> {
                 self.summary.refused = self.summary.refused.saturating_add(1);
             }
             EventKind::Truncated => self.summary.truncated = true,
+        }
+    }
+
+    /// Searches a TCP connection's data, and its plain text inside TLS.
+    fn search_tcp(
+        &mut self,
+        dst: &str,
+        sniffed: &Sniffed,
+        bytes: u64,
+        data: &str,
+        decrypted: Option<&str>,
+    ) {
+        let via = route(dst, sniffed);
+        let data = unhex(data).unwrap_or_default();
+        self.leak(&data, &via);
+        self.cut_if(bytes > data.len() as u64);
+
+        if let Some(plain) = decrypted.and_then(unhex) {
+            self.leak(&plain, &via.replacen("tls://", "https://", 1));
+            self.cut_if(plain.len() >= MAX_CAPTURE);
         }
     }
 

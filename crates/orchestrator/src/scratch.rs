@@ -255,16 +255,7 @@ impl Scanner<'_> {
             // two reads is still found.
             window.extend_from_slice(chunk);
 
-            for (i, token) in spec.tokens.iter().enumerate() {
-                if !found.get(i).copied().unwrap_or(true) && contains(&window, token) {
-                    if let Some(f) = found.get_mut(i) {
-                        *f = true;
-                    }
-
-                    let r = &mut self.report;
-                    push(&mut r.tokens_found, &mut r.omitted, (i, guest.to_owned()));
-                }
-            }
+            self.note_tokens(&window, &mut found, guest);
 
             for (seen, value) in environment.iter_mut().zip(&spec.environment) {
                 *seen = *seen || contains(&window, value);
@@ -287,6 +278,17 @@ impl Scanner<'_> {
         }
 
         Ok(elf)
+    }
+
+    /// Reports each honeytoken in `window` that `found` does not have yet.
+    fn note_tokens(&mut self, window: &[u8], found: &mut [bool], guest: &str) {
+        for ((i, token), seen) in self.spec.tokens.iter().enumerate().zip(found) {
+            if !*seen && contains(window, token) {
+                *seen = true;
+                let r = &mut self.report;
+                push(&mut r.tokens_found, &mut r.omitted, (i, guest.to_owned()));
+            }
+        }
     }
 
     /// The entry as the report lists it. Reads the target of a symbolic link.

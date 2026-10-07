@@ -289,51 +289,47 @@ const REVIEWS: [(&str, &str); 4] = [
     ("false_positive", "false positive"),
 ];
 
-async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) -> Page {
-    let name: String = q.name.chars().take(64).collect();
-    let level = LEVELS
-        .iter()
-        .find(|l| **l == q.level)
-        .map(|l| (*l).to_owned());
-    let review = REVIEWS
-        .iter()
-        .find(|(value, _)| *value == q.review)
-        .map(|(value, _)| *value);
-    let job_state = JobState::ALL
-        .iter()
-        .map(|s| s.name())
-        .find(|s| *s == q.state);
-    let rescore = q.verdict == RESCORE;
-    let filter = JobFilter {
-        name: (!name.is_empty()).then(|| name.clone()),
-        level: level.clone(),
-        review: review
-            .map(|r| if r == "unreported" { "confirmed" } else { r })
-            .map(str::to_owned),
-        unreported: review == Some("unreported"),
-        rescore,
-        state: job_state.map(str::to_owned),
-    };
+/// The job list's filters, each one of its allowed values or empty.
+struct Selection {
+    name: String,
+    level: &'static str,
+    review: &'static str,
+    state: &'static str,
+    rescore: bool,
+}
 
-    let counts = state.reader.job_states(&filter).await?;
-    let total: i64 = counts
-        .iter()
-        .filter(|(s, _)| job_state.is_none_or(|j| j == s))
-        .map(|(_, n)| n)
-        .sum();
-    let per = q
-        .per
-        .filter(|p| PER_PAGE.contains(p))
-        .unwrap_or(DEFAULT_PER_PAGE);
-    let pages = ((total + per - 1) / per).max(1);
-    let page = q.page.unwrap_or(1).clamp(1, pages);
-    let offset = (page - 1) * per;
-    let rows = state.reader.jobs(&filter, offset, per).await?;
-    let backlog = state.reader.rescore_backlog().await?;
+/// `value` if it is one of `allowed`, or empty.
+fn allowed(mut allowed: impl Iterator<Item = &'static str>, value: &str) -> &'static str {
+    allowed.find(|a| *a == value).unwrap_or_default()
+}
 
-    let review = review.unwrap_or_default();
-    let level = level.unwrap_or_default();
-    let href = |state: &str, page: i64, per: i64| {
+impl Selection {
+    fn parse(q: &JobsQuery) -> Self {
+        Self {
+            name: q.name.chars().take(64).collect(),
+            level: allowed(LEVELS.into_iter(), &q.level),
+            review: allowed(REVIEWS.iter().map(|(value, _)| *value), &q.review),
+            state: allowed(JobState::ALL.iter().map(|s| s.name()), &q.state),
+            rescore: q.verdict == RESCORE,
+        }
+    }
+
+    fn filter(&self) -> JobFilter {
+        let some = |s: &str| (!s.is_empty()).then(|| s.to_owned());
+        let unreported = self.review == "unreported";
+
+        JobFilter {
+            name: some(&self.name),
+            level: some(self.level),
+            review: some(if unreported { "confirmed" } else { self.review }),
+            unreported,
+            rescore: self.rescore,
+            state: some(self.state),
+        }
+    }
+
+    /// The job list with these filters but `state`, at `page` of `per` jobs.
+    fn href(&self, state: &str, page: i64, per: i64) -> String {
         let page = if page > 1 {
             page.to_string()
         } else {
@@ -344,57 +340,116 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
         } else {
             per.to_string()
         };
+
         jobs_href(&[
-            ("name", &name),
-            ("level", &level),
-            ("review", review),
-            ("verdict", if rescore { RESCORE } else { "" }),
+            ("name", &self.name),
+            ("level", self.level),
+            ("review", self.review),
+            ("verdict", if self.rescore { RESCORE } else { "" }),
             ("state", state),
             ("per", &per),
             ("page", &page),
         ])
-    };
-    let state_name = job_state.unwrap_or_default();
-    let at = |p: i64| href(state_name, p, per);
+    }
+}
+
+/// Which part of `total` jobs is shown.
+struct Paging {
+    page: i64,
+    pages: i64,
+    per: i64,
+    offset: i64,
+}
+
+impl Paging {
+    fn new(total: i64, page: Option<i64>, per: Option<i64>) -> Self {
+        let per = per
+            .filter(|p| PER_PAGE.contains(p))
+            .unwrap_or(DEFAULT_PER_PAGE);
+        let pages = ((total + per - 1) / per).max(1);
+        let page = page.unwrap_or(1).clamp(1, pages);
+
+        Self {
+            page,
+            pages,
+            per,
+            offset: (page - 1) * per,
+        }
+    }
+}
+
+async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) -> Page {
+    let selection = Selection::parse(&q);
+    let filter = selection.filter();
+
+    let counts = state.reader.job_states(&filter).await?;
+    let total: i64 = counts
+        .iter()
+        .filter(|(s, _)| selection.state.is_empty() || s == selection.state)
+        .map(|(_, n)| n)
+        .sum();
+    let paging = Paging::new(total, q.page, q.per);
+    let rows = state
+        .reader
+        .jobs(&filter, paging.offset, paging.per)
+        .await?;
+    let backlog = state.reader.rescore_backlog().await?;
+
+    let at = |page: i64| selection.href(selection.state, page, paging.per);
 
     Ok(Html(
         JobsPage {
-            states: counts
-                .iter()
-                .map(|(s, n)| StateCount {
-                    href: href(s, 1, per),
-                    selected: job_state == Some(s.as_str()),
-                    name: s.clone(),
-                    n: *n,
-                })
-                .collect(),
-            all_href: href("", 1, per),
+            states: state_links(&selection, &counts, paging.per),
+            all_href: selection.href("", 1, paging.per),
             total,
-            first: if rows.is_empty() { 0 } else { offset + 1 },
-            last: offset + rows.len() as i64,
-            pager: pager(page, pages, &at),
-            sizes: PER_PAGE
-                .iter()
-                .map(|&p| PageLink {
-                    label: p.to_string(),
-                    title: format!("{p} jobs per page"),
-                    href: href(state_name, offset / p + 1, p),
-                    class: if p == per { "current" } else { "" },
-                })
-                .collect(),
+            first: if rows.is_empty() {
+                0
+            } else {
+                paging.offset + 1
+            },
+            last: paging.offset + rows.len() as i64,
+            pager: pager(paging.page, paging.pages, &at),
+            sizes: size_links(&selection, paging.offset, paging.per),
             rows: rows.into_iter().map(Row::from).collect(),
-            name,
-            level,
+            name: selection.name.clone(),
+            level: selection.level.to_owned(),
             levels: LEVELS.iter().map(|l| (*l).to_owned()).collect(),
-            review: review.to_owned(),
+            review: selection.review.to_owned(),
             reviews: REVIEWS.to_vec(),
-            state: state_name.to_owned(),
-            rescore,
+            state: selection.state.to_owned(),
+            rescore: selection.rescore,
             backlog,
             backlog_href: jobs_href(&[("verdict", RESCORE)]),
         }
         .render()?,
     ))
+}
+
+/// A link per job state with its count of matching jobs.
+fn state_links(selection: &Selection, counts: &[(String, i64)], per: i64) -> Vec<StateCount> {
+    counts
+        .iter()
+        .map(|(s, n)| StateCount {
+            href: selection.href(s, 1, per),
+            selected: selection.state == s,
+            name: s.clone(),
+            n: *n,
+        })
+        .collect()
+}
+
+/// A link per page size, each starting at the page that holds the first
+/// job shown now.
+fn size_links(selection: &Selection, offset: i64, per: i64) -> Vec<PageLink> {
+    PER_PAGE
+        .iter()
+        .map(|&p| PageLink {
+            label: p.to_string(),
+            title: format!("{p} jobs per page"),
+            href: selection.href(selection.state, offset / p + 1, p),
+            class: if p == per { "current" } else { "" },
+        })
+        .collect()
 }
 
 /// Pages shown on each side of the current one, besides the first and last.
