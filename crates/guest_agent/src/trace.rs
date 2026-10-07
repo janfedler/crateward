@@ -16,6 +16,7 @@ use std::time::Duration;
 use aya::maps::{Map, MapData, MapError, PerCpuArray, RingBuf};
 use aya::programs::{BtfTracePoint, Lsm, Program, ProgramError};
 use aya::{Btf as AyaBtf, BtfError as AyaBtfError, Ebpf, EbpfError, EbpfLoader};
+use crateward_core::bytes::{i32_le, u16_le, u32_le, u64_le};
 use crateward_core::paths::guest::EBPF_OBJECT;
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
 
@@ -89,34 +90,6 @@ const AF_UNIX: u16 = 1;
 const AF_INET: u16 = 2;
 const AF_INET6: u16 = 10;
 
-fn u16_at(data: &[u8], at: usize) -> Option<u16> {
-    data.get(at..at + 2)?
-        .try_into()
-        .ok()
-        .map(u16::from_le_bytes)
-}
-
-fn u32_at(data: &[u8], at: usize) -> Option<u32> {
-    data.get(at..at + 4)?
-        .try_into()
-        .ok()
-        .map(u32::from_le_bytes)
-}
-
-fn i32_at(data: &[u8], at: usize) -> Option<i32> {
-    data.get(at..at + 4)?
-        .try_into()
-        .ok()
-        .map(i32::from_le_bytes)
-}
-
-fn u64_at(data: &[u8], at: usize) -> Option<u64> {
-    data.get(at..at + 8)?
-        .try_into()
-        .ok()
-        .map(u64::from_le_bytes)
-}
-
 /// The first `len` bytes of a fixed buffer, without a trailing NUL.
 fn string(buffer: &[u8], len: i32) -> Vec<u8> {
     let len = usize::try_from(len).unwrap_or(0).min(buffer.len());
@@ -128,7 +101,7 @@ fn string(buffer: &[u8], len: i32) -> Vec<u8> {
 
 fn socket_address(addr: &[u8], addr_len: u32) -> SocketAddress {
     let len = usize::try_from(addr_len).unwrap_or(0).min(addr.len());
-    let family = u16_at(addr, 0).unwrap_or(0);
+    let family = u16_le(addr, 0).unwrap_or(0);
     let port = || {
         addr.get(2..4)
             .and_then(|b| b.try_into().ok())
@@ -184,11 +157,11 @@ fn chain(error: &dyn std::error::Error) -> String {
 /// same clock as the records.
 #[must_use]
 pub fn decode(record: &[u8], start_ns: u64) -> Option<TraceEvent> {
-    let kind = u32_at(record, 0)?;
-    let pid = u32_at(record, 4)?;
-    let tid = u32_at(record, 8)?;
-    let uid = u32_at(record, 12)?;
-    let time_ns = u64_at(record, 16)?;
+    let kind = u32_le(record, 0)?;
+    let pid = u32_le(record, 4)?;
+    let tid = u32_le(record, 8)?;
+    let uid = u32_le(record, 12)?;
+    let time_ns = u64_le(record, 16)?;
     let ms = u32::try_from(time_ns.saturating_sub(start_ns) / 1_000_000).unwrap_or(u32::MAX);
     let kind = event_kind(kind, record.get(HEADER_LEN..)?)?;
 
@@ -205,16 +178,16 @@ pub fn decode(record: &[u8], start_ns: u64) -> Option<TraceEvent> {
 fn event_kind(kind: u32, body: &[u8]) -> Option<TraceKind> {
     Some(match kind {
         KIND_FORK => TraceKind::Fork {
-            child: u32_at(body, 0)?,
+            child: u32_le(body, 0)?,
         },
         KIND_EXEC => exec(body)?,
         KIND_EXIT => TraceKind::Exit {
-            code: u32_at(body, 0)?,
+            code: u32_le(body, 0)?,
         },
         KIND_OPEN => open(body)?,
         KIND_CONNECT | KIND_SEND => {
-            let sock_type = u32_at(body, 0)?;
-            let addr_len = u32_at(body, 4)?;
+            let sock_type = u32_le(body, 0)?;
+            let addr_len = u32_le(body, 4)?;
             let address = socket_address(body.get(8..8 + ADDR_LEN)?, addr_len);
             if kind == KIND_CONNECT {
                 TraceKind::Connect { sock_type, address }
@@ -223,22 +196,22 @@ fn event_kind(kind: u32, body: &[u8]) -> Option<TraceKind> {
             }
         }
         KIND_BPF => TraceKind::Bpf {
-            cmd: u32_at(body, 0)?,
+            cmd: u32_le(body, 0)?,
         },
         KIND_PTRACE => TraceKind::Ptrace {
-            target: u32_at(body, 0)?,
-            mode: u32_at(body, 4)?,
+            target: u32_le(body, 0)?,
+            mode: u32_le(body, 4)?,
         },
         KIND_MOUNT => TraceKind::Mount {
-            fstype: string(body.get(8..8 + FSTYPE_LEN)?, i32_at(body, 0)?),
+            fstype: string(body.get(8..8 + FSTYPE_LEN)?, i32_le(body, 0)?),
         },
         _ => return None,
     })
 }
 
 fn exec(body: &[u8]) -> Option<TraceKind> {
-    let filename_len = i32_at(body, 0)?;
-    let args_len = usize::try_from(u32_at(body, 4)?).ok()?.min(ARGS_LEN);
+    let filename_len = i32_le(body, 0)?;
+    let args_len = usize::try_from(u32_le(body, 4)?).ok()?.min(ARGS_LEN);
     let filename = string(body.get(8..8 + FILENAME_LEN)?, filename_len);
     let args = body.get(8 + FILENAME_LEN..8 + FILENAME_LEN + ARGS_LEN)?;
     let args = args.get(..args_len)?;
@@ -253,8 +226,8 @@ fn exec(body: &[u8]) -> Option<TraceKind> {
 }
 
 fn open(body: &[u8]) -> Option<TraceKind> {
-    let flags = u32_at(body, 0)?;
-    let path_len = i32_at(body, 4)?;
+    let flags = u32_le(body, 0)?;
+    let path_len = i32_le(body, 4)?;
     let buffer = body.get(8..8 + PATH_LEN)?;
     let path = if path_len > 0 {
         string(buffer, path_len)

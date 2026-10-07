@@ -10,6 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crateward_core::bytes::{u16_le, u32_le, u64_le};
 use crateward_core::paths::{build, repo};
 use serde::Deserialize;
 
@@ -91,59 +92,85 @@ pub fn run(root: &Path) -> Result<(), TaskError> {
 
 /// Checks that the ELF object has a `license` section reading `GPL`.
 fn check_license(object: &[u8]) -> Result<(), String> {
-    let u16_at = |at: usize| -> Option<usize> {
-        object
-            .get(at..at + 2)?
-            .try_into()
-            .ok()
-            .map(|b| usize::from(u16::from_le_bytes(b)))
-    };
-
-    let u64_at = |at: usize| -> Option<usize> {
-        let b: [u8; 8] = object.get(at..at + 8)?.try_into().ok()?;
-        usize::try_from(u64::from_le_bytes(b)).ok()
-    };
-
     if object.get(..6) != Some(b"\x7fELF\x02\x01".as_slice()) {
         return Err("not a 64 bit little endian ELF object".into());
     }
 
-    let short = || "truncated ELF header".to_owned();
-    let sections = u64_at(0x28).ok_or_else(short)?;
-    let entry_size = u16_at(0x3a).ok_or_else(short)?;
-    let count = u16_at(0x3c).ok_or_else(short)?;
-    let names_index = u16_at(0x3e).ok_or_else(short)?;
+    let body = license(object).ok_or("no readable license section")?;
+    if body != b"GPL\0" {
+        return Err(format!(
+            "license section is {:?}",
+            String::from_utf8_lossy(body)
+        ));
+    }
+
+    Ok(())
+}
+
+/// The contents of the section named `license`, if the section headers
+/// can be read.
+fn license(object: &[u8]) -> Option<&[u8]> {
+    let offset = |at: usize| usize::try_from(u64_le(object, at)?).ok();
+    let sections = offset(0x28)?;
+    let entry_size = usize::from(u16_le(object, 0x3a)?);
+    let count = usize::from(u16_le(object, 0x3c)?);
     let header = |i: usize| sections.checked_add(i.checked_mul(entry_size)?);
-    let names_offset = header(names_index)
-        .and_then(|h| u64_at(h + 0x18))
-        .ok_or_else(short)?;
+    let names = offset(header(usize::from(u16_le(object, 0x3e)?))?.checked_add(0x18)?)?;
+
     for i in 0..count {
-        let Some(h) = header(i) else { continue };
-        let name_at = object
-            .get(h..h + 4)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_le_bytes)
-            .and_then(|n| usize::try_from(n).ok())
-            .and_then(|n| names_offset.checked_add(n));
-        let name = name_at
-            .and_then(|at| object.get(at..))
-            .and_then(|rest| rest.split(|&b| b == 0).next());
-        if name == Some(b"license".as_slice()) {
-            let offset = u64_at(h + 0x18).ok_or_else(short)?;
-            let size = u64_at(h + 0x20).ok_or_else(short)?;
-            let body = object
-                .get(offset..offset.saturating_add(size))
-                .ok_or_else(short)?;
-            return if body == b"GPL\0" {
-                Ok(())
-            } else {
-                Err(format!(
-                    "license section is {:?}",
-                    String::from_utf8_lossy(body)
-                ))
-            };
+        let h = header(i)?;
+        let name_at = names.checked_add(usize::try_from(u32_le(object, h)?).ok()?)?;
+        let name = object.get(name_at..)?.split(|&b| b == 0).next()?;
+        if name == b"license" {
+            let start = offset(h.checked_add(0x18)?)?;
+            let size = offset(h.checked_add(0x20)?)?;
+
+            return object.get(start..start.checked_add(size)?);
         }
     }
 
-    Err("no license section".into())
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An ELF object with a section name table and a `license` section.
+    fn object(license: &[u8]) -> Vec<u8> {
+        let mut o = vec![0_u8; 224];
+        o[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        o[0x28..0x30].copy_from_slice(&96_u64.to_le_bytes());
+        o[0x3a..0x3c].copy_from_slice(&64_u16.to_le_bytes());
+        o[0x3c..0x3e].copy_from_slice(&2_u16.to_le_bytes());
+        o[64..73].copy_from_slice(b"\0license\0");
+        o[80..80 + license.len()].copy_from_slice(license);
+
+        for (header, name, offset, size) in [(96, 0, 64, 9), (160, 1, 80, license.len())] {
+            o[header..header + 4].copy_from_slice(&(name as u32).to_le_bytes());
+            o[header + 0x18..header + 0x20].copy_from_slice(&(offset as u64).to_le_bytes());
+            o[header + 0x20..header + 0x28].copy_from_slice(&(size as u64).to_le_bytes());
+        }
+
+        o
+    }
+
+    #[test]
+    fn only_a_gpl_license_section_passes() {
+        assert_eq!(check_license(&object(b"GPL\0")), Ok(()));
+        assert!(
+            check_license(&object(b"MIT\0"))
+                .unwrap_err()
+                .contains("MIT")
+        );
+        assert!(check_license(b"\x7fELF\x01\x01").is_err());
+
+        let mut truncated = object(b"GPL\0");
+        truncated.truncate(190);
+
+        assert_eq!(
+            check_license(&truncated),
+            Err("no readable license section".into())
+        );
+    }
 }

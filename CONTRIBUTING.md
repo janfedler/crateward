@@ -69,6 +69,8 @@ existing one:
 | Startup, logging, exit codes, the stop signal | `crateward_core::app` |
 | Failure classes | `crateward_core::failure` |
 | The clock | `crateward_core::protocol::WallClock::now` |
+| Integers in untrusted bytes | `crateward_core::bytes` |
+| Escaping text from hostile input | `crateward_core::text` |
 | A PostgreSQL schema for a test | `crateward_core::testing` (feature `testing`) |
 | Commands, copies, downloads in `xtask` | `crates/xtask/src/main.rs`, `images.rs` and `testing.rs` |
 | The microVM tests' root and kernel | `crates/orchestrator/tests/common` |

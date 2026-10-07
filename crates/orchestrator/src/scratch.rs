@@ -21,6 +21,7 @@ use std::os::fd::AsFd as _;
 use std::path::Path;
 use std::process::{ExitCode, Stdio};
 
+use crateward_core::bytes::u32_le;
 use crateward_core::child::{self, Child, ChildError};
 use crateward_core::paths::guest::WORK;
 use crateward_core::sandbox::{self, FsAccess, Limits};
@@ -28,6 +29,7 @@ use ext4_view::{Ext4, Ext4Error, FileType, Metadata, PathBuf as ExtPath};
 use serde::{Deserialize, Serialize};
 
 use crate::payload::spawn_mkfs;
+use crate::trace::render;
 
 /// First argument of the sandboxed child.
 pub const SCAN: &str = "sandbox-scratch";
@@ -164,10 +166,6 @@ fn kind(file_type: FileType) -> &'static str {
         FileType::CharacterDevice => "char",
         FileType::BlockDevice => "block",
     }
-}
-
-fn render(bytes: &[u8]) -> String {
-    crate::trace::render(bytes)
 }
 
 /// Whether `haystack` holds `value`. An empty value is never found.
@@ -674,13 +672,7 @@ pub enum GeometryError {
 ///
 /// Returns why the geometry is impossible.
 pub fn check_geometry(superblock: &[u8], image_len: u64) -> Result<(), GeometryError> {
-    let u32_at = |offset: usize| {
-        superblock
-            .get(offset..offset + 4)
-            .and_then(|b| b.try_into().ok())
-            .map(u32::from_le_bytes)
-            .ok_or(GeometryError::Truncated)
-    };
+    let u32_at = |offset: usize| u32_le(superblock, offset).ok_or(GeometryError::Truncated);
 
     let blocks = u64::from(u32_at(0x150)?) << 32 | u64::from(u32_at(0x4)?);
     let first_data_block = u64::from(u32_at(0x14)?);

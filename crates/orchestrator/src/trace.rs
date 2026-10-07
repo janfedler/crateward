@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crateward_core::paths::guest::{self, HOME};
 use crateward_core::protocol::{SocketAddress, TraceEvent, TraceKind, TraceTotals};
+use crateward_core::text;
 use serde::{Deserialize, Serialize};
 
 /// Processes kept in the summary.
@@ -200,21 +201,12 @@ pub struct TraceSummary {
     pub omitted: u64,
 }
 
-/// Renders guest bytes: printable UTF-8 is kept, everything else escaped.
+/// Renders guest bytes: printable UTF-8 is kept, everything else escaped
+/// ([`text::escape`]).
 #[must_use]
 pub fn render(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes.get(..MAX_STRING).unwrap_or(bytes));
-    let mut out = String::with_capacity(text.len());
-
-    for c in text.chars() {
-        if c.is_control()
-            || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
-        {
-            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
-        } else {
-            out.push(c);
-        }
-    }
+    let lossy = String::from_utf8_lossy(bytes.get(..MAX_STRING).unwrap_or(bytes));
+    let mut out: String = lossy.chars().map(text::escape).collect();
 
     if bytes.len() > MAX_STRING {
         out.push('\u{2026}');
@@ -843,6 +835,7 @@ mod tests {
         assert_eq!(s.processes.len(), MAX_PROCESSES);
         assert_eq!(s.processes_omitted, 50);
         assert_eq!(render(b"a\x1b[31m\xe2\x80\xaeb"), "a\\u{1b}[31m\\u{202e}b");
+        assert_eq!(render("x\u{2063}y".as_bytes()), "x\\u{2063}y");
         assert!(render(&[b'x'; 2000]).ends_with('\u{2026}'));
     }
 

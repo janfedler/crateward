@@ -25,6 +25,7 @@ pub mod attack;
 #[cfg(feature = "blobs")]
 pub mod blobs;
 pub mod breaker;
+pub mod bytes;
 #[cfg(feature = "sandbox")]
 pub mod child;
 pub mod component;
@@ -50,4 +51,5 @@ pub mod sandbox;
 pub mod store;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod text;
 pub mod verdict;

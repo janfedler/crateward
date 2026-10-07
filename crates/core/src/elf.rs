@@ -6,26 +6,10 @@
 //! jail must not either, because a jail has no loader at all. Reading two
 //! header fields is simpler and more precise than parsing `file` output.
 
+use crate::bytes::{u16_le, u32_le, u64_le};
+
 /// Program header type of an interpreter request.
 const PT_INTERP: u32 = 3;
-
-fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    let raw = bytes.get(offset..offset.checked_add(2)?)?;
-
-    Some(u16::from_le_bytes(raw.try_into().ok()?))
-}
-
-fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    let raw = bytes.get(offset..offset.checked_add(4)?)?;
-
-    Some(u32::from_le_bytes(raw.try_into().ok()?))
-}
-
-fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    let raw = bytes.get(offset..offset.checked_add(8)?)?;
-
-    Some(u64::from_le_bytes(raw.try_into().ok()?))
-}
 
 /// Whether a little endian 64 bit ELF file has no `PT_INTERP` header.
 ///
@@ -43,16 +27,16 @@ pub fn is_static(bytes: &[u8]) -> Result<bool, &'static str> {
     }
 
     let truncated = "truncated ELF header";
-    let phoff = read_u64(bytes, 0x20).ok_or(truncated)?;
-    let phentsize = read_u16(bytes, 0x36).ok_or(truncated)?;
-    let phnum = read_u16(bytes, 0x38).ok_or(truncated)?;
+    let phoff = u64_le(bytes, 0x20).ok_or(truncated)?;
+    let phentsize = u16_le(bytes, 0x36).ok_or(truncated)?;
+    let phnum = u16_le(bytes, 0x38).ok_or(truncated)?;
     let phoff = usize::try_from(phoff).map_err(|_| truncated)?;
     for index in 0..usize::from(phnum) {
         let entry = index
             .checked_mul(usize::from(phentsize))
             .and_then(|offset| offset.checked_add(phoff))
             .ok_or(truncated)?;
-        let kind = read_u32(bytes, entry).ok_or("truncated program header table")?;
+        let kind = u32_le(bytes, entry).ok_or("truncated program header table")?;
         if kind == PT_INTERP {
             return Ok(false);
         }

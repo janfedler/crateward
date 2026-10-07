@@ -6,6 +6,7 @@
 //! that caused it, and platform specific behavior stays visible even though
 //! Crateward only executes code on Linux.
 
+use crateward_core::text;
 use serde::{Deserialize, Serialize};
 
 /// How much a finding matters on its own.
@@ -249,34 +250,15 @@ pub struct Finding {
 /// Longest evidence text kept.
 pub const MAX_EVIDENCE: usize = 200;
 
-/// Whether a character must not appear literally in evidence: control
-/// characters (Postgres `jsonb` rejects NUL), and bidirectional or invisible
-/// characters that would make the dashboard show something other than the
-/// code (Trojan Source).
-fn must_escape(c: char) -> bool {
-    c.is_control()
-        || matches!(
-            c,
-            '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{2069}'
-                | '\u{FEFF}'
-        )
-}
-
-/// Makes evidence safe to store and display: escapes control, bidi and
-/// invisible characters as `\u{..}` and truncates to [`MAX_EVIDENCE`]
-/// bytes on a character boundary.
+/// Makes evidence safe to store and display: escapes characters with
+/// [`text::escape`] and truncates to [`MAX_EVIDENCE`] bytes on a character
+/// boundary.
 #[must_use]
-pub fn evidence(text: &str) -> String {
+pub fn evidence(raw: &str) -> String {
     let mut out = String::new();
 
-    for c in text.chars() {
-        let piece = if must_escape(c) {
-            format!("\\u{{{:x}}}", u32::from(c))
-        } else {
-            c.to_string()
-        };
+    for c in raw.chars() {
+        let piece = text::escape(c);
 
         if out.len() + piece.len() > MAX_EVIDENCE {
             out.push('…');

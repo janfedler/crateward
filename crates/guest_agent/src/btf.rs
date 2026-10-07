@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::io;
 
+use crateward_core::bytes::u32_le;
+
 const MAGIC: u16 = 0xeb9f;
 
 /// Where the kernel exposes its BTF.
@@ -97,10 +99,7 @@ pub struct Btf {
 }
 
 fn u32_at(data: &[u8], at: usize) -> Result<u32, BtfError> {
-    data.get(at..at + 4)
-        .and_then(|b| b.try_into().ok())
-        .map(u32::from_le_bytes)
-        .ok_or(BtfError::Truncated(at))
+    u32_le(data, at).ok_or(BtfError::Truncated(at))
 }
 
 fn usize_of(value: u32) -> usize {
