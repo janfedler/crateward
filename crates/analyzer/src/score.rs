@@ -467,6 +467,25 @@ fn score_theft(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Stri
             },
         );
     }
+
+    let unsearched = run.network.unsearched();
+    if !unsearched.is_empty() {
+        profile.insert("net:unsearched".into());
+        groups.add(
+            Group::Theft,
+            Evidence {
+                signal: "network_unsearched".into(),
+                points: 50,
+                source: EvidenceSource::Network,
+                summary: format!(
+                    "The guest sent more than the honeytoken search could see: {}.",
+                    unsearched.join(", ")
+                ),
+                package: None,
+                location: None,
+            },
+        );
+    }
 }
 
 /// Whether a honeytoken on disk came with the rest of the environment, in a
@@ -1081,6 +1100,35 @@ mod tests {
             v.evidence
                 .iter()
                 .any(|e| e.signal == "static:dropper_pattern" && e.points == 40)
+        );
+    }
+
+    #[test]
+    fn network_data_the_search_missed_needs_review() {
+        let flooded = run(json!({"network": {"dns": [], "connections": [],
+            "udp_datagrams": 0, "refused": 0, "truncated": true, "cut": 3}}));
+        let v = score(&inputs(&[flooded]));
+        let missed: Vec<_> = v
+            .evidence
+            .iter()
+            .filter(|e| e.signal == "network_unsearched")
+            .map(|e| (e.points, e.summary.as_str()))
+            .collect();
+
+        assert_eq!(
+            missed,
+            [(
+                50,
+                "The guest sent more than the honeytoken search could see: more events \
+                 than the fake internet logs, connections or frames longer than it keeps."
+            )]
+        );
+        assert!(v.level.needs_review());
+        assert!(
+            score(&inputs(&[run(json!({}))]))
+                .evidence
+                .iter()
+                .all(|e| e.signal != "network_unsearched")
         );
     }
 

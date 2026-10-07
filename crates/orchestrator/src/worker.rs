@@ -22,7 +22,7 @@ use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClo
 use crateward_core::store::{PauseReason, Policies, Store, StoreError, StoredJob, heartbeat};
 use serde::{Deserialize, Serialize};
 
-use crateward_fake_internet::server::{Event, EventKind, unhex};
+use crateward_fake_internet::server::{Event, EventKind, MAX_CAPTURE, MAX_EVENTS, unhex};
 use crateward_fake_internet::sniff::Sniffed;
 
 use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
@@ -106,6 +106,32 @@ pub struct NetworkSummary {
     pub packets_truncated: bool,
     /// The log hit its event limit.
     pub truncated: bool,
+    /// Connections and frames the guest sent more of than the fake
+    /// internet keeps.
+    #[serde(default)]
+    pub cut: u32,
+    /// The log was longer than the host reads.
+    #[serde(default)]
+    pub log_cut: bool,
+}
+
+impl NetworkSummary {
+    /// Why the honeytoken search did not see everything the guest sent.
+    /// A guest can make the log drop what follows by flooding it, so any
+    /// of these may hide a leak.
+    #[must_use]
+    pub fn unsearched(&self) -> Vec<&'static str> {
+        [
+            (self.truncated, "more events than the fake internet logs"),
+            (self.packets_truncated, "more raw frames than it logs"),
+            (self.refused > 0, "connections it refused"),
+            (self.cut > 0, "connections or frames longer than it keeps"),
+            (self.log_cut, "a log longer than the host reads"),
+        ]
+        .into_iter()
+        .filter_map(|(hit, reason)| hit.then_some(reason))
+        .collect()
+    }
 }
 
 /// One TCP connection.
@@ -135,8 +161,10 @@ pub struct Leak {
 /// Entries kept per list in the summary.
 const MAX_LISTED: usize = 200;
 
-/// Largest network log read back.
-const MAX_NETWORK_LOG: u64 = 64 * 1024 * 1024;
+/// Largest network log read back: more than the fake internet writes, with
+/// every event at its largest (raw and decrypted data, hex encoded), so the
+/// honeytoken search covers all of it.
+const MAX_NETWORK_LOG: u64 = MAX_EVENTS as u64 * (4 * MAX_CAPTURE as u64 + 64 * 1024);
 
 /// Reads the fake internet's log and looks for the job's honeytokens in
 /// everything the guest sent. Unparsable lines are skipped: the log is
@@ -149,13 +177,17 @@ fn analyze_network(path: &Path, tokens: &[Token]) -> (NetworkSummary, Vec<Leak>)
     };
 
     if let Ok(file) = std::fs::File::open(path) {
-        for line in BufReader::new(file.take(MAX_NETWORK_LOG)).lines() {
-            let Ok(line) = line else { break };
-
-            if let Ok(event) = serde_json::from_str::<Event>(&line) {
+        let mut reader = BufReader::new(file.take(MAX_NETWORK_LOG));
+        let mut line = Vec::new();
+        while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+            if let Ok(event) = serde_json::from_slice::<Event>(&line) {
                 log.record(event.kind);
             }
+
+            line.clear();
         }
+
+        log.summary.log_cut = reader.get_ref().limit() == 0;
     }
 
     (log.summary, log.leaked)
@@ -188,10 +220,13 @@ impl NetworkLog<'_> {
                 decrypted,
             } => {
                 let via = route(&dst, &sniffed);
-                self.leak(&unhex(&data).unwrap_or_default(), &via);
+                let data = unhex(&data).unwrap_or_default();
+                self.leak(&data, &via);
+                self.cut_if(bytes > data.len() as u64);
 
                 if let Some(plain) = decrypted.as_deref().and_then(unhex) {
                     self.leak(&plain, &via.replacen("tls://", "https://", 1));
+                    self.cut_if(plain.len() >= MAX_CAPTURE);
                 }
 
                 if self.summary.connections.len() < MAX_LISTED {
@@ -209,8 +244,14 @@ impl NetworkLog<'_> {
                 self.leak(&unhex(&data).unwrap_or_default(), "udp");
                 self.summary.udp_datagrams = self.summary.udp_datagrams.saturating_add(1);
             }
-            EventKind::Packet { summary, data, .. } => {
-                self.leak(&unhex(&data).unwrap_or_default(), "packet");
+            EventKind::Packet {
+                summary,
+                bytes,
+                data,
+            } => {
+                let data = unhex(&data).unwrap_or_default();
+                self.leak(&data, "packet");
+                self.cut_if(bytes > data.len() as u64);
 
                 if self.summary.packets.len() < MAX_LISTED {
                     self.summary.packets.push(summary);
@@ -221,6 +262,13 @@ impl NetworkLog<'_> {
                 self.summary.refused = self.summary.refused.saturating_add(1);
             }
             EventKind::Truncated => self.summary.truncated = true,
+        }
+    }
+
+    /// Counts a connection or frame of which only the start was kept.
+    fn cut_if(&mut self, cut: bool) {
+        if cut {
+            self.summary.cut = self.summary.cut.saturating_add(1);
         }
     }
 
@@ -1400,12 +1448,12 @@ mod tests {
 
         assert_eq!(skipped.dns, ["a", "b"]);
 
-        // A line that is no text ends the reading.
+        // So is a line that is no text.
         let mut bytes = format!("{}\n", dns("a")).into_bytes();
         bytes.extend_from_slice(b"\xff\xfe\n");
         bytes.extend_from_slice(dns("b").as_bytes());
 
-        assert_eq!(read("binary", &bytes).dns, ["a"]);
+        assert_eq!(read("binary", &bytes).dns, ["a", "b"]);
 
         // A missing log is an empty summary.
         let missing = std::env::temp_dir().join("cw-netlog-missing");
@@ -1414,6 +1462,66 @@ mod tests {
             analyze_network(&missing, &tokens()).0,
             NetworkSummary::default()
         );
+    }
+
+    #[test]
+    fn a_token_after_a_flood_is_still_found() {
+        // More than the 64 MiB the host used to read.
+        let padding = line(EventKind::Tcp {
+            dst: "1.2.3.4:80".into(),
+            sniffed: Sniffed::Unknown,
+            bytes: 1 << 20,
+            data: hex(&vec![b'x'; MAX_CAPTURE]),
+            inner: None,
+            decrypted: None,
+        });
+        let mut log = vec![padding; 600];
+        log.push(line(tcp(
+            "1.2.3.4:80",
+            Sniffed::Unknown,
+            "cioSECRET!",
+            None,
+        )));
+        let path = network_log("flood", log.join("\n").as_bytes());
+        let (summary, leaked) = analyze_network(&path, &tokens());
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(leaked, [leak("cargo_registry_token", "1.2.3.4:80")]);
+        assert_eq!(summary.cut, 600);
+        assert!(!summary.log_cut);
+        assert_eq!(
+            summary.unsearched(),
+            ["connections or frames longer than it keeps"]
+        );
+    }
+
+    #[test]
+    fn only_data_the_fake_internet_kept_whole_counts_as_searched() {
+        let lines: Vec<String> = [
+            tcp("1.2.3.4:80", Sniffed::Unknown, "all of it!", None),
+            EventKind::Tcp {
+                dst: "1.2.3.4:443".into(),
+                sniffed: Sniffed::Tls { sni: None },
+                bytes: 10,
+                data: hex(b"0123456789"),
+                inner: None,
+                decrypted: Some(hex(&vec![b'p'; MAX_CAPTURE])),
+            },
+            EventKind::Packet {
+                summary: "icmp echo".into(),
+                bytes: 1500,
+                data: hex(b"start"),
+            },
+        ]
+        .into_iter()
+        .map(line)
+        .collect();
+        let path = network_log("cut", lines.join("\n").as_bytes());
+        let (summary, _) = analyze_network(&path, &tokens());
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(summary.cut, 2);
+        assert!(NetworkSummary::default().unsearched().is_empty());
     }
 
     #[test]

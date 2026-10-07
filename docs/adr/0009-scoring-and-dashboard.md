@@ -20,7 +20,7 @@ the one person who can act on it.
 
    | Group | Cap | Signals and points |
    |-------|-----|--------------------|
-   | Theft | 100 | honeytoken left the VM 100, copied inside the VM 60 |
+   | Theft | 100 | honeytoken left the VM 100, copied inside the VM 60, network data the honeytoken search could not see 50 |
    | Integrity | 100 | became root 80, tamper attempt 60, guest stopped 50, set ID file 40 |
    | Dropper | 100 | the build ran a program from a writable location 60, build time code embeds an executable and starts programs 40 |
    | Credentials | 60 | a non cargo process read credentials 50, another process's memory or environment 30, a build script wrote the whole environment with a honeytoken into its build directory 15 |
