@@ -418,7 +418,7 @@ fn vm_test(test: &str, env: &[(&str, &str)]) -> Result<(), TaskError> {
 /// The C compiler for musl targets: `musl-gcc` when installed, otherwise
 /// the host `gcc`.
 fn musl_cc() -> &'static str {
-    if Path::new("/usr/bin/musl-gcc").exists() {
+    if Path::new(build::MUSL_GCC).exists() {
         "musl-gcc"
     } else {
         "gcc"

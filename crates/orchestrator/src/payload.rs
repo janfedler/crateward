@@ -28,6 +28,7 @@ use crateward_core::blobs::{BlobError, BlobStore};
 use crateward_core::child::{self, Child, ChildError};
 use crateward_core::cratesio::probe_manifest;
 use crateward_core::name::CrateName;
+use crateward_core::paths::guest;
 use crateward_core::paths::host::MKFS_EROFS;
 use crateward_core::sandbox::{self, FsAccess, Limits};
 
@@ -52,12 +53,23 @@ const LIMITS: Limits = Limits {
 /// Largest unpacked tar read from the blob store per crate.
 const MAX_BLOB_BYTES: u64 = 1024 * 1024 * 1024;
 
-const CARGO_CONFIG: &str = "[source.crates-io]\n\
-replace-with = \"vendored\"\n\n\
-[source.vendored]\n\
-directory = \"/cw/vendor\"\n\n\
-[net]\n\
-offline = true\n";
+/// The cargo configuration of every probe: crates.io replaced by the
+/// locked crates in the payload, offline.
+fn cargo_config() -> String {
+    format!(
+        "[source.crates-io]\nreplace-with = \"vendored\"\n\n\
+         [source.vendored]\ndirectory = \"{}\"\n\n\
+         [net]\noffline = true\n",
+        guest::VENDOR
+    )
+}
+
+/// A guest path below the payload mount, relative to the image root.
+fn in_payload(path: &'static str) -> &'static str {
+    path.strip_prefix(guest::PAYLOAD)
+        .and_then(|p| p.strip_prefix('/'))
+        .unwrap_or(path)
+}
 
 /// Why a payload could not be built. All of these are infrastructure
 /// failures.
@@ -244,11 +256,12 @@ impl<W: Write> TarWriter<W> {
 
     fn probe(&mut self, dir: &str, probe: &ProbeSpec) -> Result<(), PayloadError> {
         let manifest = probe_manifest(&probe.name, &probe.version);
+        let config = cargo_config();
         for (file, data) in [
             ("Cargo.toml", manifest.as_bytes()),
             ("Cargo.lock", probe.lockfile.as_bytes()),
             ("lib.rs", b"".as_slice()),
-            (".cargo/config.toml", CARGO_CONFIG.as_bytes()),
+            (".cargo/config.toml", config.as_bytes()),
         ] {
             self.append(&format!("{dir}/{file}"), 0o644, data)?;
         }
@@ -280,7 +293,7 @@ impl<W: Write> TarWriter<W> {
         // Directory sources need a checksum file. `package` must match the
         // lockfile. File hashes are left out: the payload is read only.
         let checksum = format!("{{\"files\":{{}},\"package\":\"{}\"}}", package.checksum);
-        let path = format!("vendor/{dir}/.cargo-checksum.json");
+        let path = format!("{}/{dir}/.cargo-checksum.json", in_payload(guest::VENDOR));
 
         self.append(&path, 0o644, checksum.as_bytes())
     }
@@ -320,7 +333,11 @@ impl<W: Write> TarWriter<W> {
 
         let mode = if executable { 0o755 } else { 0o644 };
 
-        self.append(&format!("vendor/{path}"), mode, &data)
+        self.append(
+            &format!("{}/{path}", in_payload(guest::VENDOR)),
+            mode,
+            &data,
+        )
     }
 
     /// The reduced manifest of a stubbed crate and its empty library.
@@ -367,7 +384,7 @@ pub fn write_tar<W: Write>(
         lockfile: spec.lockfile.clone(),
     };
 
-    tar.probe("probe", &first)?;
+    tar.probe(in_payload(guest::PROBE), &first)?;
 
     for (i, probe) in spec.extra_probes.iter().enumerate() {
         tar.probe(&format!("probes/{i}"), probe)?;
@@ -600,11 +617,11 @@ mod tests {
             format!("probe/Cargo.toml 644 {}", probe("demo", "1.0.0")),
             "probe/Cargo.lock 644 # lock\n".to_owned(),
             "probe/lib.rs 644 ".to_owned(),
-            format!("probe/.cargo/config.toml 644 {CARGO_CONFIG}"),
+            format!("probe/.cargo/config.toml 644 {}", cargo_config()),
             format!("probes/0/Cargo.toml 644 {}", probe("extra", "0.2.0")),
             "probes/0/Cargo.lock 644 # extra\n".to_owned(),
             "probes/0/lib.rs 644 ".to_owned(),
-            format!("probes/0/.cargo/config.toml 644 {CARGO_CONFIG}"),
+            format!("probes/0/.cargo/config.toml 644 {}", cargo_config()),
             "run.sh 644 echo".to_owned(),
             "vendor/demo-1.0.0/Cargo.toml 644 [package]".to_owned(),
             "vendor/demo-1.0.0/src/lib.rs 644 // lib".to_owned(),

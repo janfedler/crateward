@@ -20,8 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Where cgroup v2 is mounted.
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+use crateward_core::paths::host;
 
 /// Name prefix of slot cgroups.
 pub const SLOT_PREFIX: &str = "slot-";
@@ -89,13 +88,13 @@ impl CgroupTree {
     ///
     /// Fails if the cgroup is not delegated or lacks a controller.
     pub fn own() -> Result<Self, CgroupError> {
-        let self_cgroup = read(Path::new("/proc/self/cgroup"))?;
+        let self_cgroup = read(Path::new(host::OWN_CGROUP))?;
         let relative = self_cgroup
             .lines()
             .find_map(|line| line.strip_prefix("0::"))
             .unwrap_or("/")
             .trim_start_matches('/');
-        let mut root = Path::new(CGROUP_ROOT).join(relative);
+        let mut root = Path::new(host::CGROUPS).join(relative);
 
         // A restarted orchestrator may already sit in its supervisor leaf.
         if root.file_name().is_some_and(|name| name == "supervisor")

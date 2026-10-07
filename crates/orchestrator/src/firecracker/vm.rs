@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+use crateward_core::paths::host;
 use crateward_core::protocol::{AGENT_PORT, Limits};
 use tokio::process::{Child, Command};
 use tokio::time::Instant;
@@ -319,9 +320,9 @@ impl Launch {
 
     /// What the launcher builds the jail from.
     fn jail_spec(&self, jail: &JailConfig, files: &[Exposed], log: PathBuf) -> JailSpec {
-        let mut devices = vec![PathBuf::from("/dev/kvm")];
+        let mut devices = vec![PathBuf::from(host::KVM)];
         if jail.tap.is_some() {
-            devices.push(PathBuf::from("/dev/net/tun"));
+            devices.push(PathBuf::from(host::TUN));
         }
 
         JailSpec {

@@ -47,6 +47,18 @@ pub mod host {
 
     /// `mkfs.ext4` from Debian's `e2fsprogs`.
     pub const MKFS_EXT4: &str = "/usr/sbin/mkfs.ext4";
+
+    /// The KVM device every microVM needs.
+    pub const KVM: &str = "/dev/kvm";
+
+    /// The TUN device for a microVM's tap interface.
+    pub const TUN: &str = "/dev/net/tun";
+
+    /// The cgroup v2 hierarchy.
+    pub const CGROUPS: &str = "/sys/fs/cgroup";
+
+    /// The calling process's own cgroup.
+    pub const OWN_CGROUP: &str = "/proc/self/cgroup";
 }
 
 /// Inside a microVM. The root filesystem build, the orchestrator and the
@@ -77,6 +89,16 @@ pub mod guest {
     /// The probe directory in the payload, the job's working directory.
     pub const PROBE: &str = "/cw/probe";
 
+    /// The locked crates in the payload, which replace crates.io.
+    pub const VENDOR: &str = "/cw/vendor";
+
+    /// The shell that runs payload scripts.
+    pub const SHELL: &str = "/bin/sh";
+
+    /// The kernel's own BTF, which the agent checks the eBPF programs
+    /// against.
+    pub const KERNEL_BTF: &str = "/sys/kernel/btf/vmlinux";
+
     /// The writable scratch disk.
     pub const SCRATCH_DEVICE: &str = "/dev/vdc";
 
@@ -94,6 +116,9 @@ pub mod guest {
 
     /// The read only warm build cache drive (ADR 0006).
     pub const WARM_DEVICE: &str = "/dev/vdd";
+
+    /// The warm build cache's directories, on the scratch disk.
+    pub const WARM: &str = "/work/.warm";
 
     /// Where the warm image is mounted.
     pub const WARM_IMAGE: &str = "/work/.warm/image";
@@ -168,9 +193,14 @@ pub mod repo {
     pub const FUZZ_TARGETS: &str = "fuzz/fuzz_targets";
 }
 
-/// Build outputs, relative to the workspace root. The `xtask` tasks write
-/// them, the release bundle and the microVM tests read them.
+/// The build machine: outputs relative to the workspace root, which the
+/// `xtask` tasks write and the release bundle and the microVM tests read,
+/// and the tools the tasks use.
 pub mod build {
+    /// `musl-gcc` from Debian's `musl-tools`, used for the guest target when
+    /// installed.
+    pub const MUSL_GCC: &str = "/usr/bin/musl-gcc";
+
     /// The target triple of everything that runs on the bare guest.
     pub const GUEST_TARGET: &str = "x86_64-unknown-linux-musl";
 
@@ -277,7 +307,22 @@ pub mod bundle {
 
 #[cfg(test)]
 mod tests {
-    use super::build;
+    use super::{build, guest};
+
+    #[test]
+    fn guest_paths_lie_in_their_directories() {
+        for path in [guest::PROBE, guest::VENDOR] {
+            assert!(path.starts_with(guest::PAYLOAD), "{path}");
+        }
+
+        for path in [guest::HOME, guest::CARGO_HOME, guest::TARGET, guest::WARM] {
+            assert!(path.starts_with(guest::WORK), "{path}");
+        }
+
+        for path in [guest::WARM_IMAGE, guest::WARM_UPPER, guest::WARM_WORK] {
+            assert!(path.starts_with(guest::WARM), "{path}");
+        }
+    }
 
     #[test]
     fn guest_binaries_are_built_for_the_guest_target() {

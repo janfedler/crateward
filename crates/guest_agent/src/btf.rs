@@ -11,11 +11,9 @@ use std::collections::HashMap;
 use std::io;
 
 use crateward_core::bytes::u32_le;
+use crateward_core::paths::guest;
 
 const MAGIC: u16 = 0xeb9f;
-
-/// Where the kernel exposes its BTF.
-const KERNEL_BTF: &str = "/sys/kernel/btf/vmlinux";
 
 const KIND_INT: u32 = 1;
 const KIND_PTR: u32 = 2;
@@ -61,7 +59,7 @@ struct Type {
 #[derive(Debug, thiserror::Error)]
 pub enum BtfError {
     /// The kernel's BTF file cannot be read.
-    #[error("{}: {}", KERNEL_BTF, .0)]
+    #[error("{}: {}", guest::KERNEL_BTF, .0)]
     Read(io::Error),
     /// The data does not start with the magic of little endian BTF.
     #[error("not little endian BTF")]
@@ -249,7 +247,7 @@ impl Btf {
     ///
     /// Fails if the file cannot be read or parsed.
     pub fn from_kernel() -> Result<Self, BtfError> {
-        Self::parse(&std::fs::read(KERNEL_BTF).map_err(BtfError::Read)?)
+        Self::parse(&std::fs::read(guest::KERNEL_BTF).map_err(BtfError::Read)?)
     }
 
     fn name(&self, offset: u32) -> Option<&str> {

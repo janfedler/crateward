@@ -484,7 +484,7 @@ async fn replay(
     let mut warming = builder.clone();
     warming.setup.scratch_mib = scratch_mib(config);
     let run = RunPlan {
-        argv: vec!["/bin/sh".into(), format!("{}/warm.sh", guest::PAYLOAD)],
+        argv: vec![guest::SHELL.into(), format!("{}/warm.sh", guest::PAYLOAD)],
         cwd: guest::PAYLOAD.into(),
         timeout: Duration::from_secs(config.timeout_secs),
     };

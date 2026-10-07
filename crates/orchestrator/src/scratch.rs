@@ -23,7 +23,7 @@ use std::process::{ExitCode, Stdio};
 
 use crateward_core::bytes::u32_le;
 use crateward_core::child::{self, Child, ChildError};
-use crateward_core::paths::guest::WORK;
+use crateward_core::paths::guest::{self, WORK};
 use crateward_core::sandbox::{self, FsAccess, Limits};
 use ext4_view::{Ext4, Ext4Error, FileType, Metadata, PathBuf as ExtPath};
 use serde::{Deserialize, Serialize};
@@ -64,21 +64,9 @@ const LIMITS: Limits = Limits {
     open_files: 16,
 };
 
-/// Paths below which writes are part of a normal `cargo check`, relative to
-/// the scratch root.
-/// With a warm build cache, the job's own target writes land in the
-/// overlay's upper directory below `/.warm/`.
-const BUILD_AREAS: [&str; 3] = ["/target/", "/lost+found", "/.warm/"];
-
-/// Cargo's own state in `CARGO_HOME`: lock files and the cache database
-/// (with its journal files) by prefix, the rest by exact path, so nothing
-/// else can hide below them.
-const CARGO_STATE_PREFIXES: [&str; 2] =
-    ["/home/.cargo/.package-cache", "/home/.cargo/.global-cache"];
-const CARGO_STATE_PATHS: [&str; 2] = [
-    "/home/.cargo/registry",
-    "/home/.cargo/registry/CACHEDIR.TAG",
-];
+/// The directory `mkfs.ext4` creates for recovered files, relative to the
+/// scratch root.
+const LOST_FOUND: &str = "/lost+found";
 
 /// What the child needs besides the image.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -181,23 +169,60 @@ fn push<T>(list: &mut Vec<T>, omitted: &mut u64, item: T) {
     }
 }
 
-/// Whether a path is below one of the build areas (or is one).
-fn in_build_area(relative: &str) -> bool {
-    BUILD_AREAS.iter().any(|area| relative.starts_with(area))
-        || matches!(relative, "/target" | "/.warm")
+/// A guest path on the scratch disk, relative to the scratch root.
+fn on_scratch(path: &'static str) -> &'static str {
+    path.strip_prefix(WORK).unwrap_or(path)
 }
 
-/// Whether a path is cargo's own state in `CARGO_HOME`.
+/// Whether `path` is `dir` or below it.
+fn within(path: &str, dir: &str) -> bool {
+    path.strip_prefix(dir)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+/// Whether a path is in a build area, where writes are part of a normal
+/// `cargo check`. With a warm build cache, the job's own target writes land
+/// in the overlay's upper directory.
+fn in_build_area(relative: &str) -> bool {
+    [
+        on_scratch(guest::TARGET),
+        on_scratch(guest::WARM),
+        LOST_FOUND,
+    ]
+    .into_iter()
+    .any(|area| within(relative, area))
+}
+
+/// Whether a path is cargo's own state in `CARGO_HOME`: lock files and the
+/// cache database (with its journal files) by prefix, the rest by exact
+/// path, so nothing else can hide below them.
 fn is_cargo_state(relative: &str) -> bool {
-    CARGO_STATE_PREFIXES.iter().any(|p| relative.starts_with(p))
-        || CARGO_STATE_PATHS.contains(&relative)
+    let Some(rest) = relative.strip_prefix(on_scratch(guest::CARGO_HOME)) else {
+        return false;
+    };
+
+    rest.starts_with("/.package-cache")
+        || rest.starts_with("/.global-cache")
+        || matches!(rest, "/registry" | "/registry/CACHEDIR.TAG")
+}
+
+/// Whether a path is in a target directory, the job's own or the warm
+/// cache's writable layer.
+fn in_target(relative: &str) -> bool {
+    [guest::TARGET, guest::WARM_UPPER]
+        .into_iter()
+        .any(|dir| within(relative, on_scratch(dir)))
 }
 
 /// The file name of a compiled unit, if the path is one.
 fn unit_name(relative: &str) -> Option<&str> {
-    let name = relative
-        .strip_prefix("/target/debug/deps/")
-        .or_else(|| relative.strip_prefix("/.warm/upper/debug/deps/"))?;
+    let name = [guest::TARGET, guest::WARM_UPPER]
+        .into_iter()
+        .find_map(|dir| {
+            relative
+                .strip_prefix(on_scratch(dir))?
+                .strip_prefix("/debug/deps/")
+        })?;
     let unit = !name.contains('/') && [".rmeta", ".rlib", ".so"].iter().any(|e| name.ends_with(e));
 
     unit.then_some(name)
@@ -356,7 +381,7 @@ impl Scanner<'_> {
                 FileType::Directory => {
                     r.directories += 1;
 
-                    if relative != "/lost+found" {
+                    if relative != LOST_FOUND {
                         self.visit(&child, depth + 1)?;
                     }
                 }
@@ -370,7 +395,7 @@ impl Scanner<'_> {
                 // Overlayfs records a deleted lower file as a character
                 // device (a whiteout), prepared in its work directory and
                 // moved into the upper one.
-                FileType::CharacterDevice if relative.starts_with("/.warm/") => {}
+                FileType::CharacterDevice if within(&relative, on_scratch(guest::WARM)) => {}
                 _ => push(&mut r.special, &mut r.omitted, item),
             }
         }
@@ -402,8 +427,7 @@ impl Scanner<'_> {
         r.bytes = r.bytes.saturating_add(item.size);
         let elf = !planted && self.search(child, &item.path)?;
         let executable = item.mode & 0o111 != 0 || elf;
-        if executable && !relative.starts_with("/target/") && !relative.starts_with("/.warm/upper/")
-        {
+        if executable && !in_target(relative) {
             let r = &mut self.report;
             push(&mut r.executables_outside_target, &mut r.omitted, item);
         }
@@ -553,7 +577,7 @@ fn tar_header(kind: tar::EntryType, meta: &Metadata, size: u64) -> tar::Header {
 pub fn export<W: Write>(fs: &Ext4, out: W, excluded: &[String]) -> Result<(u64, u64), ExportError> {
     let excluded: HashSet<String> = excluded.iter().map(|n| n.replace('-', "_")).collect();
     let mut builder = tar::Builder::new(out);
-    let mut stack = vec![(ExtPath::new("/target"), 0_usize)];
+    let mut stack = vec![(ExtPath::new(on_scratch(guest::TARGET)), 0_usize)];
     let (mut entries, mut bytes) = (0_u64, 0_u64);
 
     while let Some((dir, depth)) = stack.pop() {
