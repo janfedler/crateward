@@ -23,12 +23,12 @@ the one person who can act on it.
    | Theft | 100 | honeytoken left the VM 100, copied inside the VM 60, network data the honeytoken search could not see 50 |
    | Integrity | 100 | became root 80, tamper attempt 60, guest stopped 50, set ID file 40 |
    | Dropper | 100 | the build ran a program from a writable location 60, build time code embeds an executable and starts programs 40 |
-   | Credentials | 60 | a non cargo process read credentials 50, another process's memory or environment 30, a build script wrote the whole environment with a honeytoken into its build directory 15 |
+   | Credentials | 60 | a non cargo process read credentials 50, another process's memory or environment 30, the crate's own build script wrote the whole environment with a honeytoken into its build directory 15 (a dependency's 0) |
    | Persistence | 60 | write to a persistence location 40, elsewhere outside the build 15, left on disk (persistence 40, executable 20, other 10 per top directory) |
    | Network | 40 | name looked up 10, connection without lookup 20, raw frame 30 |
-   | Static | 30 | per finding kind, its strongest instance: high at build time 30, high elsewhere or medium at build time 10, medium elsewhere 2, low at build time 1 |
+   | Static | 30 | per finding kind, its strongest instance: high at build time 30, high elsewhere or medium at build time 10, medium elsewhere 2, low at build time 1. A downloader shape whose download the run saw 10 |
    | Execution | 20 | a build script ran a network or privilege tool 15, an encoder 8, a downloader 5, a shell 3 |
-   | Change | 20 | build script added 10, new high finding 10, proc macro added 5, each new dynamic behavior 5 |
+   | Change | 20 | build script added 10, new high finding 10 per kind, proc macro added 5, each new dynamic behavior 5 |
 
 2. **Attribution.** Dynamic evidence names the package whose code acted,
    through the process tree (a build script's directory, or `rustc`

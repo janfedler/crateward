@@ -186,7 +186,7 @@ pub struct Evidence {
 /// The version of the analyzer's scoring (`crateward_analyzer::score`).
 /// Bumped whenever scoring changes, so old verdicts are recomputed. The
 /// dashboard reads it to show which verdicts wait for that.
-pub const ANALYZER_VERSION: u32 = 5;
+pub const ANALYZER_VERSION: u32 = 6;
 
 /// The version of the static analysis (`crateward_static_analysis::analyze`).
 /// Bumped whenever detectors or rules change, so old reports are recomputed

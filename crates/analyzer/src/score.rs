@@ -13,13 +13,15 @@
 //!   or a guest that stopped itself are high.
 //! * A build script that prints the whole environment copies the planted
 //!   token along with everything else. Common tools do this, so such a dump
-//!   counts as reading credentials, not as theft.
+//!   counts as reading credentials, not as theft, and only when the crate's
+//!   own build script did it.
 //! * Reading credentials, writing to persistence locations, contacting the
 //!   network, or running shells and downloaders during a build are
 //!   suspicious on their own and common in legitimate `-sys` crates, so they
 //!   add up rather than decide.
 //! * Static findings count by severity, more when the code runs at build
-//!   time, and new findings against the previous version count again.
+//!   time, and new findings against the previous version count again. A
+//!   downloader shape counts less when the run saw the download.
 //!
 //! Dynamic evidence names the package responsible when the process tree
 //! leads to a build script (`/work/target/debug/build/<package>-<hash>/`) or
@@ -106,6 +108,14 @@ impl Groups {
         }
 
         self.items.push((group, evidence));
+    }
+
+    /// Whether a run saw `package` look up a name or run a downloader.
+    fn downloaded(&self, package: &str) -> bool {
+        self.items.iter().any(|(_, e)| {
+            matches!(e.signal.as_str(), "network_lookup" | "exec_downloader")
+                && e.package.as_deref() == Some(package)
+        })
     }
 
     /// Applies the caps: within a group, the strongest items count first.
@@ -293,6 +303,7 @@ fn finding_name(kind: &FindingKind) -> String {
 /// crate with many ordinary findings must not add up to a high score.
 fn score_static(inputs: &Inputs<'_>, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     let Some(report) = inputs.report else { return };
+    let downloaded = groups.downloaded(inputs.name);
     let mut strongest: BTreeMap<String, (u32, &Finding, u32)> = BTreeMap::new();
 
     for f in &report.findings {
@@ -317,11 +328,12 @@ fn score_static(inputs: &Inputs<'_>, groups: &mut Groups, profile: &mut BTreeSet
         }
 
         // A payload is no static finding like the others: it does not share
-        // their cap.
-        let (group, points) = if f.kind == FindingKind::DropperPattern {
-            (Group::Dropper, 40)
-        } else {
-            (Group::Static, points)
+        // their cap. A download the run saw is scored by what the build did
+        // with it, so its shape adds little.
+        let (group, points) = match f.kind {
+            FindingKind::DropperPattern => (Group::Dropper, 40),
+            FindingKind::DownloaderPattern if downloaded => (Group::Static, 10),
+            _ => (Group::Static, points),
         };
 
         let more = if count > 1 {
@@ -385,10 +397,12 @@ fn score_diff(inputs: &Inputs<'_>, groups: &mut Groups) {
         );
     }
 
+    // Like static findings, each kind counts once.
+    let mut kinds = BTreeSet::new();
     for f in diff
         .new_findings
         .iter()
-        .filter(|f| f.severity >= Severity::High)
+        .filter(|f| f.severity >= Severity::High && kinds.insert(finding_name(&f.kind)))
     {
         groups.add(
             Group::Change,
@@ -407,10 +421,10 @@ fn score_diff(inputs: &Inputs<'_>, groups: &mut Groups) {
     }
 }
 
-fn score_run(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
+fn score_run(name: &str, run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     let processes: Processes<'_> = run.trace.processes.iter().map(|p| (p.pid, p)).collect();
     score_leaks(run, groups, profile);
-    score_copies(run, groups, profile);
+    score_copies(name, run, groups, profile);
     score_integrity(run, &processes, groups, profile);
     score_files(run, &processes, groups, profile);
     score_disk(run, groups, profile);
@@ -456,22 +470,28 @@ fn score_leaks(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<Stri
 }
 
 /// Honeytokens copied inside the VM, and build scripts that wrote the whole
-/// environment with them.
-fn score_copies(run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
+/// environment with them. Dumps by dependencies, such as `libz-sys` through
+/// `cc`, are shown without points: they say nothing about the crate `name`.
+fn score_copies(name: &str, run: &RunReport, groups: &mut Groups, profile: &mut BTreeSet<String>) {
     for leak in run.tokens_on_disk.iter().filter(|l| dumped(run, l)) {
-        profile.insert("dump:environment".into());
+        let package = build_dir_package(&leak.via);
+        let own = package.as_deref() == Some(name);
+        if own {
+            profile.insert("dump:environment".into());
+        }
+
         groups.add(
             Group::Credentials,
             Evidence {
                 signal: "environment_dumped".into(),
-                points: 15,
+                points: if own { 15 } else { 0 },
                 source: EvidenceSource::Disk,
                 summary: format!(
                     "A build script wrote the whole environment, with the planted {}, \
                      into its build directory.",
                     leak.kind
                 ),
-                package: build_dir_package(&leak.via),
+                package,
                 location: Some(leak.via.clone()),
             },
         );
@@ -884,12 +904,13 @@ pub fn should_escalate(verdict: &Verdict) -> bool {
 pub fn score(inputs: &Inputs<'_>) -> Verdict {
     let mut groups = Groups { items: Vec::new() };
     let mut profile = BTreeSet::new();
-    score_static(inputs, &mut groups, &mut profile);
-    score_diff(inputs, &mut groups);
 
     for run in inputs.runs {
-        score_run(run, &mut groups, &mut profile);
+        score_run(inputs.name, run, &mut groups, &mut profile);
     }
+
+    score_static(inputs, &mut groups, &mut profile);
+    score_diff(inputs, &mut groups);
 
     let new_behavior: Vec<String> = match inputs.previous_profile {
         Some(previous) => {
@@ -1041,11 +1062,14 @@ mod tests {
     /// A build script's output, as `libz-sys` writes it.
     const OUTPUT: &str = "/work/.warm/upper/debug/build/libz-sys-8151eeab73d3e858/output";
 
+    /// The crate's own build script's output.
+    const OWN_OUTPUT: &str = "/work/target/debug/build/evil-0123456789abcdef/output";
+
     #[test]
     fn a_dumped_environment_is_no_theft() {
-        let with = |scratch: serde_json::Value| {
+        let with = |via: &str, scratch: serde_json::Value| {
             let mut r = run(json!({
-                "tokens_on_disk": [{"kind": "github_token_env", "via": OUTPUT}],
+                "tokens_on_disk": [{"kind": "github_token_env", "via": via}],
                 "scratch": scratch,
             }));
 
@@ -1053,38 +1077,36 @@ mod tests {
             score(&inputs(&[r]))
         };
 
-        let v = with(scratch(&[OUTPUT], &[]));
+        let v = with(OWN_OUTPUT, scratch(&[OWN_OUTPUT], &[]));
 
         assert_eq!((v.score, v.level), (15, RiskLevel::Low));
         assert_eq!(v.evidence[0].signal, "environment_dumped");
-        assert_eq!(v.evidence[0].package.as_deref(), Some("libz-sys"));
         assert_eq!(v.profile, ["dump:environment"]);
 
+        // A dependency's dump is shown, without points.
+        let v = with(OUTPUT, scratch(&[OUTPUT], &[]));
+
+        assert_eq!((v.score, v.level), (0, RiskLevel::None));
+        assert_eq!(v.evidence[0].signal, "environment_dumped");
+        assert_eq!(v.evidence[0].package.as_deref(), Some("libz-sys"));
+        assert!(v.profile.is_empty());
+
         // The same file without the rest of the environment is a copy.
-        let v = with(scratch(&[], &[]));
+        let v = with(OUTPUT, scratch(&[], &[]));
 
         assert_eq!((v.score, v.level), (60, RiskLevel::High));
         assert_eq!(v.evidence[0].signal, "honeytoken_copied");
 
         // A report from before the scanner looked for dumps.
         assert_eq!(
-            with(serde_json::Value::Null).evidence[0].signal,
+            with(OUTPUT, serde_json::Value::Null).evidence[0].signal,
             "environment_dumped"
         );
     }
 
-    /// `monica_rand_core` 0.10.2: its build script printed the environment,
-    /// wrote an embedded executable to `/tmp` and started it.
-    #[test]
-    fn a_build_that_runs_what_it_dropped_is_critical() {
-        let mut r = run(json!({
-            "tokens_on_disk": [{"kind": "github_token_env", "via": OUTPUT}],
-            "scratch": scratch(&[OUTPUT], &[]),
-        }));
-
-        r.trace.processes[2].exe = "/tmp/code-helper".into();
-        let runs = [r];
-        let finding = |kind, file: &str| Finding {
+    /// A high finding in the build script.
+    fn finding(kind: FindingKind, file: &str) -> Finding {
+        Finding {
             kind,
             severity: Severity::High,
             file: file.into(),
@@ -1093,23 +1115,39 @@ mod tests {
             cfg: None,
             platform: crateward_static_analysis::findings::Platform::Any,
             evidence: "e".into(),
-        };
+        }
+    }
 
-        let report = StaticReport {
+    fn report(findings: Vec<Finding>) -> StaticReport {
+        StaticReport {
             analyzer_version: 6,
             manifest: crateward_static_analysis::manifest::ManifestFacts::default(),
             files: 4,
             rust_files: 1,
             skipped: Vec::new(),
-            findings: vec![
-                finding(FindingKind::EnvironmentEnumeration, "build.rs"),
-                finding(FindingKind::IncludedBinary, "build.rs"),
-                finding(FindingKind::DropperPattern, "build.rs"),
-            ],
+            findings,
             findings_dropped: 0,
             library_platform: crateward_static_analysis::findings::Platform::Any,
             platforms: BTreeMap::new(),
-        };
+        }
+    }
+
+    /// `monica_rand_core` 0.10.2: its build script printed the environment,
+    /// wrote an embedded executable to `/tmp` and started it.
+    #[test]
+    fn a_build_that_runs_what_it_dropped_is_critical() {
+        let mut r = run(json!({
+            "tokens_on_disk": [{"kind": "github_token_env", "via": OWN_OUTPUT}],
+            "scratch": scratch(&[OWN_OUTPUT], &[]),
+        }));
+
+        r.trace.processes[2].exe = "/tmp/code-helper".into();
+        let runs = [r];
+        let report = report(vec![
+            finding(FindingKind::EnvironmentEnumeration, "build.rs"),
+            finding(FindingKind::IncludedBinary, "build.rs"),
+            finding(FindingKind::DropperPattern, "build.rs"),
+        ]);
 
         let mut i = inputs(&runs);
         let dynamic = score(&i);
@@ -1307,6 +1345,65 @@ mod tests {
         assert!(!should_escalate(&v));
     }
 
+    /// `dittolive-ditto-sys`: the build script's download ran in the VM.
+    #[test]
+    fn a_download_the_run_saw_weighs_less_than_its_shape() {
+        let report = report(vec![finding(FindingKind::DownloaderPattern, "build.rs")]);
+        let downloader = |runs: &[RunReport]| {
+            let mut i = inputs(runs);
+            i.report = Some(&report);
+            score(&i)
+                .evidence
+                .into_iter()
+                .find(|e| e.signal == "static:downloader_pattern")
+                .unwrap()
+                .points
+        };
+
+        assert_eq!(downloader(&[run(json!({}))]), 10);
+
+        let mut quiet = run(json!({}));
+        quiet.trace.processes.truncate(2);
+
+        assert_eq!(downloader(&[quiet]), 30);
+        assert_eq!(downloader(&[]), 30);
+    }
+
+    /// `trusty-mpm` 1.7.12: one rule in two new places.
+    #[test]
+    fn a_new_high_finding_counts_once_per_kind() {
+        let diff = VersionDiff {
+            previous_version: "1.7.9".into(),
+            build_script_added: false,
+            proc_macro_added: false,
+            links_changed: false,
+            new_findings: vec![
+                finding(FindingKind::ShellCommand, "src/a.rs"),
+                finding(FindingKind::ShellCommand, "src/b.rs"),
+                finding(FindingKind::ProcessSpawn, "src/c.rs"),
+            ],
+            removed_findings: 0,
+            new_dependencies: Vec::new(),
+        };
+
+        let mut i = inputs(&[]);
+        i.diff = Some(&diff);
+        let new: Vec<_> = score(&i)
+            .evidence
+            .into_iter()
+            .filter(|e| e.signal == "new_high_finding")
+            .map(|e| e.summary)
+            .collect();
+
+        assert_eq!(
+            new,
+            [
+                "New since 1.7.9: shell_command",
+                "New since 1.7.9: process_spawn"
+            ]
+        );
+    }
+
     #[test]
     fn groups_are_capped() {
         let names: Vec<String> = (0..10).map(|i| format!("host{i}.example")).collect();
@@ -1465,7 +1562,7 @@ mod tests {
         let mut groups = Groups { items: Vec::new() };
         let mut profile = BTreeSet::new();
         for r in [&first, &second] {
-            score_run(r, &mut groups, &mut profile);
+            score_run("evil", r, &mut groups, &mut profile);
         }
 
         let items: Vec<_> = groups
