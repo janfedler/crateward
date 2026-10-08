@@ -33,7 +33,14 @@ pub struct VersionDiff {
 }
 
 fn key(f: &Finding) -> (&FindingKind, &str, &str) {
-    (&f.kind, f.file.as_str(), f.evidence.as_str())
+    // A pattern's evidence names the lines of its parts, which move with
+    // any edit. It counts as new only if the file did not have it before.
+    let evidence = match f.kind {
+        FindingKind::DownloaderPattern | FindingKind::DropperPattern => "",
+        _ => f.evidence.as_str(),
+    };
+
+    (&f.kind, f.file.as_str(), evidence)
 }
 
 /// Compares two reports. `dependencies` and `previous_dependencies` are the
@@ -121,5 +128,25 @@ mod tests {
 
         let same = diff(&new, &new, "0.1.0", &deps, &deps);
         assert!(same.new_findings.is_empty() && !same.build_script_added);
+    }
+
+    #[test]
+    fn a_pattern_that_only_moved_is_not_new() {
+        let script = "fn main() {\n    let u = \"https://example.com/x\";\n    std::process::Command::new(\"sh\");\n}";
+        let old = report(Some(script.as_bytes()));
+        let moved = format!("// A comment.\n{script}");
+        let new = report(Some(moved.as_bytes()));
+        let deps = BTreeSet::new();
+
+        assert!(
+            new.findings
+                .iter()
+                .any(|f| f.kind == FindingKind::DownloaderPattern)
+        );
+        assert!(
+            diff(&new, &old, "0.0.9", &deps, &deps)
+                .new_findings
+                .is_empty()
+        );
     }
 }

