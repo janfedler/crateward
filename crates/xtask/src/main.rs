@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod blank_lines;
+mod commit_lint;
 mod coverage;
 mod deploy;
 mod diagram;
@@ -37,6 +38,8 @@ enum Task {
     Ci,
     /// Check the writing style of all documentation.
     DocsLint,
+    /// Check that every commit message follows Conventional Commits.
+    CommitLint,
     /// Check the blank line rules of CONTRIBUTING.md in Rust code.
     BlankLines {
         /// Add the missing blank lines instead of checking.
@@ -121,6 +124,7 @@ fn main() -> ExitCode {
         Task::Ci => ci(),
         Task::DocsLint => docs_lint(),
         Task::BlankLines { write } => blank_lines::run(&workspace_root(), write),
+        Task::CommitLint => commit_lint::run(&workspace_root()),
         Task::StateDiagram { write } => diagram::run(&workspace_root(), write),
         Task::GuestAgent => guest_agent(),
         Task::GuestEbpf => guest_ebpf::run(&workspace_root()),
@@ -314,6 +318,7 @@ fn ci() -> Result<(), TaskError> {
     fuzz::check(&workspace_root())?;
     docs_lint()?;
     blank_lines::run(&workspace_root(), false)?;
+    commit_lint::run(&workspace_root())?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;
 

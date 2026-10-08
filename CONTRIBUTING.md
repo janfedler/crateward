@@ -124,6 +124,21 @@ Every public item has a doc comment (`missing_docs` is denied). Comments
 say why the code does something, not what it does. A comment that no longer
 matches the code is a bug. Comments follow the [writing style](#writing).
 
+### Commits
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+a subject `type(scope): description`, then a blank line and the body.
+
+* The type is one of `feat`, `fix`, `docs`, `refactor`, `style`, `test`,
+  `build`, `ci`, `chore`, `perf` and `revert`. A `!` after the type or
+  scope marks a breaking change.
+* The scope is the crate directory (`api`, `orchestrator`, `xtask`), or
+  `deploy`, `config`, `deps` or the name of a document. Leave it out when
+  a commit spans several areas.
+* The description is imperative, starts in lowercase and has no full stop.
+
+`cargo xtask commit-lint` checks every commit.
+
 ## Writing
 
 ### Style
