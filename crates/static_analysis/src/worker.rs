@@ -4,7 +4,7 @@
 //! and for every locked dependency, analyzing missing ones in one sandboxed
 //! child, then diffs against the previous version and decides the triage.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,8 +27,17 @@ use crate::triage::{Decision, Dependency, decide};
 /// Tar bytes handed to one child at most. More start another child.
 const BATCH_BYTES: usize = 512 * 1024 * 1024;
 
+/// Crate files one child analyzes again per refresh.
+const REFRESH_BATCH: usize = 10;
+
 /// Reports by the SHA-256 of their crate file.
 type Reports = BTreeMap<Sha256Digest, StaticReport>;
+
+/// A running child: the crate files it analyzes, in order, and its outcomes.
+type Running = (
+    Vec<Sha256Digest>,
+    tokio::task::JoinHandle<Result<Vec<Outcome>, crateward_core::child::ChildError>>,
+);
 
 /// A locked package as the fetch stage recorded it.
 #[derive(Debug, Clone, Deserialize)]
@@ -142,23 +151,31 @@ impl Analyzer {
     /// Analyzes again, a few per call, the crate files of scored jobs whose
     /// report an older analyzer wrote, so the dashboard shows what the
     /// current one adds, such as line numbers. Verdicts waiting for
-    /// review go first. Returns how many reports were written.
+    /// review go first. In burst mode, VM runs wait and children run on
+    /// all cores but one. Returns how many reports were written.
     ///
     /// # Errors
     ///
     /// Fails only if the store fails.
     pub async fn refresh_some(&mut self) -> Result<usize, StoreError> {
-        let limit = 10 + self.unrefreshable.len();
+        let children = if self.store.bursting().await? {
+            std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1).max(1))
+        } else {
+            1
+        };
+
+        let wanted = REFRESH_BATCH * children;
+        let limit = wanted + self.unrefreshable.len();
         let outdated: Vec<Sha256Digest> = self
             .store
             .outdated_static_reports(ANALYZER_VERSION, i64::try_from(limit).unwrap_or(i64::MAX))
             .await?
             .into_iter()
             .filter(|sha| !self.unrefreshable.contains(sha))
-            .take(10)
+            .take(wanted)
             .collect();
 
-        let reports = match self.ensure_reports(&outdated).await {
+        let reports = match self.analyze_in(&outdated, children).await {
             Ok(reports) => reports,
             Err(failure) => {
                 tracing::warn!(%failure, "cannot refresh static reports");
@@ -320,6 +337,16 @@ impl Analyzer {
     /// Current reports for the given crate files, analyzing missing ones.
     /// Files without a stored blob or that fail analysis are left out.
     async fn ensure_reports(&self, files: &[Sha256Digest]) -> Result<Reports, Failure> {
+        self.analyze_in(files, 1).await
+    }
+
+    /// Like [`Self::ensure_reports`], with up to `children` children at
+    /// once.
+    async fn analyze_in(
+        &self,
+        files: &[Sha256Digest],
+        children: usize,
+    ) -> Result<Reports, Failure> {
         let mut reports = Reports::new();
         let mut missing = Vec::new();
 
@@ -333,6 +360,8 @@ impl Analyzer {
             }
         }
 
+        let per_child = missing.len().div_ceil(children);
+        let mut running = VecDeque::new();
         let mut batch = Vec::new();
         let mut batch_bytes = 0;
         let mut iter = missing.into_iter().peekable();
@@ -341,10 +370,20 @@ impl Analyzer {
             batch_bytes += tar.len();
             batch.push((sha, tar));
 
-            if batch_bytes >= BATCH_BYTES || iter.peek().is_none() {
-                reports.extend(self.analyze_batch(std::mem::take(&mut batch)).await?);
+            if batch_bytes >= BATCH_BYTES || batch.len() == per_child || iter.peek().is_none() {
+                if running.len() == children
+                    && let Some(oldest) = running.pop_front()
+                {
+                    reports.extend(self.finish_batch(oldest).await?);
+                }
+
+                running.push_back(self.start_batch(std::mem::take(&mut batch)));
                 batch_bytes = 0;
             }
+        }
+
+        for child in running {
+            reports.extend(self.finish_batch(child).await?);
         }
 
         Ok(reports)
@@ -370,13 +409,23 @@ impl Analyzer {
 
     /// Analyzes the tars in one sandboxed child and stores the reports.
     /// Archives that cannot be analyzed are left out.
-    async fn analyze_batch(
-        &self,
-        batch: Vec<(Sha256Digest, Vec<u8>)>,
-    ) -> Result<Vec<(Sha256Digest, StaticReport)>, Failure> {
+    /// Starts a child on a batch of crate files.
+    fn start_batch(&self, batch: Vec<(Sha256Digest, Vec<u8>)>) -> Running {
         let (shas, tars): (Vec<_>, Vec<_>) = batch.into_iter().unzip();
         let exe = self.exe.clone();
-        let outcomes = tokio::task::spawn_blocking(move || analyze_in_sandbox(&exe, tars))
+
+        (
+            shas,
+            tokio::task::spawn_blocking(move || analyze_in_sandbox(&exe, tars)),
+        )
+    }
+
+    /// Waits for a child and stores its reports.
+    async fn finish_batch(
+        &self,
+        (shas, child): Running,
+    ) -> Result<Vec<(Sha256Digest, StaticReport)>, Failure> {
+        let outcomes = child
             .await
             .map_err(Failure::infrastructure)?
             .map_err(Failure::infrastructure)?;

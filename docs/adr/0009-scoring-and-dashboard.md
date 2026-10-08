@@ -43,7 +43,7 @@ the one person who can act on it.
    with vendored htmx and server sent events, on loopback only, reached
    through an SSH tunnel. A `Host` check, same origin checks for writes, a
    strict Content Security Policy and read only page queries. The only
-   write is a review decision.
+   writes are a review decision and the burst mode switch.
 6. **Public site:** a static export of counts only. Findings reach it by
    hand, after disclosure.
 7. **MITRE ATT&CK tags.** A fixed table in `crates/core/src/attack.rs`
@@ -75,7 +75,11 @@ the one person who can act on it.
   malicious dependency is named as such.
 * Library code weighs little: code that runs only when a library is called
   is out of reach of build time analysis, though static analysis lists it.
-* Verdicts carry the analyzer version and are recomputed when it changes.
+* Verdicts carry the analyzer version and are recomputed when it changes,
+  after static analysis has written the job's report again, in idle time.
+  Burst mode, switched on the jobs page, pauses the sandbox stage so that
+  reprocessing gets the cores of the VM runs. The supervisor ends it once
+  the backlog is empty or stopped shrinking for half an hour.
   The canaries pin the extremes: the known bad one is critical, the known
   good one scores nothing.
 

@@ -97,16 +97,23 @@ impl Analyzer {
     }
 
     /// Recomputes verdicts an older analyzer produced for finished jobs,
-    /// a few per call. A recomputed verdict that newly needs review enters
-    /// the inbox like a fresh one. Returns how many were recomputed.
+    /// a few per call, more in burst mode. A recomputed verdict that newly
+    /// needs review enters the inbox like a fresh one. Returns how many
+    /// were recomputed.
     ///
     /// # Errors
     ///
     /// Fails only if the store fails.
     pub async fn rescore_some(&mut self) -> Result<usize, StoreError> {
+        let batch = if self.store.bursting().await? {
+            200
+        } else {
+            20
+        };
+
         let jobs = self
             .store
-            .outdated_verdicts(crate::score::ANALYZER_VERSION, 20)
+            .outdated_verdicts(crate::score::ANALYZER_VERSION, batch)
             .await?;
         for job in &jobs {
             let before = self.store.verdict(job.id).await?;

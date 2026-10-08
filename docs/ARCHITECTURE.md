@@ -197,7 +197,8 @@ Notes on the design:
   quarantine, in the same transaction. The job is never retried
   automatically, since that would execute the suspicious crate again.
 * Infrastructure failures feed a circuit breaker per stage. An open breaker
-  or a pause (quarantine, a failed canary, a full scratch filesystem) stops
+  or a pause (quarantine, a failed canary, a full scratch filesystem, burst
+  mode) stops
   claiming in the affected stages only. The supervisor decides from the job
   events and delivers alerts
   ([ADR 0008](adr/0008-autonomy-and-escape-detection.md)).

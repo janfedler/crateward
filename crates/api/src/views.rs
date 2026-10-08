@@ -173,6 +173,8 @@ pub struct JobsPage {
     pub backlog: i64,
     /// The job list of those jobs.
     pub backlog_href: String,
+    /// Whether burst mode is on.
+    pub bursting: bool,
 }
 
 /// One piece of evidence as shown.

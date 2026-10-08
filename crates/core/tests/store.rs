@@ -44,7 +44,7 @@ async fn migrations_are_idempotent() {
     let mut store = db.store().await;
     assert_eq!(
         store.migrate().await.unwrap(),
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     );
     assert!(store.migrate().await.unwrap().is_empty());
 
@@ -586,6 +586,17 @@ async fn an_open_breaker_or_pause_stops_only_its_stages() {
     // A disk pause does not concern the fetch stage.
     assert!(store.pause(PauseReason::Disk, None, "full").await.unwrap());
     assert!(!store.pause(PauseReason::Disk, None, "again").await.unwrap());
+    assert!(!store.bursting().await.unwrap());
+
+    // Burst mode, like a full disk, stops only the sandbox stage.
+    assert!(
+        store
+            .pause(PauseReason::Burst, None, "burst")
+            .await
+            .unwrap()
+    );
+    assert!(store.bursting().await.unwrap());
+    assert_eq!(PauseReason::Burst.stages(), PauseReason::Disk.stages());
 
     let job = store
         .claim(Stage::Fetch, "w", LEASE)

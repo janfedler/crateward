@@ -14,6 +14,7 @@
 //! * It scores jobs that waited too long for a VM slot as static only.
 //! * It checks disk usage, and pauses the sandbox stage while the scratch
 //!   filesystem is too full.
+//! * It ends burst mode once reprocessing has nothing left to speed up.
 //! * It trims the raw data (process lists, output tails) of unflagged runs
 //!   older than `storage.raw_log_retention_days`.
 //! * It looks for signs of a host escape (ADR 0008): files that differ
@@ -58,6 +59,10 @@ const WORKER: &str = "supervisor";
 /// Run reports trimmed per round at most, so one round stays short.
 const TRIM_BATCH: i64 = 500;
 
+/// How long the reprocessing backlog may stay above its lowest count in
+/// burst mode before the burst ends: what is left cannot be reprocessed.
+const BURST_STALL_SECS: i64 = 30 * 60;
+
 /// Everything one round needs.
 struct Supervisor<'a> {
     config: &'a Config,
@@ -65,6 +70,8 @@ struct Supervisor<'a> {
     policies: Policies,
     notifier: Notifier,
     integrity: integrity::Integrity,
+    /// In burst mode, the lowest backlog seen and when.
+    burst_low: Option<(i64, i64)>,
 }
 
 impl Supervisor<'_> {
@@ -93,6 +100,7 @@ impl Supervisor<'_> {
         }
 
         self.disks().await?;
+        self.burst().await?;
         let trimmed = self
             .store
             .trim_raw_runs(self.config.storage.raw_log_retention_days, TRIM_BATCH)
@@ -172,6 +180,34 @@ impl Supervisor<'_> {
             }
         } else if self.store.lift_pause(PauseReason::Disk).await? {
             tracing::info!("sandbox stage resumed: scratch filesystem has room again");
+        }
+
+        Ok(())
+    }
+
+    /// Ends burst mode once no finished job waits for reprocessing, or
+    /// the backlog stopped shrinking: reports that cannot be analyzed again
+    /// stay in it.
+    async fn burst(&mut self) -> Result<(), StoreError> {
+        if !self.store.bursting().await? {
+            self.burst_low = None;
+            return Ok(());
+        }
+
+        let backlog = self.store.rescore_backlog().await?;
+        let now = self.store.now_epoch().await?;
+        let (low, since) = match self.burst_low {
+            Some((low, since)) if backlog >= low => (low, since),
+            _ => (backlog, now),
+        };
+
+        self.burst_low = Some((low, since));
+
+        if (backlog == 0 || now - since >= BURST_STALL_SECS)
+            && self.store.lift_pause(PauseReason::Burst).await?
+        {
+            tracing::info!(backlog, "burst mode ended: VM runs start again");
+            self.burst_low = None;
         }
 
         Ok(())
@@ -301,6 +337,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
                 ),
             )
             .map_err(fatal)?,
+            burst_low: None,
         };
 
         let stop = Stop::install().map_err(fatal)?;

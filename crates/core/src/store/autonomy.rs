@@ -25,11 +25,15 @@ pub enum PauseReason {
     /// The scratch filesystem is too full: the sandbox stage stops until
     /// usage drops.
     Disk,
+    /// Burst mode, set from the dashboard: no new VM runs start, and their
+    /// cores go to reprocessing finished jobs. Lifted from the dashboard,
+    /// or by the supervisor once nothing waits.
+    Burst,
 }
 
 impl PauseReason {
     /// Every reason.
-    pub const ALL: [Self; 3] = [Self::Quarantine, Self::Canary, Self::Disk];
+    pub const ALL: [Self; 4] = [Self::Quarantine, Self::Canary, Self::Disk, Self::Burst];
 
     /// Name stored in the database.
     #[must_use]
@@ -38,6 +42,7 @@ impl PauseReason {
             Self::Quarantine => "quarantine",
             Self::Canary => "canary",
             Self::Disk => "disk",
+            Self::Burst => "burst",
         }
     }
 
@@ -47,7 +52,7 @@ impl PauseReason {
         match self {
             Self::Quarantine => &Stage::ALL,
             Self::Canary => &[Stage::Sandbox, Stage::Analysis, Stage::Finalize],
-            Self::Disk => &[Stage::Sandbox],
+            Self::Disk | Self::Burst => &[Stage::Sandbox],
         }
     }
 
@@ -307,6 +312,23 @@ impl Store {
             .await?;
 
         Ok(deleted == 1)
+    }
+
+    /// Whether burst mode is on.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn bursting(&self) -> Result<bool, StoreError> {
+        let row = self
+            .client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM pipeline_pauses WHERE reason = $1)",
+                &[&PauseReason::Burst.name()],
+            )
+            .await?;
+
+        Ok(row.try_get(0)?)
     }
 
     /// Active pauses.

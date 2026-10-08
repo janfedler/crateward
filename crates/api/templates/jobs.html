@@ -27,7 +27,8 @@
   {% for s in states %}<a href="{{ s.href }}"{% if s.selected %} class="selected"{% endif %}>{{ s.name }} <span class="muted">{{ s.n }}</span></a>
   {% endfor %}
 </p>
-{% if backlog > 0 %}<p class="muted">{{ backlog }} finished jobs wait for re-processing by the current static analysis or scoring. <a href="{{ backlog_href }}">Show them</a>.</p>{% endif %}
+{% if bursting %}<form class="burst" method="post" action="/burst"><p><b>Burst mode is on.</b> VM runs wait, and their cores re-process finished jobs. It ends by itself once nothing is left. <input type="hidden" name="action" value="stop"><button type="submit">Stop burst mode</button></p></form>{% endif %}
+{% if backlog > 0 %}<form class="burst" method="post" action="/burst"><p class="muted">{{ backlog }} finished jobs wait for re-processing by the current static analysis or scoring. <a href="{{ backlog_href }}">Show them</a>.{% if !bursting %} <input type="hidden" name="action" value="start"><button type="submit" title="New VM runs wait until it ends">Start burst mode</button>{% endif %}</p></form>{% endif %}
 <p class="muted">{{ total }} matching, newest first.{% if first > 0 %} Showing {{ first }} to {{ last }}.{% endif %}</p>
 {% include "rows.html" %}
 <nav class="pager" aria-label="pages">

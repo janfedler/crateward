@@ -56,9 +56,24 @@ impl Dashboard {
 
     /// The status, lowercased head and body of a `GET`.
     async fn fetch(&self, path: &str) -> (u16, String, String) {
+        self.request("GET", path, "").await
+    }
+
+    /// The status of a form `POST` from the dashboard itself.
+    async fn post(&self, path: &str, form: &str) -> u16 {
+        self.request("POST", path, form).await.0
+    }
+
+    async fn request(&self, method: &str, path: &str, form: &str) -> (u16, String, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", self.port)).await.unwrap();
         let host = format!("127.0.0.1:{}", self.port);
-        let request = format!("GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+        let request = format!(
+            "{method} {path} HTTP/1.1\r\nHost: {host}\r\nOrigin: http://{host}\r\n\
+             Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n{form}",
+            form.len()
+        );
+
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut raw = Vec::new();
         stream.read_to_end(&mut raw).await.unwrap();
@@ -851,6 +866,24 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
     assert!(
         findings.contains("<a href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs#L3\"")
     );
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn burst_mode_is_switched_on_the_jobs_page() {
+    let Some(db) = Dashboard::start().await else {
+        return;
+    };
+
+    assert!(!db.get("/jobs").await.1.contains("Stop burst mode"));
+    assert_eq!(db.post("/burst", "action=start").await, 303);
+    assert!(db.store.bursting().await.unwrap());
+    assert!(db.get("/jobs").await.1.contains("Stop burst mode"));
+
+    assert_eq!(db.post("/burst", "action=stop").await, 303);
+    assert!(!db.store.bursting().await.unwrap());
+    assert_eq!(db.post("/burst", "action=later").await, 400);
 
     db.drop().await;
 }

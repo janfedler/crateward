@@ -40,7 +40,9 @@ use crateward_core::component::Component;
 use crateward_core::config::Config;
 use crateward_core::job::{JobId, JobState, Stage};
 use crateward_core::paths::host;
-use crateward_core::store::{Disclosure, JobFilter, Review, Store, StoreError, StoredEvent};
+use crateward_core::store::{
+    Disclosure, JobFilter, PauseReason, Review, Store, StoreError, StoredEvent,
+};
 use crateward_core::verdict::{Evidence, Verdict};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
@@ -424,6 +426,7 @@ async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<JobsQuery>) ->
             rescore: selection.rescore,
             backlog,
             backlog_href: jobs_href(&[("verdict", RESCORE)]),
+            bursting: state.reader.bursting().await?,
         }
         .render()?,
     ))
@@ -844,6 +847,34 @@ async fn review(
     Ok(Redirect::to(&format!("/jobs/{id}")).into_response())
 }
 
+/// The burst mode switch: `start` or `stop`.
+#[derive(Debug, Deserialize)]
+pub struct BurstForm {
+    action: String,
+}
+
+/// Starts or stops burst mode: VM runs wait, and their cores reprocess
+/// finished jobs.
+async fn burst(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<BurstForm>,
+) -> Result<Response, AppError> {
+    match form.action.as_str() {
+        "start" => {
+            let detail = "VM runs wait while finished jobs are reprocessed";
+            state.writer.pause(PauseReason::Burst, None, detail).await?;
+        }
+        "stop" => {
+            state.writer.lift_pause(PauseReason::Burst).await?;
+        }
+        _ => return Ok((StatusCode::BAD_REQUEST, "unknown action").into_response()),
+    }
+
+    tracing::info!(action = %form.action, "burst mode");
+
+    Ok(Redirect::to("/jobs").into_response())
+}
+
 async fn asset(Path(file): Path<String>) -> Response {
     match STATIC.iter().find(|(name, ..)| *name == file) {
         Some((_, content_type, bytes, _)) => (
@@ -868,6 +899,7 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
         .route("/jobs/{id}", get(job))
         .route("/jobs/{id}/review", post(review))
         .route("/jobs/{id}/runs/{file}", get(run_report))
+        .route("/burst", post(burst))
         .route("/static/{file}", get(asset))
         .with_state(state)
         .layer(middleware::from_fn(move |request, next| {

@@ -57,6 +57,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
         11,
         include_str!("../migrations/0011_shared_finding_pages.sql"),
     ),
+    (12, include_str!("../migrations/0012_burst.sql")),
 ];
 
 /// The server's message for database errors, which the error's own

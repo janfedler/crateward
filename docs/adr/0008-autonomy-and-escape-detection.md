@@ -15,8 +15,10 @@ about 49 kB, almost all of it the trace's process list.
 ## Decision
 
 1. **State in the database:** stage breakers, pipeline pauses (quarantine,
-   canary, disk), an alert outbox and canary runs. Claiming skips paused
-   stages and open breakers. Workers need nothing else.
+   canary, disk, and burst mode from
+   [ADR 0009](0009-scoring-and-dashboard.md)), an alert outbox and canary
+   runs. Claiming skips paused stages and open breakers. Workers need
+   nothing else.
 2. **Quarantine in the same transaction** as the transition that suspects a
    compromise. Only a human lifts it (`crateward quarantine lift`).
 3. **How a VM ended** comes from Firecracker's exit code when the agent's
