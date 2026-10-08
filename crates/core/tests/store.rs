@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use crateward_core::breaker::{BreakerState, Counts};
+use crateward_core::digest::Sha256Digest;
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
 use crateward_core::job::{JobEvent, JobId, JobState, Stage, Triage};
@@ -864,14 +865,15 @@ async fn outdated(store: &Store) -> (Vec<JobId>, Vec<JobId>) {
     (queue, listed)
 }
 
-#[tokio::test]
-async fn a_verdict_older_than_its_static_report_is_outdated() {
-    let Some(db) = TestDb::new("test").await else {
-        return;
-    };
-
-    let mut store = db.store().await;
-    store.migrate().await.unwrap();
+/// A finished job of crate file `ab…ab`, whose static report the static
+/// analysis version before the current one wrote, and whose verdict
+/// `analyzer_version` wrote after it. `blake3` names the stored archive.
+async fn scored_on_an_old_report(
+    db: &TestDb,
+    store: &Store,
+    blake3: Option<&str>,
+    analyzer_version: u32,
+) -> (JobId, Sha256Digest, Verdict) {
     let job = store
         .enqueue(&new_job("lib", "1.0.0", 0))
         .await
@@ -884,7 +886,7 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
             sha256: sha,
             name: "lib".into(),
             version: "1.0.0".into(),
-            blake3: None,
+            blake3: blake3.map(str::to_owned),
             compressed_bytes: 1,
             unpacked_bytes: 1,
             stored_bytes: Some(1),
@@ -904,7 +906,7 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
         evidence: Vec::new(),
         profile: Vec::new(),
         new_behavior: Vec::new(),
-        analyzer_version: ANALYZER_VERSION,
+        analyzer_version,
     };
 
     store.record_verdict(job, &verdict).await.unwrap();
@@ -918,10 +920,31 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
         .await
         .unwrap();
 
+    (
+        job,
+        sha,
+        Verdict {
+            analyzer_version: ANALYZER_VERSION,
+            ..verdict
+        },
+    )
+}
+
+#[tokio::test]
+async fn a_verdict_older_than_its_static_report_is_outdated() {
+    let Some(db) = TestDb::new("test").await else {
+        return;
+    };
+
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let (job, sha, verdict) = scored_on_an_old_report(&db, &store, None, ANALYZER_VERSION).await;
+
     // The report waits for a refresh before the verdict is rescored.
     assert_eq!(outdated(&store).await, (vec![], vec![job]));
 
     // The static analyzer refreshed the report after the verdict.
+    let report = serde_json::json!({"findings": []});
     store
         .record_static_report(&sha, STATIC_ANALYZER_VERSION, true, Some("high"), &report)
         .await
@@ -932,6 +955,46 @@ async fn a_verdict_older_than_its_static_report_is_outdated() {
     store.record_verdict(job, &verdict).await.unwrap();
 
     assert_eq!(outdated(&store).await, (vec![], vec![]));
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn an_old_verdict_waits_for_its_report_to_be_refreshed() {
+    let Some(db) = TestDb::new("test").await else {
+        return;
+    };
+
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+    let (job, sha, _) =
+        scored_on_an_old_report(&db, &store, Some("blob"), ANALYZER_VERSION - 1).await;
+
+    // Scoring now would score again after the refresh.
+    assert_eq!(outdated(&store).await, (vec![], vec![job]));
+
+    let report = serde_json::json!({"findings": []});
+    store
+        .record_static_report(&sha, STATIC_ANALYZER_VERSION, true, None, &report)
+        .await
+        .unwrap();
+
+    assert_eq!(outdated(&store).await, (vec![job], vec![job]));
+
+    // A report whose archive was never stored cannot be refreshed.
+    store
+        .record_static_report(&sha, STATIC_ANALYZER_VERSION - 1, true, None, &report)
+        .await
+        .unwrap();
+    db.admin()
+        .batch_execute(&format!(
+            "SET search_path TO {}; UPDATE crate_files SET blake3 = NULL",
+            db.schema()
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(outdated(&store).await, (vec![job], vec![job]));
 
     db.drop().await;
 }

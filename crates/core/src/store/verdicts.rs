@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::{Store, StoreError};
 use crate::job::JobId;
-use crate::verdict::Verdict;
+use crate::verdict::{STATIC_ANALYZER_VERSION, Verdict};
 
 /// Where a verdict stands in the "needs you" inbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,14 +49,21 @@ impl Review {
 /// scored before their static report was last written: the static analyzer
 /// refreshes outdated reports on its own schedule, so a verdict recomputed
 /// before that would otherwise keep the old findings. Jobs with trimmed
-/// runs keep their verdict (see `retention`). `version` is the SQL for the
-/// current analyzer version, over `jobs j` and `verdicts v`.
-pub(super) fn needs_rescore(version: &str) -> String {
+/// runs keep their verdict (see `retention`). A job whose report the
+/// static analyzer will still refresh waits for it, so that it is scored
+/// once and not again after the refresh. `version` and `static_version` are
+/// the SQL for the current analyzer versions, over `jobs j` and `verdicts v`.
+pub(super) fn needs_rescore(version: &str, static_version: &str) -> String {
     format!(
         "{FINISHED}
          AND (v.analyzer_version < {version}
               OR EXISTS (SELECT 1 FROM static_reports s
-                         WHERE s.sha256 = j.cksum AND s.analyzed_at > v.scored_at))"
+                         WHERE s.sha256 = j.cksum AND s.analyzed_at > v.scored_at))
+         AND NOT EXISTS (SELECT 1 FROM static_reports s
+                         JOIN crate_files f ON f.sha256 = s.sha256
+                         WHERE s.sha256 = j.cksum
+                           AND s.analyzer_version < {static_version}
+                           AND f.blake3 IS NOT NULL)"
     )
 }
 
@@ -202,6 +209,7 @@ impl Store {
 
     /// Finished jobs whose verdict an older analyzer produced, or that were
     /// scored before their static report was last written, oldest first.
+    /// Jobs whose report waits for a refresh are left out.
     ///
     /// # Errors
     ///
@@ -219,9 +227,9 @@ impl Store {
                     "SELECT {} FROM jobs j JOIN verdicts v ON v.job_id = j.id
                      WHERE {} ORDER BY v.scored_at LIMIT $2",
                     super::COLUMNS_J,
-                    needs_rescore("$1")
+                    needs_rescore("$1", "$3")
                 ),
-                &[&version, &limit],
+                &[&version, &limit, &STATIC_ANALYZER_VERSION],
             )
             .await?;
 
