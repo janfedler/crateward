@@ -567,4 +567,179 @@ mod tests {
         assert!(index.contains("<td>removed by crates.io first</td>"));
         assert_eq!(json["findings"][1]["reported"], serde_json::Value::Null);
     }
+
+    /// The file `name` of a rendered site.
+    fn file<'a>(files: &'a [(String, Vec<u8>)], name: &str) -> &'a [u8] {
+        &files.iter().find(|(n, _)| n == name).unwrap().1
+    }
+
+    fn index(files: &[(String, Vec<u8>)]) -> String {
+        String::from_utf8(file(files, "index.html").to_vec()).unwrap()
+    }
+
+    fn stats_json(files: &[(String, Vec<u8>)]) -> serde_json::Value {
+        serde_json::from_slice(file(files, "stats.json")).unwrap()
+    }
+
+    #[test]
+    fn the_canaries_are_summed_up_in_one_sentence() {
+        let stats = PublicStats::default();
+        let canary = |passed| ("canary-exfil".to_owned(), passed, 0);
+
+        for (canaries, text, pass) in [
+            (vec![], "No canary results yet.", false),
+            (
+                vec![canary(true), canary(true)],
+                "gave the expected results",
+                true,
+            ),
+            (
+                vec![canary(true), canary(false)],
+                "A canary gave an unexpected result.",
+                false,
+            ),
+        ] {
+            let files = render(&stats, &canaries, &[], "now").unwrap();
+
+            assert!(index(&files).contains(text), "{text}");
+            assert_eq!(stats_json(&files)["canaries_pass"], pass, "{text}");
+        }
+    }
+
+    #[test]
+    fn an_empty_store_renders_an_empty_site() {
+        let files = render(&PublicStats::default(), &[], &[], "now").unwrap();
+        let index = index(&files);
+
+        assert!(index.contains("<tr><th>Versions seen</th><td>0</td></tr>"));
+        assert!(index.contains("<tr><th>Versions with a verdict</th><td>0</td></tr>"));
+        assert!(index.contains("<p>None yet.</p>"));
+
+        assert_eq!(
+            stats_json(&files),
+            serde_json::json!({
+                "generated": "now",
+                "versions": 0,
+                "finished": 0,
+                "coverage": [],
+                "levels": [],
+                "daily": [],
+                "canaries_pass": false,
+                "findings": [],
+            })
+        );
+    }
+
+    #[test]
+    fn counts_appear_on_the_page_and_in_the_json_in_their_order() {
+        let stats = PublicStats {
+            versions: 12,
+            finished: 9,
+            coverage: vec![
+                ("static_only".into(), 6),
+                ("dynamic_linux".into(), 2),
+                ("not_applicable_on_linux".into(), 1),
+            ],
+            levels: vec![("none".into(), 7), ("low".into(), 1), ("high".into(), 1)],
+            daily: vec![("2026-10-09".into(), 4), ("2026-10-08".into(), 5)],
+        };
+
+        let files = render(&stats, &[], &[], "2026-10-09 08:00 UTC").unwrap();
+        let index = index(&files);
+
+        for row in [
+            "<tr><th>Versions seen</th><td>12</td></tr>",
+            "<tr><th>Versions with a verdict</th><td>9</td></tr>",
+            "<tr><th>Static analysis only</th><td>6 (66%)</td></tr>",
+            "<tr><th>Built and traced in a microVM on Linux</th><td>2 (22%)</td></tr>",
+            "<tr><th>No code for Linux (not applicable)</th><td>1 (11%)</td></tr>",
+            "<tr><th>none</th><td>7</td></tr>",
+            "<tr><th>high</th><td>1</td></tr>",
+            "<span>Updated 2026-10-09 08:00 UTC</span>",
+        ] {
+            assert!(index.contains(row), "{row}");
+        }
+
+        let newer = index.find("<th>2026-10-09</th><td>4</td>").unwrap();
+        let older = index.find("<th>2026-10-08</th><td>5</td>").unwrap();
+
+        assert!(newer < older);
+
+        let json = stats_json(&files);
+
+        assert_eq!(json["versions"], 12);
+        assert_eq!(json["finished"], 9);
+        assert_eq!(
+            json["coverage"][1],
+            serde_json::json!({"kind": "dynamic_linux", "count": 2})
+        );
+        assert_eq!(
+            json["levels"][2],
+            serde_json::json!({"level": "high", "count": 1})
+        );
+        assert_eq!(
+            json["daily"],
+            serde_json::json!([
+                {"day": "2026-10-09", "finished": 4},
+                {"day": "2026-10-08", "finished": 5},
+            ])
+        );
+    }
+
+    #[test]
+    fn an_unknown_coverage_kind_is_shown_in_words() {
+        assert_eq!(coverage_label("unknown"), "unknown");
+        assert_eq!(coverage_label("some_new_kind"), "some new kind");
+    }
+
+    #[test]
+    fn the_page_loads_only_its_own_files() {
+        let files = render(&PublicStats::default(), &[], &[], "now").unwrap();
+        let index = index(&files);
+
+        assert!(index.contains(
+            "content=\"default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'\""
+        ));
+        assert!(index.contains(r#"<link rel="stylesheet" href="site.css">"#));
+
+        for link in [
+            r#"<a href="stats.json">"#,
+            r#"<a href="about/">"#,
+            r#"<a href="mailto:security@janfedler.de">"#,
+        ] {
+            assert!(index.contains(link), "{link}");
+        }
+
+        // Nothing points elsewhere but the contact address.
+        assert!(!index.contains("http://") && !index.contains("https://"));
+
+        let css = String::from_utf8(file(&files, "site.css").to_vec()).unwrap();
+
+        assert!(css.starts_with(include_str!("../static/brand.css")));
+        assert!(css.ends_with(include_str!("../static/site.css")));
+        assert_eq!(file(&files, "CNAME"), b"crateward.com\n");
+        assert!(file(&files, ".nojekyll").is_empty());
+    }
+
+    #[test]
+    fn writing_replaces_earlier_files_and_creates_directories() {
+        let dir = scratch("write");
+        let files = |text: &str| {
+            vec![
+                ("index.html".to_owned(), text.as_bytes().to_vec()),
+                ("about/index.html".to_owned(), b"about".to_vec()),
+            ]
+        };
+
+        write(&dir, &files("old")).unwrap();
+        write(&dir, &files("new")).unwrap();
+
+        assert_eq!(std::fs::read(dir.join("index.html")).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read(dir.join("about/index.html")).unwrap(),
+            b"about"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
