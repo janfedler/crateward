@@ -74,7 +74,7 @@ pub struct PublicStats {
     pub coverage: Vec<(String, i64)>,
     /// Verdicts per level.
     pub levels: Vec<(String, i64)>,
-    /// Finished versions per day, `YYYY-MM-DD`, the last 30 days.
+    /// Finished versions per day, `YYYY-MM-DD`, the last 30 days, newest first.
     pub daily: Vec<(String, i64)>,
 }
 
@@ -243,7 +243,7 @@ impl Store {
                     "SELECT to_char(date_trunc('day', updated_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD'),
                             count(*)
                      FROM jobs WHERE state = 'Done' AND updated_at > now() - interval '30 days'
-                     GROUP BY 1 ORDER BY 1",
+                     GROUP BY 1 ORDER BY 1 DESC",
                     &[],
                 )
                 .await?,

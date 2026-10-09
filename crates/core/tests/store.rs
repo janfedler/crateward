@@ -1199,3 +1199,37 @@ async fn findings_are_reported_resolved_and_only_then_published() {
 
     db.drop().await;
 }
+
+#[tokio::test]
+async fn the_public_days_are_newest_first() {
+    let Some(db) = TestDb::new("test").await else {
+        return;
+    };
+
+    let mut store = db.store().await;
+    store.migrate().await.unwrap();
+
+    for name in ["older", "newer"] {
+        store
+            .enqueue(&new_job(name, "1.0.0", 0))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    db.admin()
+        .batch_execute(&format!(
+            "SET search_path TO {}; UPDATE jobs SET state = 'Done';
+             UPDATE jobs SET updated_at = now() - interval '2 days' WHERE crate_name = 'older'",
+            db.schema()
+        ))
+        .await
+        .unwrap();
+
+    let daily = store.public_stats().await.unwrap().daily;
+
+    assert_eq!(daily.len(), 2);
+    assert!(daily[0].0 > daily[1].0, "{daily:?}");
+
+    db.drop().await;
+}
