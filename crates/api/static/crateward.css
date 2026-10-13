@@ -204,7 +204,7 @@ input[type="checkbox"] { accent-color: var(--accent); padding: 0; }
 .count.bad { color: var(--bad); background: color-mix(in oklch, var(--bad) 15%, transparent); }
 
 th.num, td.num { width: 1%; text-align: right; }
-.points { display: inline-block; min-width: 2.25rem; padding: 1px 8px; border-radius: var(--radius-full);
+.points { display: inline-block; min-width: 2.25rem; white-space: nowrap; padding: 1px 8px; border-radius: var(--radius-full);
           text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--bg-overlay); }
 .points.bad { color: var(--bad); background: color-mix(in oklch, var(--bad) 14%, transparent); }
 .points.warn { color: var(--warn); background: color-mix(in oklch, var(--warn) 12%, transparent); }
