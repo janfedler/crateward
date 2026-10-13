@@ -22,8 +22,7 @@ scores the risk with reasons that link to file, line and trace evidence.
 * **Honeytokens.** Decoy credentials reveal theft.
 * **Explainable verdicts.** Every score links to its evidence.
 * **Version diffs.** What changed in behavior since the previous version.
-* **SBOMs.** A CycloneDX SBOM per version after BSI TR-03183-2, with the
-  findings as a VEX document that points into it.
+* **SBOMs.** CycloneDX after BSI TR-03183-2, with findings as VEX.
 * **A static archive.** Chosen job pages as files that outlive the server.
 * **Runs unattended.** Retries, breakers, canaries and quarantine.
 * **Defense in depth.** Jails, seccomp, Landlock and fuzzing.
