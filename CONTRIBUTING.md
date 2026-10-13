@@ -143,17 +143,20 @@ a subject `type(scope): description`, then a blank line and the body.
 
 ### Style
 
-Documentation, code comments, configuration comments and messages are
-English, in short and precise sentences, with no em dashes, no hyphenated
-compounds and no semicolons. `cargo xtask docs-lint` enforces the last three
-rules in the Markdown files, the Rust comments and `config/*.toml`:
+Documentation, code comments, configuration comments, messages, commit
+messages and pull request descriptions are English, in short and precise
+sentences, with no em dashes, no hyphenated compounds and no semicolons.
+`cargo xtask docs-lint` enforces the last three rules in the Markdown files,
+the Rust comments and `config/*.toml`:
 
 * Write "read only", "content addressed", "build time" instead of joining
   words with hyphens.
 * Put names that contain hyphens (crates, tools, flags, targets) and code
   in inline code, for example `cargo-deny`.
-* End a sentence with a full stop where a semicolon would join two. In a
-  lowercase log or error message, use a colon, "so" or "and" instead.
+* End every sentence with a full stop, never with a semicolon, and never
+  join two sentences with one. List items that are sentences end with a
+  full stop too, not with a semicolon. In a lowercase log or error
+  message, use a colon, "so" or "and" instead.
 * Text inside double quotes is a quotation of a source and is not checked.
 
 Use the precise computer science term where one applies. The job state
