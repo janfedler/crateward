@@ -102,8 +102,8 @@ The stages in order:
    index, and creates the job. The daily database dump reconciles anything
    the feeds missed and provides the popularity data behind priorities.
 2. **fetcher** downloads the `.crate` file and verifies its SHA-256 against
-   the index. It validates the archive in a sandboxed child without
-   extracting it.
+   the index, and records its SHA-512 for SBOMs. It validates the archive
+   in a sandboxed child without extracting it.
 
    It then resolves all dependencies for all targets with
    `cargo generate-lockfile` on a generated consumer probe (sandboxed, no
@@ -136,6 +136,9 @@ The stages in order:
    * High and critical verdicts wait in the "needs you" inbox of the
      dashboard (**api**).
    * The **supervisor** raises alerts from the closed escalation list.
+   * The analyzer writes the job's CycloneDX SBOM, which the api serves
+     with a findings document that points into it
+     ([ADR 0012](adr/0012-cyclonedx-sbom-and-vex.md)).
    * The api exports aggregate numbers to the public site.
 
 ## Job state machine

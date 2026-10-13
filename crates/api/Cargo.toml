@@ -1,6 +1,6 @@
 [package]
 name = "crateward_api"
-description = "Dashboard and read only API: server rendered HTML with htmx and server sent events."
+description = "Dashboard, archive and public site export: server rendered HTML with htmx and server sent events."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -29,7 +29,6 @@ tracing.workspace = true
 crateward_core = { workspace = true, features = ["testing"] }
 rustix = { workspace = true, features = ["process"] }
 sha2.workspace = true
-tokio-postgres.workspace = true
 
 [lints]
 workspace = true

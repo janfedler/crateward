@@ -31,7 +31,6 @@ crateward_core = { workspace = true, features = ["testing"] }
 http-body-util.workspace = true
 hyper = { workspace = true, features = ["server"] }
 hyper-util.workspace = true
-tokio-postgres.workspace = true
 
 [lints]
 workspace = true

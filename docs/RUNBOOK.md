@@ -52,7 +52,7 @@ filling, the sandbox stage stops claiming jobs.
 2. Check `/sys/devices/system/cpu/vulnerabilities/*` and the microcode
    version (`grep microcode /proc/cpuinfo`). A kernel or microcode update may
    have changed behavior.
-3. Run the soak test (M1) against the current kernel. If it fails, boot the
+3. Run the soak test (`cargo xtask soak`) against the current kernel. If it fails, boot the
    previous kernel from GRUB and pin it until a fix exists.
 
 ## Canary failure

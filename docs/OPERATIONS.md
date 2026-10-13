@@ -1,7 +1,6 @@
 # Operations
 
-How the server is set up and run. Values marked "target" become measured
-numbers during milestone M7.
+How the server is set up and run.
 
 ## Host
 
@@ -10,7 +9,7 @@ numbers during milestone M7.
 | CPU | SMT disabled |
 | Memory | no ECC |
 | OS | Debian 13, stock 6.12 kernel, unattended upgrades |
-| Configuration | Ansible, from this repository (M1 and M8) |
+| Configuration | Ansible, from this repository |
 | Admin access | SSH with keys only ([ADR 0003](adr/0003-debian-ansible-ssh.md)) |
 
 Kernel command line additions: `nosmt`, `mds=full,nosmt` and
