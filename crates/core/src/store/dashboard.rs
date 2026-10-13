@@ -78,6 +78,45 @@ pub struct PublicStats {
     pub daily: Vec<(String, i64)>,
 }
 
+/// A finished, scored job, as `crateward archive` chooses among them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveCandidate {
+    /// The job.
+    pub id: JobId,
+    /// Crate name as published.
+    pub name: String,
+    /// Version.
+    pub version: String,
+    /// Score.
+    pub score: i32,
+    /// Risk level name.
+    pub level: String,
+    /// Review name.
+    pub review: String,
+    /// Coverage kind: `dynamic_linux`, `static_only` or
+    /// `not_applicable_on_linux`.
+    pub coverage: String,
+    /// Whether its finding was published (`crateward disclosure publish`).
+    pub published: bool,
+    /// The strongest evidence's summary, or empty.
+    pub top_evidence: String,
+}
+
+impl ArchiveCandidate {
+    /// Why the archive must not show this job, if it must not. A crate
+    /// is named only once a person reviewed what the archive would say
+    /// about it, and a confirmed finding only after it was published
+    /// (DISCLOSURE.md).
+    #[must_use]
+    pub fn refusal(&self) -> Option<&'static str> {
+        match self.review.as_str() {
+            "pending" => Some("waits for review"),
+            "confirmed" if !self.published => Some("confirmed, not published yet"),
+            _ => None,
+        }
+    }
+}
+
 const ROW: &str = "j.id, j.crate_name, j.version, j.state, v.score, v.level, v.review,
      v.verdict->'evidence'->0->>'summary',
      extract(epoch FROM now() - j.updated_at)::bigint,
@@ -256,6 +295,46 @@ impl Store {
             levels,
             daily,
         })
+    }
+
+    /// Finished, scored jobs for the archive, highest score first: those
+    /// in `ids`, or all of them.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn archive_candidates(
+        &self,
+        ids: Option<&[i64]>,
+    ) -> Result<Vec<ArchiveCandidate>, StoreError> {
+        self.client
+            .query(
+                "SELECT j.id, j.crate_name, j.version, v.score, v.level, v.review,
+                        COALESCE(j.job->'coverage'->>'kind', 'unknown'),
+                        EXISTS (SELECT 1 FROM disclosures d
+                                WHERE d.job_id = j.id AND d.published_at IS NOT NULL),
+                        COALESCE(v.verdict->'evidence'->0->>'summary', '')
+                 FROM jobs j JOIN verdicts v ON v.job_id = j.id
+                 WHERE j.state = 'Done' AND ($1::bigint[] IS NULL OR j.id = ANY($1))
+                 ORDER BY v.score DESC, j.id DESC",
+                &[&ids],
+            )
+            .await?
+            .iter()
+            .map(|r| {
+                Ok(ArchiveCandidate {
+                    id: JobId(r.try_get(0)?),
+                    name: r.try_get(1)?,
+                    version: r.try_get(2)?,
+                    score: r.try_get(3)?,
+                    level: r.try_get(4)?,
+                    review: r.try_get(5)?,
+                    coverage: r.try_get(6)?,
+                    published: r.try_get(7)?,
+                    top_evidence: r.try_get(8)?,
+                })
+            })
+            .collect()
     }
 
     /// Verdicts waiting for review, oldest first.

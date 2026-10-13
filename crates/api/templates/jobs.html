@@ -1,36 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Crateward: jobs{% endblock %}
+{% block at_jobs %} aria-current="page"{% endblock %}
 {% block content %}
-<h1>Jobs</h1>
+<div class="page-head">
+  <h1>Jobs <span class="count">{{ total }}</span></h1>
+  <p class="lede">Every crate version Crateward picked up, newest first.</p>
+</div>
 <form class="filters" method="get" action="/jobs">
-  <input name="name" placeholder="crate name prefix" value="{{ name }}">
-  <select name="level">
-    <option value="">any level</option>
+  <input name="name" placeholder="Crate name prefix" aria-label="Crate name prefix" value="{{ name }}">
+  <select name="level" aria-label="Level">
+    <option value="">Any level</option>
     {% for l in levels %}<option value="{{ l }}"{% if *l == *level %} selected{% endif %}>{{ l }}</option>{% endfor %}
   </select>
-  <select name="review">
-    <option value="">any review</option>
+  <select name="review" aria-label="Review">
+    <option value="">Any review</option>
     {% for (value, label) in reviews %}<option value="{{ value }}"{% if *value == review %} selected{% endif %}>{{ label }}</option>{% endfor %}
   </select>
-  <select name="verdict">
-    <option value="">any verdict</option>
-    <option value="rescore"{% if rescore %} selected{% endif %}>waiting for re-processing</option>
+  <select name="verdict" aria-label="Verdict">
+    <option value="">Any verdict</option>
+    <option value="rescore"{% if rescore %} selected{% endif %}>waiting for reprocessing</option>
   </select>
-  <select name="state">
-    <option value="">any state</option>
+  <select name="state" aria-label="State">
+    <option value="">Any state</option>
     {% for s in states %}<option value="{{ s.name }}"{% if s.selected %} selected{% endif %}>{{ s.name }}</option>{% endfor %}
   </select>
   <button type="submit">Filter</button>
 </form>
-<p class="states">
-  <a href="{{ all_href }}"{% if state.is_empty() %} class="selected"{% endif %}>all</a>
-  {% for s in states %}<a href="{{ s.href }}"{% if s.selected %} class="selected"{% endif %}>{{ s.name }} <span class="muted">{{ s.n }}</span></a>
+<nav class="tabs" aria-label="States">
+  <a href="{{ all_href }}"{% if state.is_empty() %} class="selected" aria-current="page"{% endif %}>all</a>
+  {% for s in states %}<a href="{{ s.href }}"{% if s.selected %} class="selected" aria-current="page"{% endif %}>{{ s.name }} <span class="count">{{ s.n }}</span></a>
   {% endfor %}
-</p>
-{% if bursting %}<form class="burst" method="post" action="/burst"><p><b>Burst mode is on.</b> VM runs wait, and their cores re-process finished jobs. It ends by itself once nothing is left. <input type="hidden" name="action" value="stop"><button type="submit">Stop burst mode</button></p></form>{% endif %}
-{% if backlog > 0 %}<form class="burst" method="post" action="/burst"><p class="muted">{{ backlog }} finished jobs wait for re-processing by the current static analysis or scoring. <a href="{{ backlog_href }}">Show them</a>.{% if !bursting %} <input type="hidden" name="action" value="start"><button type="submit" title="New VM runs wait until it ends">Start burst mode</button>{% endif %}</p></form>{% endif %}
-<p class="muted">{{ total }} matching, newest first.{% if first > 0 %} Showing {{ first }} to {{ last }}.{% endif %}</p>
+</nav>
+{% if bursting %}<form class="notice" method="post" action="/burst"><p><b>Burst mode is on.</b> VM runs wait, and their cores reprocess finished jobs. It ends by itself once nothing is left.</p><input type="hidden" name="action" value="stop"><button type="submit">Stop burst mode</button></form>{% endif %}
+{% if backlog > 0 %}<form class="notice" method="post" action="/burst"><p>{{ backlog }} finished jobs wait for reprocessing by the current static analysis or scoring. <a href="{{ backlog_href }}">Show them</a>.</p>{% if !bursting %}<input type="hidden" name="action" value="start"><button type="submit" title="New VM runs wait until it ends">Start burst mode</button>{% endif %}</form>{% endif %}
+{% if rows.is_empty() %}<p class="empty">No job matches these filters. <a href="/jobs">Clear them</a>.</p>{% else %}
+<p class="muted">{{ total }} matching.{% if first > 0 %} Showing {{ first }} to {{ last }}.{% endif %}</p>
 {% include "rows.html" %}
+{% endif %}
 <nav class="pager" aria-label="pages">
   {% for l in pager %}{% if l.href.is_empty() %}<span class="{{ l.class }}"{% if !l.title.is_empty() %} title="{{ l.title }}"{% endif %}{% if l.class == "current" %} aria-current="page"{% endif %}>{{ l.label }}</span>{% else %}<a href="{{ l.href }}" title="{{ l.title }}">{{ l.label }}</a>{% endif %}
   {% endfor %}

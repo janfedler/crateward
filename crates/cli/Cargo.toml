@@ -15,9 +15,14 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+# The archive's pages, rendered like the dashboard renders them.
+crateward_api.workspace = true
 # The job store, for pipeline status and quarantine control.
 crateward_core = { workspace = true, features = ["store", "integrity"] }
+# The archive's selection screen.
+ratatui.workspace = true
 secrecy.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true

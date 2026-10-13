@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crateward archive</title>
+<meta name="description" content="Selected reports of Crateward, which analyzed new crates.io releases in Firecracker microVMs.">
+<link rel="stylesheet" href="static/crateward.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="index.html">Crateward</a>
+  <nav class="primary" aria-label="Main"><a href="index.html" aria-current="page">Archive</a></nav>
+</header>
+<main>
+<div class="page-head">
+  <h1>Archive</h1>
+  <p class="lede">Crateward analyzed new crates.io releases for malicious behavior: static analysis of the published files, then a build in a Firecracker microVM traced with eBPF, with a fake internet and fake credentials to catch what a build sends out. These are selected reports from that work, as its dashboard showed them.</p>
+</div>
+
+<div class="cards">
+  <div class="card"><div class="label">Versions seen</div><div class="n">{{ versions }}</div>{% if !period.is_empty() %}<div class="muted">{{ period }}</div>{% endif %}</div>
+  <div class="card"><div class="label">Analyzed</div><div class="n">{{ finished }}</div><div class="muted">{{ dynamic_share }} built and traced in a VM</div></div>
+  <div class="card"><div class="label">Reports here</div><div class="n">{{ rows.len() }}</div><div class="muted">made {{ generated }}</div></div>
+</div>
+
+<h2>Verdicts by level</h2>
+<div class="bars">
+{% for l in levels %}
+<div class="bar"><span class="name level-{{ l.level }}">{{ l.level }}</span>
+<meter class="tone-{{ l.level }}" min="0" max="{{ finished.max(1) }}" value="{{ l.total }}">{{ l.total }}</meter><span class="n">{{ l.total }}</span></div>
+{% endfor %}
+</div>
+<p class="hint">A level comes from the score of explainable evidence, each signal with its points. High and critical verdicts went to a person for review. Each report says whether one was reviewed, and how.</p>
+
+<h2 id="reports">Reports</h2>
+{% if rows.is_empty() %}<p class="empty">No reports were archived.</p>{% else %}
+<div class="archived">
+<div class="filter" role="radiogroup" aria-label="Level">
+  <input type="radio" name="level" id="lvl-all" checked><label for="lvl-all">All <span class="count">{{ rows.len() }}</span></label>
+  {% for l in levels %}{% if l.archived > 0 %}
+  <input type="radio" name="level" id="lvl-{{ l.level }}"><label for="lvl-{{ l.level }}" class="tone-{{ l.level }}">{{ l.level }} <span class="count">{{ l.archived }}</span></label>{% endif %}{% endfor %}
+</div>
+<div class="scroll-x">
+<table class="jobs">
+<thead><tr><th class="num">Score</th><th>Crate</th><th>Strongest evidence</th><th>Coverage</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr class="lvl-{{ r.level }}">
+  <td class="num"><span class="points tone-{{ r.level }}" title="{{ r.level }}">{{ r.score }}</span></td>
+  <td class="crate"><a href="jobs/{{ r.id }}.html">{{ r.name }} <span class="version">{{ r.version }}</span></a>
+    <div class="sub"><span class="level-{{ r.level }}">{{ r.level }}</span>
+    {%- if r.review == "confirmed" %} <span class="badge bad">confirmed</span>{% endif %}
+    {%- if r.review == "false_positive" %} <span class="badge ok">false positive</span>{% endif %}</div></td>
+  <td class="what{% if r.evidence.is_empty() %} none{% endif %}">{% if r.evidence.is_empty() %}<span class="muted">-</span>{% else %}{{ r.evidence }}{% endif %}</td>
+  <td class="nowrap">{{ r.coverage }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% endif %}
+<p class="muted updated">Crateward is MIT OR Apache-2.0. Fonts under the SIL Open Font License (<a href="static/OFL.txt">OFL.txt</a>).</p>
+</main>
+</body>
+</html>

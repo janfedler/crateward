@@ -3,9 +3,9 @@
 <div class="run-head">
   <h2>Run: {{ run.kind }}</h2>
   <span class="badge {{ run.outcome_class }}">{{ run.outcome }}</span>
-  <a class="button" href="{{ run.download }}" download>Download JSON</a>
+  {% if !archive %}<a class="button" href="{{ run.download }}" download>Download JSON</a>{% endif %}
 </div>
-{% if !run.superseded.is_empty() %}<p class="muted">The full build covers everything the earlier <code>cargo check</code> run did, so only the full run is shown. <a href="{{ run.superseded }}" download>Download the check run's report</a>.</p>{% endif %}
+{% if !run.superseded.is_empty() %}<p class="muted">The full build covers everything the earlier <code>cargo check</code> run did, so only the full run is shown.{% if !archive %} <a href="{{ run.superseded }}" download>Download the check run's report</a>.{% endif %}</p>{% endif %}
 
 {% if !run.alerts.is_empty() %}
 <ul class="alerts">{% for a in run.alerts %}<li>{{ a }}</li>{% endfor %}</ul>

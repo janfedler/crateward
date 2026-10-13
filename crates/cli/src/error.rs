@@ -52,6 +52,21 @@ pub enum CliError {
     /// No job has this number.
     #[error("no job {0}")]
     NoJob(i64),
+    /// The archive could not be written.
+    #[error(transparent)]
+    Archive(#[from] crateward_api::archive::ArchiveError),
+    /// A saved selection cannot be read.
+    #[error("{path}: {source}")]
+    Selection {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
+    /// The terminal cannot be used for the selection screen.
+    #[error("the selection screen needs a terminal: {0}")]
+    Terminal(std::io::Error),
+    /// Neither a terminal nor a saved selection.
+    #[error("not a terminal: pass a saved selection with --selection")]
+    NoTerminal,
 }
 
 impl CliError {

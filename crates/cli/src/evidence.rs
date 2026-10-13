@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 use crateward_core::job::JobId;
 use crateward_core::paths::host;
 use crateward_core::store::{Store, StoreError, StoredEvent, StoredJob};
+use crateward_core::text::redact;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -24,18 +25,6 @@ pub async fn run(store: Store, data_dir: &Path, job: JobId, dir: &Path) -> Resul
     }
 
     Ok(())
-}
-
-/// Replaces every honeytoken value in `text`. They are fake by
-/// construction, but a reader should not have to know that.
-#[must_use]
-pub fn redact(text: &str, tokens: &[String]) -> String {
-    tokens
-        .iter()
-        .filter(|t| !t.is_empty())
-        .fold(text.to_owned(), |text, token| {
-            text.replace(token.as_str(), "[honeytoken]")
-        })
 }
 
 /// Writes the evidence pack of `job` into `dir`, which must not exist yet:

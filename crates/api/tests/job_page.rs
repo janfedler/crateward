@@ -705,9 +705,7 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
     // Until the report is recorded, the inbox and a filter find it.
     let link = format!("<a href=\"/jobs/{}\">", job.0);
     let (_, inbox) = db.get("/inbox").await;
-    let (waiting, unreported) = inbox
-        .split_once("<h2>Confirmed, not reported</h2>")
-        .unwrap();
+    let (waiting, unreported) = inbox.split_once("<h2>Confirmed, not reported").unwrap();
 
     assert!(!waiting.contains(&link) && unreported.contains(&link));
     assert!(unreported.contains("<span class=\"badge warn\">not reported</span>"));
@@ -825,10 +823,12 @@ async fn the_job_list_counts_states_and_pages() {
     let (status, first) = db.get("/jobs").await;
 
     assert_eq!(status, 200);
-    assert!(first.contains("101 matching, newest first. Showing 1 to 10."));
-    assert!(first.contains("Discovered <span class=\"muted\">100</span>"));
-    assert!(first.contains("<a href=\"/jobs?state=Failed\">Failed <span class=\"muted\">1</span>"));
-    assert!(first.contains("Running <span class=\"muted\">0</span>"));
+    assert!(first.contains("101 matching. Showing 1 to 10."));
+    assert!(first.contains("<h1>Jobs <span class=\"count\">101</span></h1>"));
+    assert!(first.contains("Discovered <span class=\"count\">100</span>"));
+    assert!(first.contains("<a href=\"/jobs?state=Failed\">Failed <span class=\"count\">1</span>"));
+    assert!(first.contains("Running <span class=\"count\">0</span>"));
+    assert!(first.contains("<a href=\"/jobs\" aria-current=\"page\">Jobs</a>"));
     assert!(first.contains(&link(92)) && !first.contains(&link(91)));
     assert!(first.contains("<span class=\"disabled\" title=\"first page\">«</span>"));
     assert!(first.contains(
@@ -876,13 +876,24 @@ async fn the_job_list_counts_states_and_pages() {
     assert!(failed.contains("1 matching"));
     assert!(failed.contains(&link(7)) && !failed.contains(&link(8)));
     assert!(
-        failed.contains("<a href=\"/jobs?name=many&#38;state=Failed\" class=\"selected\">Failed")
+        failed.contains("<a href=\"/jobs?name=many&#38;state=Failed\" class=\"selected\" aria-current=\"page\">Failed")
     );
     assert!(failed.contains("<a href=\"/jobs?name=many\">all</a>"));
     assert!(failed.contains("<option value=\"Failed\" selected>"));
 
     // An unknown state is no filter.
     assert!(db.get("/jobs?state=Bogus").await.1.contains("101 matching"));
+    assert!(db.get("/jobs?name=zzz").await.1.contains(
+        "<p class=\"empty\">No job matches these filters. <a href=\"/jobs\">Clear them</a>.</p>"
+    ));
+
+    // The overview draws the states as bars on the same scale.
+    let (status, overview) = db.get("/").await;
+    assert_eq!(status, 200);
+    assert!(overview.contains("<a href=\"/\" aria-current=\"page\">Overview</a>"));
+    assert!(overview.contains(
+        "<a class=\"bar\" href=\"/jobs?state=Discovered\"><span class=\"name\">Discovered</span>\n<meter min=\"0\" max=\"101\" value=\"100\">100</meter>"
+    ));
 
     db.drop().await;
 }

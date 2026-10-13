@@ -19,6 +19,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod archive;
 pub mod export;
 pub mod run_view;
 pub mod security;
@@ -55,7 +56,7 @@ use crate::views::{
 pub const COMPONENT: Component = Component::Api;
 
 /// The dashboard stylesheet: the design system's tokens, then its own rules.
-const DASHBOARD_CSS: &str = concat!(
+pub(crate) const DASHBOARD_CSS: &str = concat!(
     include_str!("../static/brand.css"),
     include_str!("../static/crateward.css")
 );
@@ -768,20 +769,30 @@ fn disclosure_rows(d: Disclosure) -> Vec<(String, String)> {
     .collect()
 }
 
-fn timeline_row(e: StoredEvent, now: SystemTime) -> (String, String, String, String, String) {
-    let secs = now
-        .duration_since(e.at)
-        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+/// An event as when, from, to, kind and worker. When is an age on the
+/// dashboard and a date in the archive, where ages go stale.
+fn timeline_row(
+    e: StoredEvent,
+    now: SystemTime,
+    archive: bool,
+) -> (String, String, String, String, String) {
+    let when = if archive {
+        let at =
+            e.at.duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+
+        export::format_utc(i64::try_from(at).unwrap_or(i64::MAX))
+    } else {
+        let secs = now
+            .duration_since(e.at)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+
+        ago(secs)
+    };
 
     let kind = e.event.get("kind").and_then(serde_json::Value::as_str);
 
-    (
-        ago(secs),
-        e.from,
-        e.to,
-        kind.unwrap_or("?").to_owned(),
-        e.worker,
-    )
+    (when, e.from, e.to, kind.unwrap_or("?").to_owned(), e.worker)
 }
 
 fn evidence_view(e: Evidence) -> EvidenceView {
@@ -811,13 +822,20 @@ fn verdict_view((verdict, review): (Verdict, Review)) -> VerdictView {
     }
 }
 
-async fn job(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<i64>,
-) -> Result<Response, AppError> {
-    let store = &state.reader;
+/// A job's page, for the dashboard or, with `archive`, as a static file
+/// of `crateward archive`: without the review decision and run downloads,
+/// with dates instead of ages. `None` if there is no such job.
+///
+/// # Errors
+///
+/// Fails on database errors.
+pub async fn job_page(
+    store: &Store,
+    id: i64,
+    archive: bool,
+) -> Result<Option<JobPage>, StoreError> {
     let Some(job) = store.get(JobId(id)).await? else {
-        return Ok((StatusCode::NOT_FOUND, "no such job").into_response());
+        return Ok(None);
     };
 
     let verdict = store.verdict(job.id).await?.map(verdict_view);
@@ -846,11 +864,18 @@ async fn job(
     );
 
     let disclosure = store.disclosure(job.id).await?;
+    let slug = disclosure
+        .as_ref()
+        .and_then(|d| d.published_on.as_ref().and(d.slug.clone()))
+        .unwrap_or_default();
+
     let events = store.events(job.id).await?;
     let runs = store.job_runs(job.id).await?;
     let now = SystemTime::now();
-    let page = JobPage {
+
+    Ok(Some(JobPage {
         id,
+        archive,
         name: job.name,
         version: job.version,
         state: job.job.state.name().to_owned(),
@@ -871,12 +896,28 @@ async fn job(
         findings_dropped,
         groups,
         crate_url,
-        timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
+        timeline: events
+            .into_iter()
+            .map(|e| timeline_row(e, now, archive))
+            .collect(),
         runs: run_view::run_views(id, &runs),
         disclosure: disclosure.map(disclosure_rows).unwrap_or_default(),
-    };
+        finding_url: if slug.is_empty() {
+            String::new()
+        } else {
+            format!("https://{}/findings/{}/", export::DOMAIN, encode(&slug))
+        },
+    }))
+}
 
-    Ok(Html(page.render()?).into_response())
+async fn job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Response, AppError> {
+    match job_page(&state.reader, id, false).await? {
+        Some(page) => Ok(Html(page.render()?).into_response()),
+        None => Ok((StatusCode::NOT_FOUND, "no such job").into_response()),
+    }
 }
 
 /// A run report as a file, for tools and archives.

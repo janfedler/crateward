@@ -25,6 +25,7 @@ macro_rules! out {
     }};
 }
 
+mod archive;
 mod disclosure;
 mod egress;
 mod error;
@@ -99,6 +100,20 @@ enum Command {
         /// A new directory for the pack.
         #[arg(long)]
         out: PathBuf,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
+        config: PathBuf,
+    },
+    /// Write chosen job pages as a static archive, for when the server is
+    /// gone. Opens a screen to choose them, unless `--selection` is given.
+    Archive {
+        /// The archive's directory: new, empty, or an earlier archive.
+        #[arg(long)]
+        out: PathBuf,
+        /// A saved selection (`selection.json` of an earlier archive) to
+        /// use instead of the screen.
+        #[arg(long)]
+        selection: Option<PathBuf>,
         /// Configuration file.
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
@@ -189,6 +204,13 @@ fn run(command: Command) -> Result<(), CliError> {
                 evidence::run(store, &config.instance.data_dir, JobId(job), &out)
             })
         }
+        Command::Archive {
+            out,
+            selection,
+            config,
+        } => with_store(&Config::load(&config)?, |store| async move {
+            archive::run(store, &out, selection.as_deref()).await
+        }),
         Command::Disclosure { command, config } => with_store(&Config::load(&config)?, |store| {
             disclosure::run(store, command)
         }),

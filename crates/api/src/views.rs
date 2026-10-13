@@ -82,6 +82,20 @@ pub struct OverviewData {
     pub updated: String,
 }
 
+impl OverviewData {
+    /// Verdicts in all, the scale of the level bars.
+    #[must_use]
+    pub fn verdicts(&self) -> i64 {
+        self.levels.iter().map(|(_, n)| n).sum::<i64>().max(1)
+    }
+
+    /// Jobs in all, the scale of the state bars.
+    #[must_use]
+    pub fn jobs(&self) -> i64 {
+        self.states.iter().map(|(_, n)| n).sum::<i64>().max(1)
+    }
+}
+
 /// The overview page.
 #[derive(Template)]
 #[template(path = "overview.html")]
@@ -276,6 +290,8 @@ pub struct SeverityCount {
 pub struct JobPage {
     /// Job ID.
     pub id: i64,
+    /// A static page of `crateward archive` instead of the dashboard's.
+    pub archive: bool,
     /// Crate name.
     pub name: String,
     /// Version.
@@ -314,4 +330,6 @@ pub struct JobPage {
     pub runs: Vec<crate::run_view::RunView>,
     /// The disclosure record as label and value, empty without a report.
     pub disclosure: Vec<(String, String)>,
+    /// The published finding page on the public site, or empty.
+    pub finding_url: String,
 }

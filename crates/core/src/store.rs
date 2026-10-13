@@ -18,7 +18,7 @@ mod retention;
 mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
 use autonomy::{insert_alert, insert_pause};
-pub use dashboard::{JobFilter, JobRow, Overview, PublicStats};
+pub use dashboard::{ArchiveCandidate, JobFilter, JobRow, Overview, PublicStats};
 pub use disclosures::{
     Disclosure, DisclosureKind, DisclosureRefusal, PublishedFinding, REMOVED_FIRST,
 };

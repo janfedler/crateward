@@ -83,6 +83,21 @@ ssh -N -L 8080:127.0.0.1:8080 <server>
 
 `crateward status` shows the same pipeline state on the command line.
 
+## Archiving job pages
+
+`crateward archive --out <dir>` writes chosen job pages as static files
+that need no server: an `index.html` with the aggregate numbers, a page
+per job under `jobs/`, and the stylesheet and fonts. A terminal screen
+chooses the jobs by level, review, coverage, minimum score, crate name
+prefix and a cap per level, and single jobs can be added or left out by
+hand. The choice is saved as `selection.json` in the archive.
+`--selection <file>` writes from a saved choice without the screen.
+Writing into an earlier archive replaces it.
+
+The archive holds only what may be published: verdicts waiting for review
+and confirmed findings before their publication are refused
+([DISCLOSURE.md](DISCLOSURE.md)). Honeytokens are redacted.
+
 ## Services and users
 
 Each component runs as its own system user (`crateward-feed`,

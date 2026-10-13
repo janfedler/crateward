@@ -1,15 +1,21 @@
-<table>
-<tr><th>Job</th><th>Crate</th><th>State</th><th>Score</th><th>Strongest evidence</th><th>Changed</th></tr>
+{# Job rows for the inbox and the job list, from `views::Row`. #}
+<div class="scroll-x">
+<table class="jobs">
+<thead><tr><th class="num">Score</th><th>Crate</th><th>Strongest evidence</th><th>State</th><th>Changed</th></tr></thead>
+<tbody>
 {% for r in rows %}
 <tr>
-  <td class="nowrap"><a href="/jobs/{{ r.id }}">{{ r.id }}</a></td>
-  <td>{{ r.name }} {{ r.version }}</td>
-  <td class="nowrap">{{ r.state }}</td>
-  <td class="nowrap level-{{ r.level }}">{{ r.score }} {{ r.level }}{% if r.review == "pending" %} (review){% endif %}
+  <td class="num">{% if r.score.is_empty() %}<span class="points">-</span>{% else %}<span class="points tone-{{ r.level }}" title="{{ r.level }}">{{ r.score }}</span>{% endif %}</td>
+  <td class="crate"><a href="/jobs/{{ r.id }}">{{ r.name }} <span class="version">{{ r.version }}</span></a>
+    <div class="sub">job {{ r.id }}{% if !r.level.is_empty() %} · <span class="level-{{ r.level }}">{{ r.level }}</span>{% endif %}
+    {%- if r.review == "pending" %} <span class="badge warn">review</span>{% endif %}
     {%- if r.review == "confirmed" %} <span class="badge bad">confirmed</span>{% if !r.reported %} <span class="badge warn">not reported</span>{% endif %}{% endif %}
-    {%- if r.review == "false_positive" %} <span class="badge">false positive</span>{% endif %}</td>
-  <td>{{ r.evidence }}</td>
+    {%- if r.review == "false_positive" %} <span class="badge ok">false positive</span>{% endif %}</div></td>
+  <td class="what{% if r.evidence.is_empty() %} none{% endif %}">{% if r.evidence.is_empty() %}<span class="muted">-</span>{% else %}{{ r.evidence }}{% endif %}</td>
+  <td class="nowrap"><span class="badge">{{ r.state }}</span></td>
   <td class="muted nowrap">{{ r.age }}</td>
 </tr>
 {% endfor %}
+</tbody>
 </table>
+</div>

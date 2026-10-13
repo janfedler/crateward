@@ -1,11 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Crateward: needs you{% endblock %}
+{% block at_inbox %} aria-current="page"{% endblock %}
 {% block content %}
-<h1>Needs you</h1>
-<p class="muted">High and critical verdicts wait here until marked confirmed or a false positive. Nothing is published before that (DISCLOSURE.md).</p>
-{% if rows.is_empty() %}<p class="ok">Nothing waits for review.</p>{% else %}{% include "rows.html" %}{% endif %}
+<div class="page-head">
+  <h1>Needs you</h1>
+  <p class="lede">High and critical verdicts wait here until marked confirmed or a false positive. Nothing is published before that (DISCLOSURE.md).</p>
+</div>
 
-<h2>Confirmed, not reported</h2>
-<p class="muted">Write the evidence pack with <code>crateward evidence &lt;job&gt; --out &lt;dir&gt;</code>, report it, then record the report with <code>crateward disclosure report</code>; the job page has the full commands.</p>
-{% if unreported.is_empty() %}<p class="ok">Every confirmed verdict was reported.</p>{% else %}{% let rows = unreported.clone() %}{% include "rows.html" %}{% endif %}
+<h2>Waiting for review <span class="count{% if !rows.is_empty() %} bad{% endif %}">{{ rows.len() }}</span></h2>
+{% if rows.is_empty() %}<p class="empty ok">Nothing waits for review.</p>{% else %}{% include "rows.html" %}{% endif %}
+
+<h2>Confirmed, not reported <span class="count{% if !unreported.is_empty() %} bad{% endif %}">{{ unreported.len() }}</span></h2>
+<p class="hint">Write the evidence pack with <code>crateward evidence &lt;job&gt; --out &lt;dir&gt;</code>, report it, then record the report with <code>crateward disclosure report</code>. The job page has the full commands.</p>
+{% if unreported.is_empty() %}<p class="empty ok">Every confirmed verdict was reported.</p>{% else %}{% let rows = unreported.clone() %}{% include "rows.html" %}{% endif %}
 {% endblock %}

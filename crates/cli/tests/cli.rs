@@ -217,7 +217,7 @@ fn a_bad_configuration_exits_78_and_says_why() {
 fn every_command_that_reads_the_configuration_exits_78_without_it() {
     let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-such-pack");
     let out = out.to_str().unwrap();
-    let commands: [&[&str]; 9] = [
+    let commands: [&[&str]; 10] = [
         &["config", "check", "--config", MISSING],
         &["status", "--config", MISSING],
         &["quarantine", "--config", MISSING, "lift"],
@@ -225,6 +225,7 @@ fn every_command_that_reads_the_configuration_exits_78_without_it() {
         &["integrity", "--config", MISSING, "check"],
         &["egress", "--config", MISSING],
         &["evidence", "1", "--out", out, "--config", MISSING],
+        &["archive", "--out", out, "--config", MISSING],
         &["disclosure", "--config", MISSING, "show", "1"],
         &["breaker", "--config", MISSING, "close", "sandbox"],
     ];
@@ -988,6 +989,101 @@ async fn evidence_of_a_bare_job_and_the_ways_it_fails() {
     unknown.expect(1, "", "no job 999999\n");
 
     assert!(!other.exists());
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn archive_writes_a_saved_selection_and_needs_a_terminal_without_one() {
+    let Some(mut db) = Db::new().await else {
+        return;
+    };
+
+    let site = Site::new(&db.url);
+    let job = db.job("odd", "0.2.0", json!({})).await;
+    let store = &mut db.store;
+    let steps = [
+        (Stage::Fetch, JobEvent::Fetched),
+        (
+            Stage::StaticAnalysis,
+            JobEvent::StaticAnalysisCompleted {
+                triage: crateward_core::job::Triage::StaticOnly(
+                    crateward_core::verdict::StaticOnlyReason::NoBuildTimeCode,
+                ),
+            },
+        ),
+        (Stage::Analysis, JobEvent::Scored { escalate: false }),
+        (Stage::Finalize, JobEvent::Finalized),
+    ];
+
+    for (stage, event) in steps {
+        let lease = Duration::from_secs(30);
+        store.claim(stage, "w", lease).await.unwrap().unwrap();
+        let policies = policies();
+        store
+            .complete(job, "w", event, &policies, false)
+            .await
+            .unwrap();
+    }
+
+    let medium = Verdict {
+        score: 30,
+        level: RiskLevel::from_score(30),
+        ..verdict()
+    };
+
+    store.record_verdict(job, &medium).await.unwrap();
+
+    let out = site.path("archive");
+    let out_arg = out.to_str().unwrap();
+    let ran = site.run(&["archive", "--out", out_arg]);
+    ran.expect(
+        1,
+        "",
+        "not a terminal: pass a saved selection with --selection\n",
+    );
+
+    let selection = site.path("selection.json");
+    std::fs::write(&selection, r#"{"levels": ["medium"]}"#).unwrap();
+    let ran = site.run(&[
+        "archive",
+        "--out",
+        out_arg,
+        "--selection",
+        selection.to_str().unwrap(),
+    ]);
+
+    let index = out.join("index.html");
+    ran.expect(
+        0,
+        &format!(
+            "writing 1 reports to {out_arg}\nwrote 1 reports, open {}\n",
+            index.display()
+        ),
+        "",
+    );
+    assert!(out.join(format!("jobs/{}.html", job.0)).is_file());
+
+    let saved: Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("selection.json")).unwrap())
+            .unwrap();
+    assert_eq!(saved["levels"], json!(["medium"]));
+    assert_eq!(saved["per_level"], json!(25));
+
+    let missing = site.path("missing.json");
+    let ran = site.run(&[
+        "archive",
+        "--out",
+        out_arg,
+        "--selection",
+        missing.to_str().unwrap(),
+    ]);
+    assert_eq!(ran.code, 1);
+    assert!(
+        ran.err.starts_with(&format!("{}: ", missing.display())),
+        "{}",
+        ran.err
+    );
 
     db.drop().await;
 }

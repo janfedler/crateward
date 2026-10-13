@@ -1,7 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Crateward: overview{% endblock %}
+{% block at_overview %} aria-current="page"{% endblock %}
 {% block content %}
-<h1>Overview</h1>
+<div class="page-head">
+  <h1>Overview</h1>
+  <p class="lede">The pipeline at a glance. This part updates itself every few seconds.</p>
+</div>
 <div hx-ext="sse" sse-connect="/events" sse-swap="overview">
 {% include "overview_body.html" %}
 </div>

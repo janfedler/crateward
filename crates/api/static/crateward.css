@@ -12,8 +12,16 @@ header a { color: var(--fg-secondary); text-decoration: none; font-size: 11px; f
 header a:hover { color: var(--fg-primary); background: var(--bg-overlay); }
 header a.brand { font-family: var(--font-display); font-size: 24px; font-weight: 400; letter-spacing: 0;
                  text-transform: none; color: var(--fg-primary); padding: 0 1.25rem 0 0; background: none; }
+header nav.primary { display: flex; gap: .25rem; }
+header a[aria-current] { color: var(--fg-primary); background: var(--bg-overlay); }
 main { padding: 2rem 1.5rem 4rem; max-width: 1200px; margin: 0 auto; }
-@media (max-width: 640px) { header { padding: .5rem 1rem; } main { padding: 1.25rem 1rem 3rem; } }
+@media (max-width: 640px) {
+  header { padding: .5rem 1rem; flex-wrap: nowrap; }
+  header a.brand { font-size: 20px; padding-right: .5rem; }
+  header nav.primary { overflow-x: auto; scrollbar-width: none; }
+  header a { padding: 6px 10px; white-space: nowrap; }
+  main { padding: 1.25rem 1rem 3rem; }
+}
 
 h1 { font-size: 26px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; margin: 0 0 1rem; }
 h1 .muted { font-weight: 400; font-size: 16px; margin-left: .35rem; }
@@ -43,6 +51,14 @@ td a { text-decoration-color: var(--border-subtle); }
 .card .n { font-size: 32px; font-weight: 600; letter-spacing: -.02em; line-height: 1.25; margin-top: .25rem;
            font-variant-numeric: tabular-nums; }
 .card .n a { color: inherit; text-decoration: none; }
+.card .label { color: var(--fg-muted); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+a.card { display: block; color: inherit; text-decoration: none; transition: border-color var(--ease), background var(--ease); }
+a.card:hover { border-color: var(--border-strong); background: var(--bg-overlay); }
+.card.tone-bad { border-color: color-mix(in oklch, var(--bad) 55%, transparent);
+                 background: color-mix(in oklch, var(--bad) 8%, var(--bg-elevated)); }
+.card.tone-bad .n { color: var(--bad); }
+.card.tone-warn { border-color: color-mix(in oklch, var(--warn) 50%, transparent); }
+.card.tone-warn .n { color: var(--warn); }
 .muted { color: var(--fg-muted); }
 /* Short values (numbers, states, times) never break: with `anywhere`
    above, a long neighbor would squeeze them to a few characters. */
@@ -84,11 +100,9 @@ input::placeholder { color: var(--fg-muted); }
 input[type="checkbox"] { accent-color: var(--accent); padding: 0; }
 .filters { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem; }
 .filters input { min-width: 16rem; }
+@media (max-width: 640px) { .filters input, .filters select { flex: 1 1 100%; min-width: 0; } }
 .filters button { background: var(--fg-primary); color: var(--bg-base); border-color: transparent; }
 .filters button:hover { background: var(--color-cream-200); }
-.states { display: flex; gap: .4rem 1rem; flex-wrap: wrap; }
-.states a { white-space: nowrap; }
-.states a.selected { font-weight: 600; text-decoration: none; }
 .pager { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin-top: 1.25rem; }
 .pager a, .pager span:not(.sizes) { min-width: 2.25rem; padding: 6px 10px; text-align: center; border-radius: var(--radius-base);
        border: 1px solid var(--border-default); text-decoration: none; font-variant-numeric: tabular-nums; }
@@ -267,3 +281,89 @@ details.more { margin-top: .75rem; }
 details.section { margin-top: 3rem; }
 details.section > summary { display: flex; gap: .6rem; align-items: center; }
 details.section > summary h2 { margin: 0; }
+
+/* Every page starts the same way: a title, one sentence on what it shows. */
+.page-head { margin-bottom: 1.5rem; }
+.page-head h1 { display: flex; gap: .6rem; align-items: center; margin-bottom: .35rem; }
+.page-head h1 .count { font-size: 13px; }
+.lede { margin: 0; max-width: 75ch; font-size: 15px; }
+h2 .count { margin-left: .4rem; letter-spacing: 0; }
+.empty { padding: 1.1rem 1.25rem; border: 1px dashed var(--border-default); border-radius: var(--radius-lg);
+         color: var(--fg-secondary); }
+.empty.ok { color: var(--ok); }
+.updated { margin-top: 2.5rem; font-size: 12px; }
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 0 2.5rem; }
+@media (max-width: 640px) { .split { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; } .card .n { font-size: 26px; } }
+
+/* State tabs and notices above the job list. */
+.tabs { display: flex; gap: .25rem; overflow-x: auto; margin: 0 0 1rem; padding-bottom: .5rem;
+        border-bottom: 1px solid var(--border-default); scrollbar-width: none; }
+.tabs a { flex: none; padding: 4px 10px; border-radius: var(--radius-base); color: var(--fg-secondary);
+          text-decoration: none; font-size: 13px; white-space: nowrap; }
+.tabs a:hover { color: var(--fg-primary); background: var(--bg-overlay); }
+.tabs a.selected { color: var(--bg-base); background: var(--fg-primary); font-weight: 600; }
+.tabs a.selected .count { background: color-mix(in oklch, var(--bg-base) 15%, transparent); color: inherit; }
+.notice { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin: 0 0 1rem; padding: .6rem .9rem;
+          border: 1px solid color-mix(in oklch, var(--warn) 45%, transparent); border-radius: var(--radius-lg);
+          background: color-mix(in oklch, var(--warn) 7%, transparent); }
+.notice p { margin: 0 auto 0 0; }
+
+/* Job lists: the score as a pill, the crate as the link, the rest quiet. */
+.scroll-x { overflow-x: auto; }
+table.jobs td { vertical-align: middle; }
+table.jobs td.crate { min-width: 14rem; }
+table.jobs td.crate > a { font-weight: 600; text-decoration: none; color: var(--fg-primary); overflow-wrap: anywhere; }
+table.jobs td.crate > a:hover { text-decoration: underline; }
+table.jobs .version { font-weight: 400; color: var(--fg-secondary); }
+table.jobs .sub .badge { margin-left: .3rem; }
+table.jobs td.what { color: var(--fg-secondary); max-width: 60ch; }
+.points.tone-critical, .points.tone-high { color: var(--bad); background: color-mix(in oklch, var(--bad) 14%, transparent); }
+.points.tone-medium { color: var(--warn); background: color-mix(in oklch, var(--warn) 12%, transparent); }
+.points.tone-low, .points.tone-none { color: var(--fg-secondary); }
+@media (max-width: 640px) {
+  table.jobs thead { display: none; }
+  table.jobs tr { display: grid; grid-template-columns: auto auto 1fr; gap: .3rem .6rem; padding: .7rem 0;
+                  grid-template-areas: "num crate crate" "num what what" "num state age";
+                  border-bottom: 1px solid var(--border-default); }
+  table.jobs td { display: block; padding: 0; border: 0; min-width: 0; max-width: none; }
+  table.jobs td.num { grid-area: num; width: auto; }
+  table.jobs td.crate { grid-area: crate; }
+  table.jobs td.what { grid-area: what; font-size: 13px; }
+  table.jobs td.what.none { display: none; }
+  table.jobs td:nth-child(4) { grid-area: state; }
+  table.jobs td:nth-child(5) { grid-area: age; align-self: center; font-size: 12px; }
+}
+
+/* Distributions as bars of native meters: no inline styles needed. */
+.bars { display: grid; gap: .35rem; }
+.bar { display: grid; grid-template-columns: 9rem 1fr 5rem; gap: .75rem; align-items: center; padding: .2rem .4rem;
+       border-radius: var(--radius-base); color: inherit; text-decoration: none; }
+a.bar:hover { background: var(--bg-overlay); }
+.bar .name { font-size: 13px; overflow-wrap: anywhere; }
+.bar .n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+meter { width: 100%; height: .6rem; appearance: none; -webkit-appearance: none; border: 0; border-radius: var(--radius-full);
+        background: var(--bg-overlay); }
+meter::-webkit-meter-bar { background: var(--bg-overlay); border: 0; border-radius: var(--radius-full); height: .6rem; }
+meter::-webkit-meter-optimum-value, meter::-webkit-meter-suboptimum-value, meter::-webkit-meter-even-less-good-value {
+  background: var(--fg-secondary); border-radius: var(--radius-full); }
+meter::-moz-meter-bar { background: var(--fg-secondary); border-radius: var(--radius-full); }
+meter.tone-critical::-webkit-meter-optimum-value, meter.tone-high::-webkit-meter-optimum-value { background: var(--bad); }
+meter.tone-critical::-moz-meter-bar, meter.tone-high::-moz-meter-bar { background: var(--bad); }
+meter.tone-medium::-webkit-meter-optimum-value { background: var(--warn); }
+meter.tone-medium::-moz-meter-bar { background: var(--warn); }
+@media (max-width: 640px) { .bar { grid-template-columns: 6.5rem 1fr 4rem; gap: .5rem; } }
+
+/* Stage breakers and canaries as a status list. */
+.status { list-style: none; padding: 0; margin: 0; display: grid; gap: .1rem; }
+.status li { display: flex; gap: .6rem; align-items: center; padding: .35rem .4rem; margin: 0;
+             border-bottom: 1px solid var(--border-subtle); }
+.status .muted, .status .bad { margin-left: auto; font-size: 13px; }
+.dot { flex: none; width: .55rem; height: .55rem; border-radius: 50%; background: var(--fg-muted); }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+
+/* The archive's level filter works like the findings' severity filter. */
+.archived:has(#lvl-critical:checked) tbody tr:not(.lvl-critical),
+.archived:has(#lvl-high:checked) tbody tr:not(.lvl-high),
+.archived:has(#lvl-medium:checked) tbody tr:not(.lvl-medium),
+.archived:has(#lvl-low:checked) tbody tr:not(.lvl-low),
+.archived:has(#lvl-none:checked) tbody tr:not(.lvl-none) { display: none; }

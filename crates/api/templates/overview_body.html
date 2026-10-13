@@ -1,35 +1,54 @@
 <div class="cards">
-  <div class="card"><div class="muted">Needs you</div>
-    <div class="n {% if o.pending_reviews > 0 %}bad{% else %}ok{% endif %}"><a href="/inbox">{{ o.pending_reviews }}</a></div></div>
-  <div class="card"><div class="muted">Finished, 24 h</div><div class="n">{{ o.done_24h }}</div>
+  <a class="card{% if o.pending_reviews > 0 %} tone-bad{% endif %}" href="/inbox"><div class="label">Needs you</div>
+    <div class="n">{{ o.pending_reviews }}</div><div class="muted">verdicts to review or report</div></a>
+  <div class="card"><div class="label">Finished, 24 h</div><div class="n">{{ o.done_24h }}</div>
     <div class="muted">{{ o.dynamic_share }} with a VM run</div></div>
-  <div class="card"><div class="muted">Alerts waiting</div><div class="n">{{ o.alerts_waiting }}</div></div>
-  <div class="card"><div class="muted">Pipeline</div>
-    {% if o.pauses.is_empty() %}<div class="n ok">running</div>
-    {% else %}{% for p in o.pauses %}<div class="bad">paused: {{ p }}</div>{% endfor %}{% endif %}</div>
+  <div class="card{% if o.alerts_waiting > 0 %} tone-warn{% endif %}"><div class="label">Alerts waiting</div><div class="n">{{ o.alerts_waiting }}</div>
+    <div class="muted">not delivered yet</div></div>
+  <div class="card{% if !o.pauses.is_empty() %} tone-bad{% endif %}"><div class="label">Pipeline</div>
+    {% if o.pauses.is_empty() %}<div class="n ok">running</div><div class="muted">no pauses</div>
+    {% else %}<div class="n bad">paused</div>{% for p in o.pauses %}<div class="muted">{{ p }}</div>{% endfor %}{% endif %}</div>
 </div>
-<h2>Stages</h2>
-<table>
-<tr><th>Stage</th><th>Breaker</th></tr>
-{% for (stage, state) in o.breakers %}
-<tr><td>{{ stage }}</td><td class="{% if state == "closed" %}ok{% else %}bad{% endif %}">{{ state }}</td></tr>
-{% endfor %}
-</table>
-<h2>Canaries</h2>
-<table>
-<tr><th>Canary</th><th>Result</th><th>When</th></tr>
-{% for (name, passed, when) in o.canaries %}
-<tr><td>{{ name }}</td><td class="{% if *passed %}ok{% else %}bad{% endif %}">{% if *passed %}passed{% else %}FAILED{% endif %}</td><td class="muted">{{ when }}</td></tr>
-{% endfor %}
-</table>
-<h2>Jobs by state</h2>
-<table>
-<tr><th>State</th><th>Jobs</th></tr>
-{% for (state, n) in o.states %}<tr><td>{{ state }}</td><td><a href="/jobs?state={{ state }}">{{ n }}</a></td></tr>{% endfor %}
-</table>
+
+<div class="split">
+<section>
 <h2>Verdicts by level</h2>
-<table>
-<tr><th>Level</th><th>Verdicts</th></tr>
-{% for (level, n) in o.levels %}<tr><td class="level-{{ level }}">{{ level }}</td><td><a href="/jobs?level={{ level }}">{{ n }}</a></td></tr>{% endfor %}
-</table>
-<p class="muted">Updated {{ o.updated }}</p>
+<div class="bars">
+{% for (level, n) in o.levels %}
+<a class="bar" href="/jobs?level={{ level }}"><span class="name level-{{ level }}">{{ level }}</span>
+<meter class="tone-{{ level }}" min="0" max="{{ o.verdicts() }}" value="{{ n }}">{{ n }}</meter><span class="n">{{ n }}</span></a>
+{% endfor %}
+</div>
+</section>
+<section>
+<h2>Jobs by state</h2>
+<div class="bars">
+{% for (state, n) in o.states %}
+<a class="bar" href="/jobs?state={{ state }}"><span class="name">{{ state }}</span>
+<meter min="0" max="{{ o.jobs() }}" value="{{ n }}">{{ n }}</meter><span class="n">{{ n }}</span></a>
+{% endfor %}
+</div>
+</section>
+</div>
+
+<div class="split">
+<section>
+<h2>Stages</h2>
+<ul class="status">
+{% for (stage, state) in o.breakers %}
+<li><span class="dot {% if state == "closed" %}ok{% else %}bad{% endif %}"></span>{{ stage }} <span class="muted">breaker {{ state }}</span></li>
+{% endfor %}
+</ul>
+</section>
+<section>
+<h2>Canaries</h2>
+{% if o.canaries.is_empty() %}<p class="empty">No canary results yet.</p>{% else %}
+<ul class="status">
+{% for (name, passed, when) in o.canaries %}
+<li><span class="dot {% if *passed %}ok{% else %}bad{% endif %}"></span>{{ name }} <span class="{% if *passed %}muted{% else %}bad{% endif %}">{% if *passed %}passed{% else %}FAILED{% endif %}, {{ when }}</span></li>
+{% endfor %}
+</ul>
+{% endif %}
+</section>
+</div>
+<p class="muted updated">Updated {{ o.updated }}</p>

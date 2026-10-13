@@ -42,6 +42,7 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `axum` | api | The dashboard's HTTP server, from the tokio project. Default features off. |
 | `askama` | api | Compile time templates that escape HTML by default (ADR 0009). |
 | `futures-util` | api | The stream behind the dashboard's server sent events. |
+| `ratatui` | cli | The selection screen of `crateward archive`, on its crossterm backend. Default features off. |
 | `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
 
 ## Tools

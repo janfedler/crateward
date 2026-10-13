@@ -27,6 +27,18 @@ pub fn escape(c: char) -> String {
     }
 }
 
+/// Replaces every honeytoken value in `text`. They are fake by
+/// construction, but a reader should not have to know that.
+#[must_use]
+pub fn redact(text: &str, tokens: &[String]) -> String {
+    tokens
+        .iter()
+        .filter(|t| !t.is_empty())
+        .fold(text.to_owned(), |text, token| {
+            text.replace(token.as_str(), "[honeytoken]")
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

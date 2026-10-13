@@ -3,17 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"selfRequestsOnly":true}'>
 <title>{% block title %}Crateward{% endblock %}</title>
+{%- block head %}
+<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"selfRequestsOnly":true}'>
 <link rel="stylesheet" href="/static/crateward.css?v={{ crate::stylesheet_version() }}">
 <script src="/static/htmx-2.0.11.min.js"></script>
 <script src="/static/sse-2.2.4.min.js"></script>
+{%- endblock %}
 </head>
 <body>
 <header>
+{%- block header %}
   <a class="brand" href="/">Crateward</a>
-  <a href="/inbox">Needs you</a>
-  <a href="/jobs">Jobs</a>
+  <nav class="primary" aria-label="Main">
+    <a href="/"{% block at_overview %}{% endblock %}>Overview</a>
+    <a href="/inbox"{% block at_inbox %}{% endblock %}>Needs you</a>
+    <a href="/jobs"{% block at_jobs %}{% endblock %}>Jobs</a>
+  </nav>
+{%- endblock %}
 </header>
 <main>
 {% block content %}{% endblock %}

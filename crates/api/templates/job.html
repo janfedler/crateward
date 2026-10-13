@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Crateward: {{ name }} {{ version }}{% endblock %}
+{% block head %}{% if archive %}
+<link rel="stylesheet" href="../static/crateward.css">
+{%- else %}{{ super() }}{% endif %}{% endblock %}
+{% block header %}{% if archive %}
+  <a class="brand" href="../index.html">Crateward</a>
+  <nav class="primary" aria-label="Main"><a href="../index.html">Archive</a></nav>
+{%- else %}{{ super() }}{% endif %}{% endblock %}
+{% block at_jobs %} aria-current="page"{% endblock %}
 {% block content %}
 <div class="report-head">
   <div class="report-title">
@@ -20,7 +28,13 @@
   {% endif %}
 </div>
 
-{% if score != "" %}
+{% if archive %}
+<div class="decision">
+  {% if review == "confirmed" %}<span><b class="review-confirmed">Confirmed</b> by review and reported. {% if !finding_url.is_empty() %}<a href="{{ finding_url }}">Read the published finding</a>.{% endif %}</span>
+  {% else if review == "false_positive" %}<span><b class="review-false_positive">False positive.</b> A person reviewed this verdict and found the crate benign. The evidence below is what the analysis saw.</span>
+  {% else %}<span><b>Automated verdict.</b> Nobody reviewed it. A score is a reason to look closer, not a finding.</span>{% endif %}
+</div>
+{% else if score != "" %}
 <div class="decision">
   <span>Review <b class="review-{{ review }}">{{ review }}</b></span>
   <form class="inline" method="post" action="/jobs/{{ id }}/review">
@@ -33,7 +47,7 @@
 {% endif %}
 
 <nav class="toc" aria-label="Sections">
-  {% if review == "confirmed" %}<a href="#disclosure">Disclosure</a>{% endif %}
+  {% if review == "confirmed" && !archive %}<a href="#disclosure">Disclosure</a>{% endif %}
   <a href="#evidence">Evidence <span class="count">{{ evidence.len() + quiet.len() }}</span></a>
   <a href="#behavior">Behavior <span class="count">{{ profile.len() }}</span></a>
   <a href="#findings">Static findings <span class="count">{{ finding_total }}</span></a>
@@ -41,7 +55,7 @@
   <a href="#timeline">Timeline <span class="count">{{ timeline.len() }}</span></a>
 </nav>
 
-{% if review == "confirmed" %}
+{% if review == "confirmed" && !archive %}
 <h2 id="disclosure">Disclosure</h2>
 {% if disclosure.is_empty() %}
 <p class="muted">Not reported yet. Write the evidence pack with
