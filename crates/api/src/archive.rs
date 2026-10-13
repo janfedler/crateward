@@ -6,19 +6,24 @@
 //! numbers. The files need no server and no script, so any static host
 //! serves them.
 //!
+//! A job whose previous version is archived too gets a comparison with it
+//! (ADR 0011), and only then, since a comparison names both versions.
+//!
 //! The archive names crates, so it holds only what may be published:
 //! [`ArchiveCandidate::refusal`] keeps out verdicts nobody reviewed yet and
 //! confirmed findings before their publication (DISCLOSURE.md).
 //! Honeytokens are redacted like in an evidence pack.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use askama::Template;
 use crateward_core::store::{ArchiveCandidate, PublicStats, Store, StoreError};
 use crateward_core::text::redact;
 
+use crate::diff::counterpart;
 use crate::export::format_utc;
-use crate::{FONTS, job_page};
+use crate::{FONTS, diff_page, job_page};
 
 /// The file that marks a directory as an archive, so writing again may
 /// replace it.
@@ -256,12 +261,28 @@ pub async fn write(
     let mut chosen = chosen(store, ids).await?;
     prepare(dir)?;
 
+    let archived: HashSet<i64> = chosen.iter().map(|c| c.id.0).collect();
     for c in &mut chosen {
-        let Some(page) = job_page(store, c.id.0, true).await? else {
+        let Some(mut page) = job_page(store, c.id.0, true).await? else {
             return Err(ArchiveError::NotCandidate(c.id.0));
         };
 
         let tokens = store.honeytoken_values(c.id).await?;
+
+        // A comparison with the version before, when both are archived.
+        let versions = store.analyzed_versions(c.id).await?;
+        let previous = counterpart(&versions, c.id.0, None).filter(|v| archived.contains(&v.id.0));
+        if let Some(previous) = previous
+            && let Some(diff) = diff_page(store, c.id.0, Some(previous.id.0), true).await?
+        {
+            let mut both = tokens.clone();
+            both.extend(store.honeytoken_values(previous.id).await?);
+            let html = redact_page(&diff.render()?, &both);
+            std::fs::write(dir.join("jobs").join(format!("{}-diff.html", c.id.0)), html)?;
+            page.compare_href = format!("{}-diff.html", c.id.0);
+            page.compare_version.clone_from(&previous.version);
+        }
+
         let html = redact_page(&page.render()?, &tokens);
         std::fs::write(dir.join("jobs").join(format!("{}.html", c.id.0)), html)?;
 

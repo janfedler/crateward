@@ -49,6 +49,8 @@ const TOOLCHAIN: [&str; 25] = [
 pub struct ProcessRow {
     /// Indentation, capped at eight levels.
     pub depth: usize,
+    /// Depth in the tree, not capped.
+    pub nesting: usize,
     /// Guest process ID.
     pub pid: u64,
     /// `cargo`, `rustc`, `build_script`, `toolchain`, `other` or `unknown`.
@@ -101,16 +103,8 @@ impl ProcessRow {
     /// names it `target/debug/build/<package>-<hash>/build-script-build`.
     #[must_use]
     pub fn label(&self) -> &str {
-        let package = || {
-            let (_, rest) = self.exe.rsplit_once("/build/")?;
-            let (dir, _) = rest.split_once('/')?;
-            let (name, hash) = dir.rsplit_once('-')?;
-
-            hash.chars().all(|c| c.is_ascii_hexdigit()).then_some(name)
-        };
-
         match self.role.as_str() {
-            "build_script" => package().unwrap_or(&self.exe),
+            "build_script" => build_package(&self.exe).unwrap_or(&self.exe),
             _ => &self.exe,
         }
     }
@@ -123,6 +117,17 @@ impl ProcessRow {
     fn compiler_name(&self) -> bool {
         self.role == "rustc" || self.role == "toolchain"
     }
+}
+
+/// The package of a program under cargo's `build/<package>-<hash>/`
+/// directory, if it is one.
+#[must_use]
+pub fn build_package(exe: &str) -> Option<&str> {
+    let (_, rest) = exe.rsplit_once("/build/")?;
+    let (dir, _) = rest.split_once('/')?;
+    let (name, hash) = dir.rsplit_once('-')?;
+
+    hash.chars().all(|c| c.is_ascii_hexdigit()).then_some(name)
 }
 
 /// A file opened by a process.
@@ -210,6 +215,8 @@ pub struct RunView {
     pub scratch: Vec<(String, String)>,
     /// Scratch disk entries worth a look.
     pub entries: Vec<EntryRow>,
+    /// Retention removed the process list and the output tails.
+    pub trimmed: bool,
     /// The end of the build's standard output.
     pub stdout: String,
     /// The end of the build's standard error.
@@ -419,6 +426,7 @@ fn fold(rows: Vec<ProcessRow>) -> Vec<ProcessRow> {
                 if let Some(row) = rows.get(i) {
                     out.push(ProcessRow {
                         count,
+                        nesting: row.depth,
                         depth: row.depth.min(MAX_DEPTH),
                         ..row.clone()
                     });
@@ -450,6 +458,7 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
 
     ProcessRow {
         depth,
+        nesting: depth,
         pid: u64_of(p, "pid").unwrap_or(0),
         role,
         exe,
@@ -774,6 +783,7 @@ pub fn run_view(job: i64, kind: &str, report: &Value) -> RunView {
         outcome: outcome.replace('_', " "),
         stdout: str_of(report, "stdout_tail"),
         stderr: str_of(report, "stderr_tail"),
+        trimmed: report.get("trimmed").and_then(Value::as_bool) == Some(true),
         ..RunView::default()
     };
 
@@ -925,6 +935,7 @@ mod tests {
     fn build_scripts_show_their_package_and_outside_programs_stand_out() {
         let row = |exe: &str, role: &str| ProcessRow {
             depth: 0,
+            nesting: 0,
             pid: 1,
             role: role.to_owned(),
             exe: exe.to_owned(),

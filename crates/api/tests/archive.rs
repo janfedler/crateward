@@ -24,9 +24,14 @@ fn token(n: u8) -> String {
 
 /// A finished job of `name` with a verdict of `score`.
 async fn done(store: &mut Store, name: &str, score: u32, n: u8) -> JobId {
+    release(store, name, "0.1.0", score, n).await
+}
+
+/// A finished job of `name` at `version` with a verdict of `score`.
+async fn release(store: &mut Store, name: &str, version: &str, score: u32, n: u8) -> JobId {
     let new = NewJob {
         name: name.parse().unwrap(),
-        version: "0.1.0".parse().unwrap(),
+        version: version.parse().unwrap(),
         cksum: format!("{n:02x}").repeat(32).parse().unwrap(),
         published_at: None,
         priority: 0,
@@ -241,5 +246,44 @@ async fn unreviewed_and_unpublished_findings_are_refused_before_anything_is_writ
     assert!(matches!(error, Err(ArchiveError::NotCandidate(99))));
     assert!(!dir.exists());
 
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn versions_archived_together_are_compared() {
+    let Some(db) = TestDb::new("archive").await else {
+        return;
+    };
+
+    let mut store = db.migrated().await;
+    let old = release(&mut store, "pair", "0.1.0", 30, 1).await;
+    let new = release(&mut store, "pair", "0.2.0", 40, 2).await;
+
+    let dir = scratch("diff");
+    let written = archive::write(&store, &[new.0, old.0], &dir, &json!({})).await;
+    assert_eq!(written.unwrap(), 2);
+
+    let page = read(&dir, &format!("jobs/{}.html", new.0));
+    assert!(page.contains(&format!(
+        "<a class=\"button compare\" href=\"{}-diff.html\">Compare with 0.1.0</a>",
+        new.0
+    )));
+    assert!(!read(&dir, &format!("jobs/{}.html", old.0)).contains("Compare with"));
+
+    let diff = read(&dir, &format!("jobs/{}-diff.html", new.0));
+    assert!(diff.contains("<link rel=\"stylesheet\" href=\"../static/crateward.css\">"));
+    assert!(diff.contains(&format!("<a href=\"{}.html\">0.1.0 report</a>", old.0)));
+    assert!(!diff.contains("/jobs/") && !diff.contains("<script"));
+    assert!(!diff.contains("class=\"versions\""));
+    assert!(diff.contains("pair sent [honeytoken]"));
+    assert!(!diff.contains("ghp_"));
+
+    // Without the version before, there is nothing to compare with.
+    let alone = archive::write(&store, &[new.0], &dir, &json!({})).await;
+    assert_eq!(alone.unwrap(), 1);
+    assert!(!dir.join(format!("jobs/{}-diff.html", new.0)).exists());
+    assert!(!read(&dir, &format!("jobs/{}.html", new.0)).contains("Compare with"));
+
+    std::fs::remove_dir_all(dir).unwrap();
     db.drop().await;
 }

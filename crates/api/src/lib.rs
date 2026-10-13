@@ -20,6 +20,7 @@
 #![forbid(unsafe_code)]
 
 pub mod archive;
+pub mod diff;
 pub mod export;
 pub mod run_view;
 pub mod security;
@@ -873,6 +874,14 @@ pub async fn job_page(
     let runs = store.job_runs(job.id).await?;
     let now = SystemTime::now();
 
+    // The archive links a comparison only if it holds both versions.
+    let previous = if archive {
+        None
+    } else {
+        let versions = store.analyzed_versions(job.id).await?;
+        diff::counterpart(&versions, id, None).map(|v| v.version.clone())
+    };
+
     Ok(Some(JobPage {
         id,
         archive,
@@ -907,7 +916,106 @@ pub async fn job_page(
         } else {
             format!("https://{}/findings/{}/", export::DOMAIN, encode(&slug))
         },
+        compare_href: previous
+            .as_ref()
+            .map(|_| format!("/jobs/{id}/diff"))
+            .unwrap_or_default(),
+        compare_version: previous.unwrap_or_default(),
     }))
+}
+
+/// A job's page, by its ID: the dashboard's, or the archive's file name.
+fn job_href(id: i64, archive: bool) -> String {
+    if archive {
+        format!("{id}.html")
+    } else {
+        format!("/jobs/{id}")
+    }
+}
+
+/// The comparison of job `id` with `against`, or with the version before
+/// it. `None` if there is no such job or nothing to compare with.
+///
+/// # Errors
+///
+/// Fails on database errors.
+pub async fn diff_page(
+    store: &Store,
+    id: i64,
+    against: Option<i64>,
+    archive: bool,
+) -> Result<Option<views::DiffPage>, StoreError> {
+    let versions = store.analyzed_versions(JobId(id)).await?;
+    let Some(other) = diff::counterpart(&versions, id, against) else {
+        return Ok(None);
+    };
+
+    let (Some(now), Some(before)) = (
+        diff::Side::load(store, id).await?,
+        diff::Side::load(store, other.id.0).await?,
+    ) else {
+        return Ok(None);
+    };
+
+    let package = store
+        .job_static(JobId(id))
+        .await?
+        .and_then(|(_, _, diff)| diff);
+
+    let (package, package_note) = match diff::package_rows(package.as_ref(), &before.version) {
+        Ok(rows) => (rows, String::new()),
+        Err(note) => (Vec::new(), note),
+    };
+
+    let head = |side: &diff::Side| views::DiffHead {
+        version: side.version.clone(),
+        href: job_href(side.id, archive),
+        score: side.score.clone(),
+        level: side.level.clone(),
+    };
+
+    let links = if archive {
+        Vec::new()
+    } else {
+        versions
+            .iter()
+            .filter(|v| v.id.0 != id)
+            .map(|v| views::VersionLink {
+                version: v.version.clone(),
+                href: format!("/jobs/{id}/diff?against={}", v.id.0),
+                selected: v.id == other.id,
+            })
+            .collect()
+    };
+
+    Ok(Some(views::DiffPage {
+        archive,
+        name: now.name.clone(),
+        now: head(&now),
+        before: head(&before),
+        source_url: diff::source_url(&now.name, &before.version, &now.version),
+        versions: links,
+        package,
+        package_note,
+        c: diff::compare(&now, &before),
+    }))
+}
+
+/// Which version the comparison is against.
+#[derive(Debug, Deserialize)]
+pub struct DiffQuery {
+    against: Option<i64>,
+}
+
+async fn diff_handler(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+    Query(q): Query<DiffQuery>,
+) -> Result<Response, AppError> {
+    match diff_page(&state.reader, id, q.against, false).await? {
+        Some(page) => Ok(Html(page.render()?).into_response()),
+        None => Ok((StatusCode::NOT_FOUND, "nothing to compare with").into_response()),
+    }
 }
 
 async fn job(
@@ -1027,6 +1135,7 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
         .route("/inbox", get(inbox))
         .route("/jobs", get(jobs))
         .route("/jobs/{id}", get(job))
+        .route("/jobs/{id}/diff", get(diff_handler))
         .route("/jobs/{id}/review", post(review))
         .route("/jobs/{id}/runs/{file}", get(run_report))
         .route("/burst", post(burst))

@@ -1,0 +1,15 @@
+{# Process lines of a comparison, `diff::TreeLine`, as `lines`, marked `mark`. #}
+<div class="scroll">
+<table class="tree">
+<thead><tr><th>Process</th><th>Arguments</th><th>Exit</th></tr></thead>
+<tbody>
+{% for t in lines %}
+<tr class="role-{{ t.row.role }} {% if t.context %}context{% else %}{{ mark }}{% endif %}{% if t.row.root %} root{% endif %}{% if t.row.disguised() %} disguised{% endif %}{% if t.row.foreign() %} foreign{% endif %}">
+<td class="d{{ t.row.depth }}">{% if t.row.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ t.row.role }}</span> <span class="mono" title="{{ t.row.exe }}">{{ t.row.label() }}</span>{% if t.row.count > 1 %} <span class="times">×{{ t.row.count }}</span>{% endif %}</td>
+<td class="mono args">{{ t.row.args }}</td>
+<td class="nowrap">{{ t.row.exit }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>

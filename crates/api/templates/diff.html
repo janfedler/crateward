@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Crateward: {{ name }} {{ before.version }} to {{ now.version }}{% endblock %}
+{% block head %}{% if archive %}
+<link rel="stylesheet" href="../static/crateward.css">
+{%- else %}{{ super() }}{% endif %}{% endblock %}
+{% block header %}{% if archive %}
+  <a class="brand" href="../index.html">Crateward</a>
+  <nav class="primary" aria-label="Main"><a href="../index.html">Archive</a></nav>
+{%- else %}{{ super() }}{% endif %}{% endblock %}
+{% block at_jobs %} aria-current="page"{% endblock %}
+{% block content %}
+<div class="report-head">
+  <div class="report-title">
+    <h1>{{ name }} <span class="version">{{ before.version }} → {{ now.version }}</span></h1>
+    <p class="meta">
+      <span class="badge">changes</span>
+      <a href="{{ now.href }}">{{ now.version }} report</a>
+      <a href="{{ before.href }}">{{ before.version }} report</a>
+      <a class="muted" href="{{ source_url }}" rel="noreferrer noopener" target="_blank">source diff on diff.rs</a>
+    </p>
+    <p class="headline">Evidence: {{ c.evidence_changes() }} changed. Static findings: {{ c.findings_added }} new, {{ c.findings_removed }} gone.{% for r in c.runs %} Run {{ r.kind }}: {{ r.changes() }} changed.{% endfor %}</p>
+  </div>
+  <div class="versus">
+    <div class="verdict was tone-{{ before.level }}"><div class="score">{{ before.score }}</div> <div class="level">{{ before.level }}</div></div>
+    <span class="arrow" aria-label="became">→</span>
+    <div class="verdict tone-{{ now.level }}"><div class="score">{{ now.score }}</div> <div class="level">{{ now.level }}</div></div>
+  </div>
+</div>
+
+{% if !versions.is_empty() %}
+<p class="versions"><span class="muted">Compare {{ now.version }} with</span>
+{% for v in versions %}<a class="chip{% if v.selected %} selected{% endif %}" href="{{ v.href }}"{% if v.selected %} aria-current="page"{% endif %}>{{ v.version }}</a> {% endfor %}</p>
+{% endif %}
+
+<nav class="toc" aria-label="Sections">
+  <a href="#evidence">Evidence <span class="count{% if c.evidence_changes() > 0 %} bad{% endif %}">{{ c.evidence_changes() }}</span></a>
+  <a href="#package">Package</a>
+  <a href="#findings">Static findings <span class="count{% if c.findings_added > 0 %} bad{% endif %}">{{ c.finding_changes() }}</span></a>
+  {% for r in c.runs %}<a href="#run-{{ r.kind }}">Run: {{ r.kind }} <span class="count{% if r.changes() > 0 %} bad{% endif %}">{{ r.changes() }}</span></a>{% endfor %}
+  <a href="#behavior">Behavior <span class="count{% if !c.profile_added.is_empty() %} bad{% endif %}">{{ c.profile_changes() }}</span></a>
+</nav>
+
+<h2 id="evidence">Evidence</h2>
+<p class="tally">{{ c.evidence_changes() }} changed, {{ c.evidence_same }} the same.</p>
+{% if !c.evidence.is_empty() %}
+<table class="changes">
+<thead><tr><th>Change</th><th class="num">Points</th><th>Signal</th><th>What</th></tr></thead>
+<tbody>
+{% for e in c.evidence %}
+<tr class="{{ e.change }}"><td><span class="change {{ e.change }}">{{ e.change }}</span></td>
+<td class="num nowrap">{% if e.before.is_empty() %}<span class="points {{ e.tone }}">{{ e.after }}</span>{% else if e.after.is_empty() %}<span class="points low">{{ e.before }}</span>{% else %}<span class="muted">{{ e.before }} →</span> <span class="points {{ e.tone }}">{{ e.after }}</span>{% endif %}</td>
+<td class="signal"><span class="word">{{ e.signal }}</span>{% if !e.package.is_empty() %}<div class="sub">{{ e.package }}</div>{% endif %}</td>
+<td>{{ e.summary }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
+<h2 id="package">Package</h2>
+{% if package.is_empty() %}<p class="empty">{{ package_note }}</p>{% else %}
+<dl class="facts">
+{% for (label, value) in package %}<div class="{% if value != "no change" && value != "none" %}changed{% endif %}"><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+</dl>
+{% endif %}
+
+<h2 id="findings">Static findings</h2>
+<p class="tally">{{ c.findings_added }} new, {{ c.findings_removed }} gone, {{ c.findings_same }} the same. Code that only moved counts as the same.</p>
+{% if !c.added_groups.is_empty() %}
+<h4>New in {{ now.version }}</h4>
+<div class="findings added">{% let groups = c.added_groups.clone() %}{% include "groups.html" %}</div>
+{% endif %}
+{% if !c.removed_groups.is_empty() %}
+<h4>Gone since {{ before.version }}</h4>
+<details class="more"><summary>{{ c.findings_removed }} findings</summary>
+<div class="findings removed">{% let groups = c.removed_groups.clone() %}{% include "groups.html" %}</div>
+</details>
+{% endif %}
+
+{% if !c.runs_note.is_empty() %}
+<h2>VM runs</h2>
+<p class="empty">{{ c.runs_note }}</p>
+{% endif %}
+{% for r in c.runs %}
+<section class="run" id="run-{{ r.kind }}">
+<div class="run-head"><h2>Run: {{ r.kind }}</h2></div>
+
+<div class="panel proc">
+<h3>Processes <span class="muted">{{ r.added }} new, {{ r.removed }} gone, {{ r.same }} the same</span></h3>
+{% if !r.trimmed.is_empty() %}<p class="hint">{{ r.trimmed }}</p>
+{% else if r.process_changes() == 0 %}<p class="muted">The same processes ran.</p>
+{% else %}
+<p class="hint">Processes are compared by their program and their place in the tree, not by arguments or times. Grey rows are only there to show where a change sits.</p>
+{% if !r.new_processes.is_empty() %}
+<h4>New in {{ now.version }}</h4>
+{% let lines = r.new_processes.clone() %}{% let mark = "added" %}{% include "diff_tree.html" %}
+{% endif %}
+{% if !r.gone_processes.is_empty() %}
+<h4>Gone since {{ before.version }}</h4>
+{% let lines = r.gone_processes.clone() %}{% let mark = "removed" %}{% include "diff_tree.html" %}
+{% endif %}
+{% if r.more > 0 %}<p class="muted">{{ r.more }} more lines not shown.</p>{% endif %}
+{% endif %}
+</div>
+
+<div class="panel">
+<h3>Network <span class="muted">{{ r.network_changes() }} changed, {{ r.network_same }} the same</span></h3>
+{% if r.network_changes() == 0 %}<p class="muted">No change.</p>{% else %}
+{% if !r.dns_added.is_empty() %}<p class="chips">New lookups {% for d in r.dns_added %}<code class="chip new">{{ d }}</code> {% endfor %}</p>{% endif %}
+{% if !r.dns_removed.is_empty() %}<p class="chips">Gone lookups {% for d in r.dns_removed %}<code class="chip gone">{{ d }}</code> {% endfor %}</p>{% endif %}
+{% if !r.connections_added.is_empty() || !r.connections_removed.is_empty() %}
+<div class="scroll">
+<table>
+<thead><tr><th>Change</th><th>Destination</th><th>Protocol</th><th>What was sent</th></tr></thead>
+<tbody>
+{% for x in r.connections_added %}<tr class="added"><td><span class="change added">added</span></td><td class="mono nowrap">{{ x.dst }}</td><td class="nowrap">{{ x.protocol }}</td><td class="mono">{{ x.detail }}</td></tr>{% endfor %}
+{% for x in r.connections_removed %}<tr class="removed"><td><span class="change removed">removed</span></td><td class="mono nowrap">{{ x.dst }}</td><td class="nowrap">{{ x.protocol }}</td><td class="mono">{{ x.detail }}</td></tr>{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+</div>
+
+<div class="panel">
+<h3>Files <span class="muted">{{ r.file_changes() }} changed, {{ r.files_same }} the same</span></h3>
+{% if r.file_changes() == 0 %}<p class="muted">No change.</p>{% else %}
+<div class="scroll">
+<table>
+<thead><tr><th>Change</th><th>What</th><th>Program</th><th>Path</th></tr></thead>
+<tbody>
+{% for f in r.files_added %}<tr class="added"><td><span class="change added">added</span></td><td class="nowrap">{{ f.what }}</td><td class="mono">{{ f.program }}</td><td class="mono">{{ f.path }}</td></tr>{% endfor %}
+{% for f in r.files_removed %}<tr class="removed"><td><span class="change removed">removed</span></td><td class="nowrap">{{ f.what }}</td><td class="mono">{{ f.program }}</td><td class="mono">{{ f.path }}</td></tr>{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+</div>
+</section>
+{% endfor %}
+
+<h2 id="behavior">Behavior</h2>
+<p class="tally">{{ c.profile_added.len() }} new, {{ c.profile_removed.len() }} gone, {{ c.profile_same }} the same.</p>
+<div class="behavior">
+{% if !c.profile_added.is_empty() %}<div><h4>New in {{ now.version }}</h4><p class="chips">{% for b in c.profile_added %}<code class="chip new">{{ b }}</code> {% endfor %}</p></div>{% endif %}
+{% if !c.profile_removed.is_empty() %}<div><h4>Gone since {{ before.version }}</h4><p class="chips">{% for b in c.profile_removed %}<code class="chip gone">{{ b }}</code> {% endfor %}</p></div>{% endif %}
+</div>
+{% endblock %}

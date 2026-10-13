@@ -1,6 +1,6 @@
 # 0011: A diff view against the previous version
 
-* Status: Proposed
+* Status: Accepted
 * Date: 2026-10-13
 
 ## Context
@@ -28,45 +28,46 @@ network summary, verdict and profile stay.
 ## Decision
 
 1. **A diff page per job**, `/jobs/{id}/diff`, linked from the job page's
-   head ("Compare with 0.10.1") and from a new "Changes" entry in the
-   table of contents. It compares the job with the newest analyzed version
-   before it in semantic version order, the same rule as
-   `previous_profile`. A `?against={job}` parameter picks another version
-   of the same crate, from a list of the crate's analyzed versions.
-2. **One model, `views::DiffView`, built from stored data only.** No stage
-   changes, no new analysis, no migration. Its sections, each with added,
-   removed and unchanged counts:
-   * **Verdict**: score and level of both, and evidence by signal: added,
-     removed, and points changed.
+   head ("Compare with 0.10.1"). It compares the job with the newest
+   scored version before it in semantic version order, the same rule as
+   `previous_profile` (`Store::analyzed_versions`, `diff::counterpart`).
+   A `?against={job}` parameter picks another version of the same crate
+   from the list of its scored versions. The page links both job pages
+   and the two versions' source diff on diff.rs.
+2. **Built from stored data only.** No stage changes, no new analysis, no
+   migration. Its sections, each with new, gone and unchanged counts:
+   * **Verdict**: score and level of both, and evidence by signal and
+     package: new, gone, and points changed.
    * **Package**: the stored `VersionDiff` (build script, proc macro,
-     `links`, new dependencies). For older jobs without one, the section
-     says so.
-   * **Static findings**: grouped like the job page (severity, kind,
-     context), each group marked added, removed or unchanged by the
-     diff's key (kind, file, evidence).
-   * **Processes**: the folded process trees of the matching runs (full
-     against full, check against check), compared by the fold's shape
-     (`run_view::shape`): role, label, exit and children. Only added and
-     removed subtrees show by default, with their ancestors as context.
-     A trimmed run on either side shows "process list removed by
-     retention" instead of a false "everything is new".
-   * **Network**: lookups, destinations by port and protocol, HTTP hosts
-     and TLS SNI, as added and removed sets.
-   * **Files**: secrets opened, writes outside the build directories, and
-     scratch entries, as added and removed sets of path and program.
-   * **Behavior profile**: the full set difference, which the verdict
-     holds only one way today.
-3. **The comparison is pure.** `diff_view(current, previous)` takes two
-   loaded `JobPage`-like inputs and returns the view, so tests need no
-   database and the archive can render it too.
+     `links`, new dependencies), when it was computed against the
+     version compared with. Otherwise the section says why it is missing.
+   * **Static findings**: compared by severity, kind, rule, context, file
+     and evidence, not by line, so code that only moved is the same. New
+     and gone findings are grouped like on the job page.
+   * **Processes**: the folded trees of a run kind both versions have, the
+     full run first. A process is compared by its place in the tree: the
+     programs of its ancestors, its own program, exit and whether it
+     became root. Build scripts count by package, since their directory
+     name has a hash. New and gone processes show with their ancestors as
+     grey context. A run that retention trimmed on either side is named
+     instead of compared.
+   * **Network**: lookups, and connections by destination, protocol and
+     what was sent, as new and gone sets.
+   * **Files**: secrets read, writes outside the build directories and
+     scratch entries, by program and path, as new and gone sets.
+   * **Behavior profile**: the set difference both ways.
+3. **The comparison is pure.** `diff::compare(now, before)` takes two
+   loaded `diff::Side`s, so tests need no database and the archive renders
+   it too.
 4. **Show change, hide sameness.** Unchanged items are counted, not
-   listed, behind a "show N unchanged" fold. Added items use the warning
-   tone, removed ones the muted tone. The page reuses the job page's
-   components: the report head (both scores side by side), the sticky table
-   of contents, the group lists, the folded tree and the scroll panels.
-5. **The archive includes diffs** of archived jobs whose previous version
-   is archived too, as `jobs/{id}-diff.html`, and links them from both
-   pages. The diff never names a version the archive does not hold.
+   listed. New items use the warning tone, gone ones the muted tone. The
+   page reuses the job page's parts: the report head with both scores, the
+   sticky table of contents, the finding groups, the folded tree and the
+   scroll panels.
+5. **The archive includes comparisons** of archived jobs whose previous
+   version is archived too, as `jobs/{id}-diff.html`, linked from the
+   newer job's page. A comparison never names a version the archive does
+   not hold.
 
 ## Alternatives
 
@@ -78,9 +79,8 @@ network summary, verdict and profile stay.
   ordering change on every run, so everything would differ. Comparing by
   shape is what makes the folded tree readable already.
 * **Diffing the source files of the two `.crate` archives.** That is
-  diffs.rs' job, and the dashboard can link to it. Crateward's value is the
-  behavior diff, which no other tool shows. A link to diffs.rs is added
-  next to "Compare", so the reviewer has both.
+  diff.rs' job, and the page links to it. Crateward's value is the
+  behavior diff, which no other tool shows.
 
 ## Consequences
 
@@ -91,23 +91,13 @@ network summary, verdict and profile stay.
 * Retention limits the process comparison for old benign versions. The
   page states it. Evidence, network summaries and files are still compared.
 * Watch: the size of the page for crates whose trees change completely
-  between versions (code generators). The fold and the "unchanged" counts
-  keep it bounded like the job page.
-
-### Steps
-
-1. `run_view`: expose the fold's shape key per row and a function that
-   matches two folded trees by it.
-2. `views::DiffView` and `diff_view()`, with unit tests from the job page's
-   fixtures (one added subtree, one removed connection, a trimmed side).
-3. The store query for the crate's analyzed versions in semantic version
-   order.
-4. Route, template and styles. Job page links. Tests in `job_page.rs`.
-5. Archive: render the diff pages and link them.
+  between versions (code generators). The fold keeps it bounded like the
+  job page, and each process list stops at 400 lines with a count of the
+  rest.
 
 ## Sources
 
 * `crates/static_analysis/src/diff.rs`, `crates/core/src/store/verdicts.rs`
   (`previous_profile`), `crates/core/src/store/retention.rs`,
-  `crates/api/src/run_view.rs`
-* [diffs.rs](https://diffs.rs)
+  `crates/api/src/run_view.rs`, `crates/api/src/diff.rs`
+* [diff.rs](https://diff.rs)

@@ -332,4 +332,56 @@ pub struct JobPage {
     pub disclosure: Vec<(String, String)>,
     /// The published finding page on the public site, or empty.
     pub finding_url: String,
+    /// The comparison with the previous version, or empty.
+    pub compare_href: String,
+    /// The previous version, or empty.
+    pub compare_version: String,
+}
+
+/// Another analyzed version of the crate, to compare with.
+#[derive(Debug, Clone)]
+pub struct VersionLink {
+    /// Version.
+    pub version: String,
+    /// The comparison with it.
+    pub href: String,
+    /// It is the one compared.
+    pub selected: bool,
+}
+
+/// The comparison of a job with another version of its crate (ADR 0011).
+#[derive(Template)]
+#[template(path = "diff.html")]
+pub struct DiffPage {
+    /// A static page of `crateward archive` instead of the dashboard's.
+    pub archive: bool,
+    /// Crate name.
+    pub name: String,
+    /// The newer side.
+    pub now: DiffHead,
+    /// The side compared with.
+    pub before: DiffHead,
+    /// The two versions on diff.rs.
+    pub source_url: String,
+    /// Other versions to compare with, empty in the archive.
+    pub versions: Vec<VersionLink>,
+    /// The package changes the static analysis recorded.
+    pub package: Vec<(String, String)>,
+    /// Why there are none, or empty.
+    pub package_note: String,
+    /// The changes.
+    pub c: crate::diff::Comparison,
+}
+
+/// One side in the head of a comparison.
+#[derive(Debug, Clone)]
+pub struct DiffHead {
+    /// Version.
+    pub version: String,
+    /// Its job page.
+    pub href: String,
+    /// Score, or empty.
+    pub score: String,
+    /// Level, or empty.
+    pub level: String,
 }

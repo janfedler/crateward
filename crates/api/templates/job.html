@@ -17,6 +17,7 @@
       {% if coverage != "" %}<span class="badge">{{ coverage }}</span>{% endif %}
       <span class="muted">job {{ id }}</span>
       <a class="muted" href="{{ crate_url }}" rel="noreferrer noopener" target="_blank">crates.io</a>
+      {% if !compare_href.is_empty() %}<a class="button compare" href="{{ compare_href }}">Compare with {{ compare_version }}</a>{% endif %}
     </p>
     {% if let Some(top) = evidence.first() %}<p class="headline">{{ top.summary }}</p>{% endif %}
   </div>
@@ -115,17 +116,7 @@
   <input type="radio" name="severity" id="sev-{{ s.tone }}"><label for="sev-{{ s.tone }}" class="tone-{{ s.tone }}">{{ s.tone }} <span class="count">{{ s.count }}</span></label>{% endfor %}
   <span class="muted">{{ groups.len() }} groups{% if findings_dropped > 0 %}, {{ findings_dropped }} more dropped by the analysis limit{% endif %}</span>
 </div>
-{% for g in groups %}
-<details class="group sev-{{ g.tone }}"{% if g.open() %} open{% endif %}>
-<summary><span class="badge tone-{{ g.tone }}">{{ g.severity }}</span> <span class="kind">{{ g.kind }}</span>{% if !g.context.is_empty() %} <span class="context">{{ g.context }}</span>{% endif %} <span class="count">{{ g.count }}</span></summary>
-<ul class="items">
-{% for i in g.items %}
-<li><code class="evidence-text">{{ i.evidence }}</code>
-<span class="places">{% for (place, url) in i.places %}<a class="place" href="{{ url }}" rel="noreferrer noopener" target="_blank">{{ place }}</a> {% endfor %}{% if i.more > 0 %}<span class="muted">and {{ i.more }} more</span>{% endif %}</span></li>
-{% endfor %}
-</ul>
-</details>
-{% endfor %}
+{% include "groups.html" %}
 </div>
 {% endif %}
 

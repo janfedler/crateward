@@ -92,7 +92,8 @@ chooses the jobs by level, review, coverage, minimum score, crate name
 prefix and a cap per level, and single jobs can be added or left out by
 hand. The choice is saved as `selection.json` in the archive.
 `--selection <file>` writes from a saved choice without the screen.
-Writing into an earlier archive replaces it.
+Writing into an earlier archive replaces it. A job whose previous version
+is archived too gets its comparison with it ([ADR 0011](adr/0011-version-diff-view.md)).
 
 The archive holds only what may be published: verdicts waiting for review
 and confirmed findings before their publication are refused

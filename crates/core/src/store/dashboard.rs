@@ -117,6 +117,19 @@ impl ArchiveCandidate {
     }
 }
 
+/// A scored version of a crate, for comparing versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalyzedVersion {
+    /// The job.
+    pub id: JobId,
+    /// Version.
+    pub version: String,
+    /// Score.
+    pub score: i32,
+    /// Risk level name.
+    pub level: String,
+}
+
 const ROW: &str = "j.id, j.crate_name, j.version, j.state, v.score, v.level, v.review,
      v.verdict->'evidence'->0->>'summary',
      extract(epoch FROM now() - j.updated_at)::bigint,
@@ -335,6 +348,48 @@ impl Store {
                 })
             })
             .collect()
+    }
+
+    /// The scored versions of `job`'s crate, newest first in semantic
+    /// version order, `job` among them. A version scored by more than one
+    /// job appears once, with its latest job. Versions that are not
+    /// semantic versions are left out.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn analyzed_versions(&self, job: JobId) -> Result<Vec<AnalyzedVersion>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT DISTINCT ON (j.version) j.id, j.version, v.score, v.level
+                 FROM jobs j JOIN verdicts v ON v.job_id = j.id
+                 WHERE j.canonical_name = (SELECT canonical_name FROM jobs WHERE id = $1)
+                 ORDER BY j.version, j.id DESC",
+                &[&job.0],
+            )
+            .await?;
+
+        let mut versions = Vec::with_capacity(rows.len());
+        for r in &rows {
+            let version: String = r.try_get(1)?;
+            let Ok(order) = semver::Version::parse(&version) else {
+                continue;
+            };
+
+            let analyzed = AnalyzedVersion {
+                id: JobId(r.try_get(0)?),
+                version,
+                score: r.try_get(2)?,
+                level: r.try_get(3)?,
+            };
+
+            versions.push((order, analyzed));
+        }
+
+        versions.sort_by(|a, b| b.0.cmp(&a.0));
+
+        Ok(versions.into_iter().map(|(_, v)| v).collect())
     }
 
     /// Verdicts waiting for review, oldest first.

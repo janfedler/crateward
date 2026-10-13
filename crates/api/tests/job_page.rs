@@ -977,3 +977,179 @@ async fn burst_mode_is_switched_on_the_jobs_page() {
 
     db.drop().await;
 }
+
+/// A scored version of `masker` with its file, static report, run and
+/// package diff.
+async fn version(
+    db: &mut Dashboard,
+    version: &str,
+    n: u8,
+    score: u32,
+    findings: Value,
+    run: Value,
+) -> JobId {
+    let cksum = format!("{n:02x}").repeat(32);
+    let new = NewJob {
+        name: "masker".parse().unwrap(),
+        version: version.parse().unwrap(),
+        cksum: cksum.parse().unwrap(),
+        published_at: None,
+        priority: 0,
+        index_entry: json!({}),
+    };
+
+    let job = db.store.enqueue(&new).await.unwrap().unwrap();
+    db.step(job, Stage::Fetch, "w", JobEvent::Fetched).await;
+    let triage = Triage::StaticOnly(StaticOnlyReason::NoBuildTimeCode);
+    let analyzed = JobEvent::StaticAnalysisCompleted { triage };
+    db.step(job, Stage::StaticAnalysis, "w", analyzed).await;
+    db.step(
+        job,
+        Stage::Analysis,
+        "w",
+        JobEvent::Scored { escalate: false },
+    )
+    .await;
+
+    let store = &db.store;
+    let mut v = verdict();
+    v.score = score;
+    v.level = RiskLevel::from_score(score);
+    v.evidence.truncate(if score > 50 { 2 } else { 1 });
+    store.record_verdict(job, &v).await.unwrap();
+    store
+        .record_crate_file(&CrateFile {
+            sha256: cksum.parse().unwrap(),
+            name: "masker".to_owned(),
+            version: version.to_owned(),
+            ..crate_file()
+        })
+        .await
+        .unwrap();
+    store
+        .record_static_report(
+            &cksum.parse().unwrap(),
+            7,
+            true,
+            Some("high"),
+            &json!({"findings": findings}),
+        )
+        .await
+        .unwrap();
+    store
+        .record_run(job, "full", "completed", &run)
+        .await
+        .unwrap();
+    let diff = json!({"previous_version": "0.1.0", "build_script_added": true, "proc_macro_added": false,
+                      "links_changed": false, "new_findings": [], "removed_findings": 0, "new_dependencies": ["cc"]});
+
+    store
+        .record_job_static(job, &json!({}), &json!([]), Some(&diff))
+        .await
+        .unwrap();
+
+    job
+}
+
+#[tokio::test]
+async fn a_version_is_compared_with_the_one_before() {
+    let Some(mut db) = Dashboard::start().await else {
+        return;
+    };
+
+    let finding = |evidence: &str, line: u32| json!({"severity": "high", "kind": "build_script", "rule": "net_call", "context": "fn main", "file": "build.rs", "line": line, "evidence": evidence});
+
+    let mut quiet = run_report();
+    quiet["trace"]["processes"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(3);
+    quiet["network"]["dns"] = json!([]);
+
+    let old = version(&mut db, "0.1.0", 1, 20, json!([finding("curl", 3)]), quiet).await;
+    let new = version(
+        &mut db,
+        "0.2.0",
+        2,
+        85,
+        json!([finding("curl", 9), finding("wget <x>", 10)]),
+        run_report(),
+    )
+    .await;
+
+    // The newer job links its comparison, the oldest has none.
+    let html = db.page(new).await;
+    assert!(html.contains(&format!(
+        "<a class=\"button compare\" href=\"/jobs/{}/diff\">Compare with 0.1.0</a>",
+        new.0
+    )));
+    assert!(!db.page(old).await.contains("Compare with"));
+    assert_eq!(
+        db.get(&format!("/jobs/{}/diff", old.0)).await,
+        (404, "nothing to compare with".to_owned())
+    );
+
+    let (status, diff) = db.get(&format!("/jobs/{}/diff", new.0)).await;
+    assert_eq!(status, 200);
+    assert_eq!(text(&diff, "<h1>", "</h1>"), "masker 0.1.0 → 0.2.0");
+    assert!(diff.contains("href=\"https://diff.rs/masker/0.1.0/0.2.0/\""));
+    assert_eq!(
+        text(&diff, "<div class=\"versus\">", "<p class=\"versions\">"),
+        "20 medium → 85 critical"
+    );
+    assert_eq!(
+        text(&diff, "<nav class=\"toc\"", "</nav>"),
+        "Evidence 1 Package Static findings 1 Run: full 2 Behavior 0"
+    );
+    assert_eq!(
+        table(&diff, "<h2 id=\"evidence\">"),
+        [
+            row(&["Change", "Points", "Signal", "What"]),
+            row(&["added", "10", "exec_curl", "ran <curl> & \"more\""]),
+        ]
+    );
+    assert_eq!(
+        facts(&diff, "<h2 id=\"package\">"),
+        [
+            row(&["Build script", "added"]),
+            row(&["Proc macro", "no change"]),
+            row(&["links", "no change"]),
+            row(&["New dependencies", "cc"]),
+        ]
+    );
+    assert!(diff.contains(
+        "<p class=\"tally\">1 new, 0 gone, 1 the same. Code that only moved counts as the same.</p>"
+    ));
+    assert!(diff.contains("<code class=\"evidence-text\">wget &#60;x&#62;</code>"));
+    assert!(diff.contains("href=\"https://crates.io/crates/masker/0.2.0/code/build.rs#L10\""));
+
+    let full = run_section(&diff, "full");
+    assert!(
+        full.contains("<h3>Processes <span class=\"muted\">1 new, 0 gone, 3 the same</span></h3>")
+    );
+    assert!(full.contains("<tr class=\"role-other added\">"));
+    assert!(full.contains("<tr class=\"role-build_script context\">"));
+    assert!(full.contains("<code class=\"chip new\">evil.example</code>"));
+
+    // Another version can be chosen, and only of the same crate.
+    let (_, back) = db
+        .get(&format!("/jobs/{}/diff?against={}", old.0, new.0))
+        .await;
+
+    assert_eq!(text(&back, "<h1>", "</h1>"), "masker 0.2.0 → 0.1.0");
+    assert!(back.contains("<p class=\"empty\">The static analysis compared this version with 0.1.0, so its package diff is not shown here.</p>"));
+    assert!(back.contains(&format!(
+        "<a class=\"chip selected\" href=\"/jobs/{}/diff?against={}\" aria-current=\"page\">0.2.0</a>",
+        old.0, new.0
+    )));
+
+    let other = db.job().await;
+    assert_eq!(
+        db.get(&format!("/jobs/{}/diff?against={}", new.0, other.0))
+            .await
+            .0,
+        404
+    );
+
+    db.drop().await;
+}
