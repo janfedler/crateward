@@ -201,8 +201,11 @@ crateward:
       ansible_connection: local
       ansible_python_interpreter: /usr/bin/python3
 EOF
-    # ansible-core refuses to run without a UTF-8 locale.
-    LC_ALL=C.UTF-8 "$STATE/ansible/bin/ansible-playbook" -i "$inventory" "$@" || status=$?
+    # ansible-core refuses to run without a UTF-8 locale. Facts are read
+    # only through ansible_facts, as ansible-core 2.24 will require, so a
+    # bare fact name fails here instead of in a later release.
+    LC_ALL=C.UTF-8 ANSIBLE_INJECT_FACT_VARS=False \
+        "$STATE/ansible/bin/ansible-playbook" -i "$inventory" "$@" || status=$?
     rm -f "$inventory"
     return "$status"
 }

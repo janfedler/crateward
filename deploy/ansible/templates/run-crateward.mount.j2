@@ -10,7 +10,7 @@ Description=Crateward sandbox tmpfs
 What=tmpfs
 Where=/run/crateward
 Type=tmpfs
-Options=size={{ run_tmpfs_size }},mode=2770,uid=0,gid={{ getent_group['crateward'][1] }},nosuid,nodev
+Options=size={{ run_tmpfs_size }},mode=2770,uid=0,gid={{ ansible_facts.getent_group['crateward'][1] }},nosuid,nodev
 
 [Install]
 WantedBy=local-fs.target

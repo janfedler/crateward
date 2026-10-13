@@ -2,11 +2,11 @@
 define SSH_PORT = {{ ssh_port }}
 # sandbox.slot_uid_base to slot_uid_base + slots (the spare slot included).
 define SLOT_UIDS = {{ slot_id_base }}-{{ slot_id_base + slots }}
-define FEED_UID = {{ getent_passwd['crateward-feed'][1] }}
-define FETCHER_UID = {{ getent_passwd['crateward-fetcher'][1] }}
-define STATIC_UID = {{ getent_passwd['crateward-static'][1] }}
-define ORCHESTRATOR_UID = {{ getent_passwd['crateward-orchestrator'][1] }}
-define ANALYZER_UID = {{ getent_passwd['crateward-analyzer'][1] }}
-define API_UID = {{ getent_passwd['crateward-api'][1] }}
-define SUPERVISOR_UID = {{ getent_passwd['crateward-supervisor'][1] }}
-define BUILDER_UID = {{ getent_passwd['crateward-builder'][1] }}
+define FEED_UID = {{ ansible_facts.getent_passwd['crateward-feed'][1] }}
+define FETCHER_UID = {{ ansible_facts.getent_passwd['crateward-fetcher'][1] }}
+define STATIC_UID = {{ ansible_facts.getent_passwd['crateward-static'][1] }}
+define ORCHESTRATOR_UID = {{ ansible_facts.getent_passwd['crateward-orchestrator'][1] }}
+define ANALYZER_UID = {{ ansible_facts.getent_passwd['crateward-analyzer'][1] }}
+define API_UID = {{ ansible_facts.getent_passwd['crateward-api'][1] }}
+define SUPERVISOR_UID = {{ ansible_facts.getent_passwd['crateward-supervisor'][1] }}
+define BUILDER_UID = {{ ansible_facts.getent_passwd['crateward-builder'][1] }}
