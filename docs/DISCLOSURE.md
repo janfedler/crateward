@@ -34,13 +34,10 @@ asks not to be the first recipient.
    holds the job and its events, the verdict with its evidence, the static
    report, every VM run (trace, network log, scratch disk scan), the
    resolution, the original `.crate` file, and `SHA256SUMS`. Honeytokens
-   are redacted. `verdict.json` also names the MITRE ATT&CK techniques
-   the evidence is consistent with, and T1195.001 for the crate once the
-   verdict is confirmed.
+   are redacted.
 4. **Report.**
    * Malicious: email `help@crates.io` with the crate name, affected
-     versions, the behavior observed with its ATT&CK technique IDs, and
-     the evidence pack.
+     versions, the behavior observed, and the evidence pack.
    * Vulnerability: contact the owners through their security policy. After
      they confirm, file a RustSec advisory by pull request to
      `RustSec/advisory-db`.

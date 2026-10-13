@@ -29,17 +29,11 @@
 {% endif %}
 
 <h2>Evidence</h2>
-{% if !techniques.is_empty() %}
-<div class="attack">
-<p class="muted">Consistent with these MITRE ATT&amp;CK {{ attack_version }} techniques. Many are common in harmless builds. They label the evidence and add no points.</p>
-<ul>{% for t in techniques %}<li><a class="tag" href="{{ t.url() }}" rel="noreferrer noopener" target="_blank">{{ t.id }}</a> {{ t.name }}</li>{% endfor %}</ul>
-</div>
-{% endif -%}
 {% if evidence.is_empty() %}<p class="muted">No evidence.</p>{% else %}
 <table>
 <tr><th>Points</th><th>Signal</th><th>Source</th><th>Package</th><th>Where</th><th>What</th></tr>
 {% for e in evidence %}
-<tr><td class="nowrap">{{ e.points }}</td><td class="word">{{ e.signal }}</td><td class="word">{{ e.source }}</td><td class="word">{{ e.package }}</td><td>{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}{% if !e.techniques.is_empty() %}<div class="tags">{% for t in e.techniques %}<a class="tag" href="{{ t.url() }}" title="{{ t.name }}" rel="noreferrer noopener" target="_blank">{{ t.id }}</a>{% endfor %}</div>{% endif %}</td></tr>
+<tr><td class="nowrap">{{ e.points }}</td><td class="word">{{ e.signal }}</td><td class="word">{{ e.source }}</td><td class="word">{{ e.package }}</td><td>{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
 {% endfor %}
 </table>
 {% endif %}

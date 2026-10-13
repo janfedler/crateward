@@ -875,8 +875,7 @@ async fn evidence_writes_a_redacted_and_checksummed_pack() {
     assert!(raw.starts_with("{\n  \""), "{raw}");
     assert!(raw.contains("\n  \"events\": [\n    {\n"), "{raw}");
 
-    let attack = json!({"version": "v19", "crate": null, "evidence": []});
-    let expected = json!({"verdict": verdict(), "review": "none", "attack": attack});
+    let expected = json!({"verdict": verdict(), "review": "none"});
 
     assert_eq!(json_file(&pack, "verdict.json"), expected);
 

@@ -423,7 +423,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
                 "network",
                 "evil",
                 "203.0.113.9:443",
-                "a token went outT1041"
+                "a token went out"
             ]),
             row(&[
                 "10",
@@ -493,18 +493,6 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
         !html.contains("<h2>Run: check</h2>"),
         "the full run replaces it"
     );
-
-    // Confirmed: the summary names the supply chain compromise first.
-    let attack = text(&html, "<div class=\"attack\">", "</div>");
-
-    assert!(attack.contains("ATT&amp;CK v19"));
-
-    let compromise =
-        "T1195.001 Supply Chain Compromise: Compromise Software Dependencies and Development Tools";
-
-    let first = attack.find(compromise).unwrap();
-
-    assert!(first < attack.find("T1041 Exfiltration Over C2 Channel").unwrap());
 
     let full = run_section(&html, "full");
     assert_eq!(

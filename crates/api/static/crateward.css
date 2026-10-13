@@ -94,7 +94,7 @@ input[type="checkbox"] { accent-color: var(--accent); padding: 0; }
 .pager .gap { border-color: transparent; }
 .pager .sizes { display: flex; gap: .35rem; align-items: center; margin-left: auto; }
 
-/* Pills: badges for states, tags for ATT&CK identifiers, chips for names. */
+/* Pills: badges for states, chips for names. */
 .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full);
          font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; line-height: 1.5;
          white-space: nowrap; color: var(--fg-secondary); background: var(--bg-overlay);
@@ -105,17 +105,6 @@ input[type="checkbox"] { accent-color: var(--accent); padding: 0; }
               background: color-mix(in oklch, var(--warn) 10%, transparent); }
 .badge.bad { color: var(--bad); border-color: color-mix(in oklch, var(--bad) 45%, transparent);
              background: color-mix(in oklch, var(--bad) 10%, transparent); }
-.tags { margin-top: .3rem; }
-.tag { display: inline-flex; align-items: center; padding: 1px 8px; margin: .2rem .3rem 0 0;
-       border-radius: var(--radius-full); font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
-       white-space: nowrap; color: var(--color-accent-300); border: 1px solid var(--color-accent-500);
-       text-decoration: none; transition: background var(--ease), border-color var(--ease); }
-.tag:hover { background: var(--accent-surface); border-color: var(--accent-hover); }
-.attack { border: 1px solid var(--border-default); border-radius: var(--radius-xl); padding: .9rem 1.1rem;
-          margin-bottom: 1rem; }
-.attack p { margin: 0 0 .6rem; font-size: 13px; color: var(--fg-muted); }
-.attack ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
-.attack li { margin: 0; color: var(--fg-secondary); } .attack .tag { margin: 0 .5rem 0 0; }
 .chip { display: inline-block; padding: 1px 8px; margin: 0 .2rem .3rem 0; border-radius: var(--radius-full);
         background: var(--bg-overlay); border: 1px solid var(--border-default); color: var(--fg-primary); }
 

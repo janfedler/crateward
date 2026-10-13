@@ -3,11 +3,9 @@
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
-use crateward_core::attack;
 use crateward_core::job::JobId;
 use crateward_core::paths::host;
-use crateward_core::store::{Review, Store, StoreError, StoredEvent, StoredJob};
-use crateward_core::verdict::Verdict;
+use crateward_core::store::{Store, StoreError, StoredEvent, StoredJob};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -99,10 +97,10 @@ async fn documents(
         ),
         (
             "verdict.json",
-            verdict.map_or(Value::Null, |(v, review)| {
-                let attack = attack_document(&v, review);
-                json!({ "verdict": v, "review": review.name(), "attack": attack })
-            }),
+            verdict.map_or(
+                Value::Null,
+                |(v, review)| json!({ "verdict": v, "review": review.name() }),
+            ),
         ),
         ("static.json", static_document(store, stored).await?),
         (
@@ -121,30 +119,6 @@ async fn documents(
             }),
         ),
     ])
-}
-
-/// The ATT&CK techniques each piece of evidence is consistent with, and
-/// the supply chain compromise once a human confirmed the verdict.
-fn attack_document(verdict: &Verdict, review: Review) -> Value {
-    let technique = |t: attack::Technique| json!({ "id": t.id, "name": t.name, "url": t.url() });
-    let evidence: Vec<Value> = verdict
-        .evidence
-        .iter()
-        .map(|e| {
-            let found = attack::techniques(&e.signal, e.location.as_deref());
-            json!({
-                "signal": e.signal,
-                "location": e.location,
-                "techniques": found.into_iter().map(technique).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
-
-    json!({
-        "version": attack::VERSION,
-        "crate": (review == Review::Confirmed).then(|| technique(attack::SUPPLY_CHAIN)),
-        "evidence": evidence,
-    })
 }
 
 fn event_json(event: StoredEvent) -> Value {
@@ -210,38 +184,6 @@ fn write_checksums(dir: &Path, names: &[String]) -> Result<(), CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_pack_names_techniques_and_the_compromise_once_confirmed() {
-        use crateward_core::verdict::{Coverage, Evidence, EvidenceSource, RiskLevel};
-        let verdict = Verdict {
-            score: 80,
-            level: RiskLevel::Critical,
-            coverage: Coverage::DynamicLinux,
-            evidence: vec![Evidence {
-                signal: "exec_downloader".into(),
-                points: 5,
-                source: EvidenceSource::Trace,
-                summary: "The build ran /usr/bin/curl.".into(),
-                package: Some("evil".into()),
-                location: Some("/usr/bin/curl".into()),
-            }],
-            profile: Vec::new(),
-            new_behavior: Vec::new(),
-            analyzer_version: 1,
-        };
-
-        let pending = attack_document(&verdict, Review::Pending);
-        assert_eq!(pending["crate"], Value::Null);
-        assert_eq!(pending["evidence"][0]["techniques"][0]["id"], "T1105");
-
-        let confirmed = attack_document(&verdict, Review::Confirmed);
-        assert_eq!(confirmed["crate"]["id"], "T1195.001");
-        assert_eq!(
-            confirmed["evidence"][0]["techniques"][0]["url"],
-            "https://attack.mitre.org/techniques/T1105/"
-        );
-    }
 
     #[test]
     fn honeytokens_are_redacted_everywhere() {
