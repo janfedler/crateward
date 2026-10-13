@@ -128,8 +128,6 @@ The stages in order:
    Two host side views complete the picture. The fake internet records
    every network attempt, including frames no proxy sees. After the run the
    host reads the scratch disk in a sandboxed child.
-
-   Planned: cross target checks where the crate has platform specific code.
 7. **analyzer** scores static findings, dynamic events and the version diff,
    may escalate once to a full build and test, and stores a behavior profile.
 8. **analyzer** finalizes ([ADR 0009](adr/0009-scoring-and-dashboard.md)):

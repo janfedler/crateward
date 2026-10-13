@@ -55,8 +55,7 @@ asks not to be the first recipient.
    page and the public list say it was not reported because crates.io
    removed it first. This applies to malicious crates only: a
    vulnerability is always reported to the owners.
-5. **Wait.** Default embargo proposals, to be confirmed by the maintainer
-   before M8:
+5. **Wait.** The default embargoes:
    * Malicious crates: publish after crates.io has acted, or 14 days after an
      acknowledged report.
    * Vulnerabilities: follow the owners' timeline, at most 90 days.
