@@ -19,6 +19,7 @@ server.
 | Canary tests | A known bad crate must be caught and a known good one must come out clean, built in a real microVM | `crates/orchestrator/tests/canary.rs` through `cargo xtask canary`, on the server. The orchestrator also runs them every `sandbox.canary_interval_minutes` |
 | Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly). `cargo xtask ci` type checks them, `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default and run on the server with `--ignored` |
+| SBOM validation | A sample SBOM and findings document pass the CycloneDX 1.6 schema, and the SBOM meets BSI TR-03183-2 v2.1.0 ([ADR 0012](adr/0012-cyclonedx-sbom-and-vex.md)) | `cargo xtask cyclonedx`, with pinned `cyclonedx-cli` and `sbomqs` |
 | Deployment checks | The playbooks parse, the units verify with `systemd-analyze`, the firewall loads in a throwaway network namespace. Unit tests keep the playbook's pins and unit list in sync | `cargo xtask deploy-check`, in CI |
 | Soak test | Sequential jailed jobs, a host side timeout and crash reconciliation, then checks for leaked processes, cgroups, directories, network interfaces, file descriptors and memory | `cargo xtask soak --jobs 50`, on the server |
 
@@ -87,14 +88,25 @@ also runs both canaries on a schedule (ADR 0008).
 cargo xtask ci
 ```
 
-runs formatting, clippy with warnings denied, all tests, rustdoc with
-warnings denied, the static musl build of the guest agent, the eBPF
-programs (format, clippy and build with the pinned nightly and
-`bpf-linker`), the type check of the fuzz targets, the documentation
-checks, the blank line rules of
-[`CONTRIBUTING.md`](../CONTRIBUTING.md#blank-lines), the commit messages
-([Conventional Commits](../CONTRIBUTING.md#commits)), `cargo deny` for both lockfiles,
-`cargo audit` and `cargo vet`, in the same order as CI.
+runs, in this order:
+
+1. formatting, and clippy with warnings denied
+2. all tests
+3. the CycloneDX and TR-03183-2 validation of a sample SBOM (`cargo xtask
+   cyclonedx`)
+4. rustdoc with warnings denied
+5. the static musl build of the guest agent
+6. the eBPF programs: format, clippy and build with the pinned nightly and
+   `bpf-linker`
+7. the type check of the fuzz targets
+8. the documentation checks, the blank line rules of
+   [`CONTRIBUTING.md`](../CONTRIBUTING.md#blank-lines) and the commit
+   messages ([Conventional Commits](../CONTRIBUTING.md#commits))
+9. `cargo deny` for both lockfiles, `cargo audit` and `cargo vet`
+
+GitHub CI runs the same checks except the fuzz type check, which is too
+slow there. It also runs `cargo xtask deploy-check`, which needs
+`ansible-playbook`, `systemd-analyze`, `nft` and `unshare` on the host.
 
 ## Coverage
 

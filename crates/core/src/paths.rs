@@ -264,6 +264,12 @@ pub mod build {
     /// Scratch files of `cargo xtask deploy-check`.
     pub const DEPLOY_CHECK: &str = "target/deploy-check";
 
+    /// Pinned check tools, such as the CycloneDX validators.
+    pub const CHECK_TOOLS: &str = "target/check-tools";
+
+    /// The sample SBOM and findings document of `cargo xtask cyclonedx`.
+    pub const CYCLONEDX_SAMPLES: &str = "target/cyclonedx";
+
     /// The line coverage summary of `cargo xtask coverage`.
     pub const COVERAGE_SUMMARY: &str = "target/llvm-cov/summary.json";
 

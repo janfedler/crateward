@@ -103,8 +103,8 @@ cargo test --workspace
 CRATEWARD_TEST_DATABASE_URL="host=/var/run/postgresql dbname=crateward_test" \
 CRATEWARD_REQUIRE_DB=1 cargo test --workspace --all-features
 
-# Every check CI runs, in the same order (needs cargo-deny, cargo-audit
-# and cargo-vet):
+# The checks of CI, as docs/TESTING.md lists them (needs cargo-deny,
+# cargo-audit and cargo-vet):
 cargo xtask ci
 ```
 

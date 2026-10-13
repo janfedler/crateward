@@ -1,5 +1,5 @@
 //! Writes a sample SBOM and findings document for the CycloneDX and BSI
-//! validators in CI (ADR 0012). Without `CRATEWARD_CYCLONEDX_SAMPLES`, the
+//! validators of `cargo xtask cyclonedx` (ADR 0012). Without `CRATEWARD_CYCLONEDX_SAMPLES`, the
 //! directory to write them to, it only builds them.
 //!
 //! The SBOM is that of `reqwest` with the packages it pulls in from

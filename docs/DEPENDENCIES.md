@@ -28,9 +28,10 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `tokio-postgres` | core (`store`) | Asynchronous PostgreSQL client from the `rust-postgres` project. Plain SQL, no query builder or code generation. |
 | `semver` | core (`cratesio`, `store`) | The reference implementation of Cargo's version rules. |
 | `quick-xml` | core (`cratesio`) | Streaming XML parser for the RSS feeds. |
+| `csv` | feed | Reads the tables of the crates.io daily database dump. The standard CSV reader for Rust. |
 | `reqwest` | core (`http`) | HTTP client with rustls and the platform certificate verifier. |
 | `landlock` | core (`sandbox`) | Official Rust bindings for Landlock, from its maintainers. |
-| `tar`, `flate2` | fetcher, static analysis, orchestrator, xtask | Reading crate archives. `flate2` uses the pure Rust `miniz_oxide` backend. |
+| `tar`, `flate2` | fetcher, static analysis, orchestrator, feed, xtask | Reading crate archives and the daily dump. `flate2` uses the pure Rust `miniz_oxide` backend. |
 | `zstd` | core (`blobs`) | Compression of stored blobs. Binds the reference zstd library. |
 | `syn`, `proc-macro2` | static analysis | The parser the Rust ecosystem uses for Rust source. Parses without evaluating `cfg`, and `span-locations` gives line numbers for evidence. |
 | `yara-x` | static analysis | VirusTotal's Rust rewrite of YARA for byte patterns in any file. Default features off, only the rule compiler options it needs. |
@@ -74,3 +75,4 @@ All pinned by commit SHA.
 | htmx 2.0.11 and `htmx-ext-sse` 2.2.4 (0BSD) | Vendored in `crates/api/static`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test ([ADR 0009](adr/0009-scoring-and-dashboard.md)). |
 | Lobster, DM Sans and JetBrains Mono (OFL 1.1), from Fontsource 5.3.0 | The design system's webfonts, latin subset, served by the dashboard and copied into the public site so no page loads anything from elsewhere. Vendored in `crates/api/static` with `OFL.txt`, checked against the npm registry's SHA-512 when added and pinned by SHA-256 in a test. |
 | `bpf-linker` 0.11.1 | Links the eBPF programs. Pinned by SHA-256 in `guest/bpf-linker.toml` together with the nightly compiler whose LLVM it matches ([ADR 0007](adr/0007-guest-agent-ebpf.md)). |
+| `cyclonedx-cli` 0.33.1 and `sbomqs` 2.1.2 | Validate a sample SBOM against the CycloneDX 1.6 schema and BSI TR-03183-2 in `cargo xtask cyclonedx`. Pinned by SHA-256 in `crates/xtask/src/cyclonedx.rs` ([ADR 0012](adr/0012-cyclonedx-sbom-and-vex.md)). |

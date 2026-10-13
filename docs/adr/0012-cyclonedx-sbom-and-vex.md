@@ -160,10 +160,11 @@ release. Support for 1.6 is an open pull request.
 7. **Own types instead of `cyclonedx-bom`.** The documents use a few dozen
    fields, built as `serde_json` values. Switching later stays possible,
    since the documents are the contract, not the types.
-8. **Validation in the GitHub workflow.** A test writes a sample SBOM and
-   findings document from Crateward's own lockfile. The `cyclonedx` job
+8. **Validation in `cargo xtask cyclonedx`.** A test writes a sample SBOM
+   and findings document from Crateward's own lockfile. The task
    validates both with a pinned `cyclonedx-cli` against the 1.6 schema,
    and checks the SBOM against TR-03183-2 v2.1.0 with a pinned sbomqs.
+   `cargo xtask ci` and the GitHub workflow run it.
    The sample scores 9.8 of 10 there. The licence fields are left out of
    the gate: compound expressions lack the `declared` copy (see 2), and
    sbomqs rejects `WITH` exceptions, which the TR allows.
@@ -184,9 +185,9 @@ release. Support for 1.6 is an open pull request.
   `cargo-cyclonedx` runs `cargo metadata` on a workspace, which Crateward
   never does with an untrusted crate (ADR 0004).
 * **A JSON schema validator as a dev dependency.** It would check the
-  schema in `cargo xtask ci` offline, but `jsonschema` brings about 25
-  crates the workspace does not have. The workflow's `cyclonedx-cli`
-  checks the same schema.
+  schema without a download, but `jsonschema` brings about 25 crates the
+  workspace does not have. The pinned `cyclonedx-cli` checks the same
+  schema.
 * **A backfill command for SHA-512.** It would need the crates.io
   downloads and egress the fetcher already has. The fetcher's idle time
   does the same without an operator.

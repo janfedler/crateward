@@ -10,8 +10,9 @@ Before a pull request, run
 cargo xtask ci
 ```
 
-It runs every check CI runs, in the same order. The checks are listed in
-[`docs/TESTING.md`](docs/TESTING.md#running-the-checks). Crate code never runs outside
+It runs the checks of CI. They are listed in
+[`docs/TESTING.md`](docs/TESTING.md#running-the-checks), with the
+differences to CI. Crate code never runs outside
 a microVM, not even in tests.
 
 The rules below keep the code and the documentation easy to read. The
@@ -69,7 +70,7 @@ existing one:
 | Startup, logging, exit codes, the stop signal | `crateward_core::app` |
 | Failure classes | `crateward_core::failure` |
 | The clock | `crateward_core::protocol::WallClock::now` |
-| Integers in untrusted bytes | `crateward_core::bytes` |
+| Integers in untrusted bytes, hex encoding | `crateward_core::bytes` |
 | Escaping text from hostile input | `crateward_core::text` |
 | A PostgreSQL schema for a test | `crateward_core::testing` (feature `testing`) |
 | Commands, copies, downloads in `xtask` | `crates/xtask/src/main.rs`, `images.rs` and `testing.rs` |
