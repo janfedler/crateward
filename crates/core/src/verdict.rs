@@ -191,7 +191,7 @@ pub const ANALYZER_VERSION: u32 = 6;
 /// The version of the static analysis (`crateward_static_analysis::analyze`).
 /// Bumped whenever detectors or rules change, so old reports are recomputed
 /// and the verdicts built on them after that.
-pub const STATIC_ANALYZER_VERSION: i32 = 7;
+pub const STATIC_ANALYZER_VERSION: i32 = 8;
 
 /// The analyzer's judgment of one version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

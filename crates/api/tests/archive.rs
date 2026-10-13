@@ -83,6 +83,11 @@ async fn release(store: &mut Store, name: &str, version: &str, score: u32, n: u8
         .record_honeytokens(job, &[("github".to_owned(), token(n))])
         .await
         .unwrap();
+    store
+        .record_fetch(job, None, Some("unresolvable"), &json!([]))
+        .await
+        .unwrap();
+    store.refresh_sbom(job, "0.1.0").await.unwrap();
 
     job
 }
@@ -174,7 +179,26 @@ async fn chosen_jobs_become_static_pages_without_the_dashboard_parts() {
     assert!(page.contains(" UTC</td>"));
     assert!(page.contains("evil sent [honeytoken]"));
 
-    for file in ["index.html", "jobs/1.html", "jobs/2.html", "jobs/3.html"] {
+    // The SBOM and findings document lie next to the page.
+    assert!(page.contains("<a class=\"muted\" href=\"1.cdx.json\" download"));
+    let sbom: serde_json::Value = serde_json::from_str(&read(&dir, "jobs/1.cdx.json")).unwrap();
+    assert_eq!(
+        sbom["metadata"]["component"]["purl"],
+        "pkg:cargo/evil@0.1.0"
+    );
+    let vex: serde_json::Value = serde_json::from_str(&read(&dir, "jobs/1.vex.cdx.json")).unwrap();
+    assert_eq!(
+        vex["vulnerabilities"][0]["description"],
+        "evil sent [honeytoken]"
+    );
+
+    for file in [
+        "index.html",
+        "jobs/1.html",
+        "jobs/2.html",
+        "jobs/3.html",
+        "jobs/1.vex.cdx.json",
+    ] {
         let html = read(&dir, file);
         assert!(!html.contains("ghp_"), "{file}");
     }

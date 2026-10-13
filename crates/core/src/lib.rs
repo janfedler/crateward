@@ -31,6 +31,8 @@ pub mod component;
 pub mod config;
 #[cfg(feature = "cratesio")]
 pub mod cratesio;
+#[cfg(feature = "sbom")]
+pub mod cyclonedx;
 pub mod digest;
 pub mod elf;
 pub mod escalation;
@@ -41,6 +43,7 @@ pub mod http;
 pub mod integrity;
 pub mod job;
 pub mod name;
+pub mod package;
 pub mod paths;
 pub mod protocol;
 pub mod retry;

@@ -7,7 +7,9 @@
 //! Why it looks the way it does:
 //!
 //! * Every `.crate` file is checked against the SHA-256 from the index
-//!   before any other code touches it.
+//!   before any other code touches it. Its SHA-512 is recorded for SBOMs
+//!   (ADR 0012), and while there is no job the fetcher downloads files
+//!   fetched before that again to add it.
 //! * Archives are validated in a sandboxed subprocess without being
 //!   extracted. Path traversal, links, device files and special files are
 //!   findings, and size, file count, depth and compression ratio are
@@ -138,7 +140,9 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         ));
 
         while !stop.is_requested() {
-            if !fetcher.run_once().await.map_err(fatal)? {
+            if !fetcher.run_once().await.map_err(fatal)?
+                && !fetcher.hash_one().await.map_err(fatal)?
+            {
                 stop.sleep(Duration::from_secs(1)).await;
             }
         }

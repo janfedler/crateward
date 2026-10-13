@@ -12,6 +12,8 @@
 //!   new against the previous version's profile scores again.
 //! * The analyzer decides whether a `cargo check` run escalates to a full
 //!   build and test, at most once per job.
+//! * Finalize writes the job's CycloneDX SBOM. Idle time writes those of
+//!   older jobs and completes SBOMs whose data has arrived since.
 
 #![forbid(unsafe_code)]
 
@@ -58,13 +60,16 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         while !stop.is_requested() {
             let analyzed = analyzer.analyze_once().await.map_err(fatal)?;
             let finalized = analyzer.finalize_once().await.map_err(fatal)?;
-            let rescored = if analyzed || finalized {
+            let idle = if analyzed || finalized {
                 0
             } else {
-                analyzer.rescore_some().await.map_err(fatal)?
+                match analyzer.rescore_some().await.map_err(fatal)? {
+                    0 => analyzer.refresh_sboms().await.map_err(fatal)?,
+                    rescored => rescored,
+                }
             };
 
-            if !analyzed && !finalized && rescored == 0 {
+            if !analyzed && !finalized && idle == 0 {
                 stop.sleep(Duration::from_secs(1)).await;
             }
         }

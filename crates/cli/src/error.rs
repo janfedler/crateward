@@ -52,6 +52,9 @@ pub enum CliError {
     /// No job has this number.
     #[error("no job {0}")]
     NoJob(i64),
+    /// The job has no SBOM or no verdict yet.
+    #[error("job {0} has no SBOM yet: it is unknown or not finished")]
+    NoSbom(i64),
     /// The archive could not be written.
     #[error(transparent)]
     Archive(#[from] crateward_api::archive::ArchiveError),

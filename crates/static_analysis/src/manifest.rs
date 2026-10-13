@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crateward_core::package::PackageMeta;
 use serde::{Deserialize, Serialize};
 
 use crate::findings::CodeContext;
@@ -27,6 +28,9 @@ pub struct ManifestFacts {
     /// Targets listed for docs.rs, a hint at the platforms the author cares
     /// about.
     pub docs_rs_targets: Vec<String>,
+    /// Licence, authors and links for the SBOM (ADR 0012). `None` in
+    /// reports from before they were read.
+    pub package: Option<PackageMeta>,
     /// Whether the manifest parsed at all.
     pub parsed: bool,
 }
@@ -97,6 +101,7 @@ pub fn parse(manifest: &str, files: &BTreeSet<String>) -> ManifestFacts {
             .map(str::to_owned),
         target_dependencies,
         docs_rs_targets,
+        package: Some(PackageMeta::from_package(package)),
         parsed: true,
     }
 }

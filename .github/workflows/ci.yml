@@ -73,6 +73,49 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo test --workspace --all-features --locked
 
+  cyclonedx:
+    name: CycloneDX and BSI TR-03183-2
+    runs-on: ubuntu-24.04
+    env:
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Write a sample SBOM and findings document
+        run: CRATEWARD_CYCLONEDX_SAMPLES="$RUNNER_TEMP/cyclonedx" cargo test -p crateward_core --features sbom --test cyclonedx_samples --locked
+      - name: Validate both against the CycloneDX 1.6 schema with cyclonedx-cli
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/cyclonedx" https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.33.1/cyclonedx-linux-x64
+          echo "bfc8b2538da86fe239bc53658bbb63c1c8c510a293c1e6891aa5bea5d3c58746  $RUNNER_TEMP/cyclonedx" | sha256sum -c
+          chmod +x "$RUNNER_TEMP/cyclonedx"
+          for file in sample.cdx.json sample.vex.cdx.json; do
+            "$RUNNER_TEMP/cyclonedx" validate --input-file "$RUNNER_TEMP/cyclonedx/$file" --input-format json --input-version v1_6 --fail-on-errors
+          done
+      - name: Check the SBOM against BSI TR-03183-2 v2.1.0 with sbomqs
+        # The licence fields are left out of the gate: CycloneDX 1.6 holds
+        # one licence expression, so a compound one cannot be both concluded
+        # and declared, and sbomqs rejects WITH exceptions (ADR 0012).
+        run: |
+          curl -sSfLo "$RUNNER_TEMP/sbomqs.tar.gz" https://github.com/interlynk-io/sbomqs/releases/download/v2.1.2/sbomqs_2.1.2_Linux_x86_64.tar.gz
+          echo "451c800019c81059f86eac2c1344c57572b3436e7e0ffeaa076459d195a39ab8  $RUNNER_TEMP/sbomqs.tar.gz" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/sbomqs.tar.gz" -C "$RUNNER_TEMP" sbomqs
+          "$RUNNER_TEMP/sbomqs" compliance --bsi-v21 "$RUNNER_TEMP/cyclonedx/sample.cdx.json"
+          "$RUNNER_TEMP/sbomqs" compliance --bsi-v21 --json "$RUNNER_TEMP/cyclonedx/sample.cdx.json" > "$RUNNER_TEMP/cyclonedx/bsi.json"
+          python3 - "$RUNNER_TEMP/cyclonedx/bsi.json" <<'PY'
+          import json, sys
+          licences = {"original licence (declared)", "distribution licence (concluded)"}
+          sections = json.load(open(sys.argv[1]))["sections"]
+          failed = [s for s in sections
+                    if s["required"] and s["score"] < 10 and s["section_data_field"] not in licences]
+          for s in failed:
+              print(f'{s["element_id"]}: {s["section_data_field"]}: {s["element_result"]}')
+          sys.exit(1 if failed else 0)
+          PY
+
   doc:
     name: rustdoc
     runs-on: ubuntu-24.04

@@ -99,6 +99,17 @@ The archive holds only what may be published: verdicts waiting for review
 and confirmed findings before their publication are refused
 ([DISCLOSURE.md](DISCLOSURE.md)). Honeytokens are redacted.
 
+## SBOMs and findings documents
+
+Every finished job gets a CycloneDX SBOM of the crate and its locked
+dependencies, and a findings document that points into it
+([ADR 0012](adr/0012-cyclonedx-sbom-and-vex.md)). The job page links both,
+the archive holds them next to each page, and `crateward sbom <job> --out
+<dir>` writes them. The analyzer logs what an SBOM still lacks for
+TR-03183-2 as `wrote the SBOM` with `gaps`. Missing SHA-512 hashes and
+licences fill in while the fetcher and static analysis are idle, and the
+analyzer then replaces the SBOM with its next version.
+
 ## Services and users
 
 Each component runs as its own system user (`crateward-feed`,

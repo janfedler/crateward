@@ -5,6 +5,13 @@
 //! disagree about where a file lives. Each section says what its paths are
 //! relative to.
 
+/// The public site.
+pub mod site {
+    /// The site's domain, written to `CNAME` for GitHub Pages and named as
+    /// the creator of SBOMs.
+    pub const DOMAIN: &str = "crateward.com";
+}
+
 /// The installed server.
 pub mod host {
     /// The configuration file every service reads by default.

@@ -43,7 +43,8 @@ deny`, `cargo audit` and `cargo vet` check all of them in CI.
 | `askama` | api | Compile time templates that escape HTML by default (ADR 0009). |
 | `futures-util` | api | The stream behind the dashboard's server sent events. |
 | `ratatui` | cli | The selection screen of `crateward archive`, on its crossterm backend. Default features off. |
-| `sha2` | xtask | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. |
+| `sha2` | xtask, core, fetcher | Verifies SHA-256 checksums published by third parties, such as Firecracker releases. Computes the SHA-512 of `.crate` files and the serial numbers of CycloneDX documents (ADR 0012). |
+| `spdx` | core | Checks and normalizes the licence expressions of `Cargo.toml` files for SBOMs (ADR 0012), from Embark. |
 
 ## Tools
 

@@ -31,6 +31,7 @@ mod egress;
 mod error;
 mod evidence;
 mod integrity;
+mod sbom;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -114,6 +115,17 @@ enum Command {
         /// use instead of the screen.
         #[arg(long)]
         selection: Option<PathBuf>,
+        /// Configuration file.
+        #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
+        config: PathBuf,
+    },
+    /// Write a job's CycloneDX SBOM and findings document (ADR 0012).
+    Sbom {
+        /// The job's number, as the dashboard shows it.
+        job: i64,
+        /// The directory for the two files, created if needed.
+        #[arg(long)]
+        out: PathBuf,
         /// Configuration file.
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
@@ -211,6 +223,11 @@ fn run(command: Command) -> Result<(), CliError> {
         } => with_store(&Config::load(&config)?, |store| async move {
             archive::run(store, &out, selection.as_deref()).await
         }),
+        Command::Sbom { job, out, config } => {
+            with_store(&Config::load(&config)?, |store| async move {
+                sbom::run(store, job, &out).await
+            })
+        }
         Command::Disclosure { command, config } => with_store(&Config::load(&config)?, |store| {
             disclosure::run(store, command)
         }),

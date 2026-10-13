@@ -15,6 +15,8 @@ mod autonomy;
 mod dashboard;
 mod disclosures;
 mod retention;
+#[cfg(feature = "sbom")]
+mod sbom;
 mod verdicts;
 pub use autonomy::{AlertOutcome, Pause, PauseReason, PendingAlert};
 use autonomy::{insert_alert, insert_pause};
@@ -22,6 +24,8 @@ pub use dashboard::{AnalyzedVersion, ArchiveCandidate, JobFilter, JobRow, Overvi
 pub use disclosures::{
     Disclosure, DisclosureKind, DisclosureRefusal, PublishedFinding, REMOVED_FIRST,
 };
+#[cfg(feature = "sbom")]
+pub use sbom::{SbomOutcome, StoredSbom};
 pub use verdicts::Review;
 
 use std::collections::BTreeMap;
@@ -58,6 +62,7 @@ const MIGRATIONS: &[(i32, &str)] = &[
         include_str!("../migrations/0011_shared_finding_pages.sql"),
     ),
     (12, include_str!("../migrations/0012_burst.sql")),
+    (13, include_str!("../migrations/0013_cyclonedx.sql")),
 ];
 
 /// The server's message for database errors, which the error's own
@@ -149,6 +154,9 @@ pub struct StoredEvent {
 pub struct CrateFile {
     /// SHA-256 of the `.crate` file.
     pub sha256: Sha256Digest,
+    /// SHA-512 of the `.crate` file, hex. `None` for files fetched before
+    /// it was computed (ADR 0012).
+    pub sha512: Option<String>,
     /// Crate name as published.
     pub name: String,
     /// Version.
@@ -163,6 +171,27 @@ pub struct CrateFile {
     pub stored_bytes: Option<i64>,
     /// The validation report.
     pub report: Value,
+}
+
+/// A crate file without SHA-512.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unhashed {
+    /// Its SHA-256.
+    pub sha256: Sha256Digest,
+    /// Crate name.
+    pub name: String,
+    /// Version.
+    pub version: String,
+}
+
+/// A stored SHA-256 as a digest.
+fn digest_column(bytes: Vec<u8>) -> Result<Sha256Digest, StoreError> {
+    let bytes: [u8; 32] = bytes.try_into().map_err(|_| StoreError::Corrupt {
+        id: 0,
+        reason: "checksum is not 32 bytes".into(),
+    })?;
+
+    Ok(Sha256Digest::from_bytes(bytes))
 }
 
 /// Backoff policies per stage, used to schedule retries.
@@ -610,8 +639,8 @@ impl Store {
         self.client
             .execute(
                 "INSERT INTO crate_files (sha256, crate_name, version, blake3, compressed_bytes,
-                                          unpacked_bytes, stored_bytes, report)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                          unpacked_bytes, stored_bytes, report, sha512)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                  ON CONFLICT (sha256) DO NOTHING",
                 &[
                     &file.sha256.as_bytes().as_slice(),
@@ -622,11 +651,60 @@ impl Store {
                     &file.unpacked_bytes,
                     &file.stored_bytes,
                     &file.report,
+                    &file.sha512,
                 ],
             )
             .await?;
 
         Ok(())
+    }
+
+    /// Records the SHA-512 of a crate file.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors, including a hash that is not 128 lowercase
+    /// hex digits.
+    pub async fn record_sha512(
+        &self,
+        sha256: &Sha256Digest,
+        sha512: &str,
+    ) -> Result<(), StoreError> {
+        self.client
+            .execute(
+                "UPDATE crate_files SET sha512 = $2 WHERE sha256 = $1",
+                &[&sha256.as_bytes().as_slice(), &sha512],
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    /// Crate files without SHA-512, the newest first, since they belong to
+    /// the jobs people look at.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn unhashed_crate_files(&self, limit: i64) -> Result<Vec<Unhashed>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT sha256, crate_name, version FROM crate_files
+                 WHERE sha512 IS NULL ORDER BY fetched_at DESC LIMIT $1",
+                &[&limit],
+            )
+            .await?;
+
+        rows.into_iter()
+            .map(|r| {
+                Ok(Unhashed {
+                    sha256: digest_column(r.try_get(0)?)?,
+                    name: r.try_get(1)?,
+                    version: r.try_get(2)?,
+                })
+            })
+            .collect()
     }
 
     /// A recorded crate file by its SHA-256.
@@ -639,7 +717,7 @@ impl Store {
             .client
             .query_opt(
                 "SELECT crate_name, version, blake3, compressed_bytes, unpacked_bytes,
-                        stored_bytes, report
+                        stored_bytes, report, sha512
                  FROM crate_files WHERE sha256 = $1",
                 &[&sha256.as_bytes().as_slice()],
             )
@@ -648,6 +726,7 @@ impl Store {
         row.map(|r| {
             Ok(CrateFile {
                 sha256: *sha256,
+                sha512: r.try_get(7)?,
                 name: r.try_get(0)?,
                 version: r.try_get(1)?,
                 blake3: r.try_get(2)?,
@@ -675,10 +754,11 @@ impl Store {
     ) -> Result<(), StoreError> {
         self.client
             .execute(
-                "INSERT INTO job_fetches (job_id, lockfile, resolution_error, packages)
-                 VALUES ($1, $2, $3, $4)
+                "INSERT INTO job_fetches (job_id, lockfile, resolution_error, packages, lockfile_key)
+                 VALUES ($1, $2, $3, $4, sha256(convert_to(coalesce($2, ''), 'UTF8')))
                  ON CONFLICT (job_id) DO UPDATE
-                 SET lockfile = $2, resolution_error = $3, packages = $4, fetched_at = now()",
+                 SET lockfile = $2, resolution_error = $3, packages = $4, fetched_at = now(),
+                     lockfile_key = EXCLUDED.lockfile_key",
                 &[&job.0, &lockfile, &resolution_error, packages],
             )
             .await?;
@@ -759,8 +839,9 @@ impl Store {
             .map(|r| (r.get(0), r.get(1))))
     }
 
-    /// Crate files of scored jobs whose static report an older analyzer
-    /// wrote, verdicts waiting for review first, then the newest.
+    /// Crate files whose static report an older analyzer wrote: those of
+    /// scored jobs first, verdicts waiting for review before the others and
+    /// the newest first, then dependencies, whose licences SBOMs list.
     ///
     /// # Errors
     ///
@@ -773,12 +854,13 @@ impl Store {
         let rows = self
             .client
             .query(
-                "SELECT r.sha256, max(j.id) FROM static_reports r
-                 JOIN jobs j ON j.cksum = r.sha256
-                 JOIN verdicts v ON v.job_id = j.id
+                "SELECT r.sha256, coalesce(max(v.job_id), 0) FROM static_reports r
+                 LEFT JOIN jobs j ON j.cksum = r.sha256
+                 LEFT JOIN verdicts v ON v.job_id = j.id
                  WHERE r.analyzer_version < $1
                  GROUP BY r.sha256
-                 ORDER BY bool_or(v.review = 'pending') DESC, max(j.id) DESC
+                 ORDER BY count(v.job_id) > 0 DESC, bool_or(v.review = 'pending') DESC,
+                          max(v.job_id) DESC NULLS LAST
                  LIMIT $2",
                 &[&analyzer_version, &limit],
             )

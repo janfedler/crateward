@@ -4,20 +4,30 @@
 //! crate's own file, the diff, the VM runs, the previous version's profile),
 //! scores it, stores the verdict, and decides whether a `cargo check` run
 //! gets one confirmation run. Finalize puts high and critical verdicts into
-//! the "needs you" inbox with an alert that carries no details.
+//! the "needs you" inbox with an alert that carries no details, and writes
+//! the job's SBOM (ADR 0012).
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
-use crateward_core::job::{JobEvent, RunKind, Stage};
-use crateward_core::store::{Policies, Review, Store, StoreError, StoredJob};
+use crateward_core::job::{JobEvent, JobId, RunKind, Stage};
+use crateward_core::store::{Policies, Review, SbomOutcome, Store, StoreError, StoredJob};
 use crateward_core::verdict::Verdict;
 use crateward_orchestrator::worker::RunReport;
 use crateward_static_analysis::analyze::StaticReport;
 use crateward_static_analysis::diff::VersionDiff;
 
 use crate::score::{Inputs, score, should_escalate};
+
+/// Crateward's version, named as the tool in SBOMs.
+const TOOL_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// How many jobs one call of [`Analyzer::refresh_sboms`] looks at.
+const SBOM_BATCH: i64 = 20;
+
+/// How long the SBOM sweep waits after it found nothing to do.
+const SBOM_PAUSE: Duration = Duration::from_secs(600);
 
 /// Why a job could not be scored. The analyzer reads only stored data, so
 /// anything but a database error means that data is unusable.
@@ -38,6 +48,8 @@ pub struct Analyzer {
     policies: Policies,
     worker: String,
     lease: Duration,
+    /// When the SBOM sweep may look again after it found nothing.
+    sbom_pause: Option<Instant>,
 }
 
 impl Analyzer {
@@ -49,6 +61,7 @@ impl Analyzer {
             policies,
             worker,
             lease,
+            sbom_pause: None,
         }
     }
 
@@ -230,11 +243,51 @@ impl Analyzer {
             tracing::warn!(job = job.id.0, name = %job.name, version = %job.version, "verdict needs review");
         }
 
+        self.write_sbom(job.id).await?;
         let worker = self.worker.clone();
         self.store
             .complete(job.id, &worker, JobEvent::Finalized, &self.policies, false)
             .await?;
 
         Ok(true)
+    }
+
+    /// Writes the SBOM of a job (ADR 0012) and logs what it still lacks.
+    async fn write_sbom(&self, job: JobId) -> Result<(), StoreError> {
+        if let SbomOutcome::Written { version, gaps } =
+            self.store.refresh_sbom(job, TOOL_VERSION).await?
+        {
+            tracing::info!(
+                job = job.0,
+                version,
+                gaps = gaps.len(),
+                first_gap = gaps.first().map(String::as_str),
+                "wrote the SBOM"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Writes SBOMs for finished jobs that have none, or whose SBOM lacks
+    /// data that may have arrived since, a few per call. Returns how many
+    /// jobs were looked at.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if the store fails.
+    pub async fn refresh_sboms(&mut self) -> Result<usize, StoreError> {
+        if self.sbom_pause.is_some_and(|until| Instant::now() < until) {
+            return Ok(0);
+        }
+
+        let jobs = self.store.jobs_needing_sbom(SBOM_BATCH).await?;
+        self.sbom_pause = jobs.is_empty().then(|| Instant::now() + SBOM_PAUSE);
+
+        for job in &jobs {
+            self.write_sbom(*job).await?;
+        }
+
+        Ok(jobs.len())
     }
 }

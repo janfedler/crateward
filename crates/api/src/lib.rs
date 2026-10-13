@@ -23,6 +23,7 @@ pub mod archive;
 pub mod diff;
 pub mod export;
 pub mod run_view;
+pub mod sbom;
 pub mod security;
 pub mod views;
 
@@ -840,6 +841,7 @@ pub async fn job_page(
     };
 
     let verdict = store.verdict(job.id).await?.map(verdict_view);
+    let verdict_missing = verdict.is_none();
     let mut verdict = verdict.unwrap_or_default();
     let static_report = store.static_report(&job.cksum).await?.map(|(_, r)| r);
     if let Some(report) = &static_report {
@@ -872,6 +874,7 @@ pub async fn job_page(
 
     let events = store.events(job.id).await?;
     let runs = store.job_runs(job.id).await?;
+    let has_documents = store.job_sbom(job.id).await?.is_some() && !verdict_missing;
     let now = SystemTime::now();
 
     // The archive links a comparison only if it holds both versions.
@@ -921,7 +924,35 @@ pub async fn job_page(
             .map(|_| format!("/jobs/{id}/diff"))
             .unwrap_or_default(),
         compare_version: previous.unwrap_or_default(),
+        sbom_href: if has_documents {
+            sbom_href(id, archive)
+        } else {
+            String::new()
+        },
+        vex_href: if has_documents {
+            vex_href(id, archive)
+        } else {
+            String::new()
+        },
     }))
+}
+
+/// A job's SBOM: the dashboard's download, or the archive's file name.
+fn sbom_href(id: i64, archive: bool) -> String {
+    if archive {
+        format!("{id}.cdx.json")
+    } else {
+        format!("/jobs/{id}/sbom.cdx.json")
+    }
+}
+
+/// A job's findings document, as [`sbom_href`].
+fn vex_href(id: i64, archive: bool) -> String {
+    if archive {
+        format!("{id}.vex.cdx.json")
+    } else {
+        format!("/jobs/{id}/vex.cdx.json")
+    }
 }
 
 /// A job's page, by its ID: the dashboard's, or the archive's file name.
@@ -1059,6 +1090,46 @@ async fn run_report(
         .into_response())
 }
 
+/// The SBOM of a job (ADR 0012).
+async fn sbom_file(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Response, AppError> {
+    document(&state, id, |d| (d.sbom_file(), &d.sbom)).await
+}
+
+/// The findings document of a job, which points into its SBOM.
+async fn vex_file(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Response, AppError> {
+    document(&state, id, |d| (d.vex_file(), &d.vex)).await
+}
+
+/// One of a job's CycloneDX documents as a download.
+async fn document(
+    state: &AppState,
+    id: i64,
+    pick: impl FnOnce(&sbom::Documents) -> (String, &serde_json::Value),
+) -> Result<Response, AppError> {
+    let Some(documents) = sbom::documents(&state.reader, id).await? else {
+        return Ok((StatusCode::NOT_FOUND, "no SBOM for this job yet").into_response());
+    };
+
+    let (file, value) = pick(&documents);
+    let body = serde_json::to_vec_pretty(value).unwrap_or_default();
+    let disposition = format!("attachment; filename=\"{file}\"");
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, sbom::MEDIA_TYPE.to_owned()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 /// A review decision from the job page.
 #[derive(Debug, Deserialize)]
 pub struct ReviewForm {
@@ -1138,6 +1209,8 @@ pub fn router(state: Arc<AppState>, port: u16) -> Router {
         .route("/jobs/{id}/diff", get(diff_handler))
         .route("/jobs/{id}/review", post(review))
         .route("/jobs/{id}/runs/{file}", get(run_report))
+        .route("/jobs/{id}/sbom.cdx.json", get(sbom_file))
+        .route("/jobs/{id}/vex.cdx.json", get(vex_file))
         .route("/burst", post(burst))
         .route("/static/{file}", get(asset))
         .with_state(state)

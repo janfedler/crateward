@@ -15,9 +15,9 @@ use askama::Template;
 use crateward_core::config::ExportConfig;
 use crateward_core::paths::host;
 use crateward_core::store::{PublicStats, PublishedFinding, Store, StoreError};
+use crateward_core::text::Utc;
 
-/// The site's domain, written to `CNAME` for GitHub Pages.
-pub const DOMAIN: &str = "crateward.com";
+pub use crateward_core::paths::site::DOMAIN;
 
 /// Why the site could not be built or pushed.
 #[derive(Debug, thiserror::Error)]
@@ -302,24 +302,11 @@ pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, ExportError>
 /// Seconds since the epoch as `YYYY-MM-DD HH:MM UTC`.
 #[must_use]
 pub fn format_utc(secs: i64) -> String {
-    let days = secs.div_euclid(86_400);
-    let rest = secs.rem_euclid(86_400);
-
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
+    let t = Utc::from_epoch(secs);
 
     format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
-        rest / 3600,
-        (rest % 3600) / 60
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        t.year, t.month, t.day, t.hour, t.minute
     )
 }
 

@@ -1,5 +1,6 @@
 //! The fetch stage worker.
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -71,6 +72,8 @@ pub struct Fetcher {
     pub worker: String,
     /// Lease duration.
     pub lease: Duration,
+    /// Crate files whose SHA-512 cannot be computed.
+    unhashable: HashSet<Sha256Digest>,
 }
 
 fn gunzip(bytes: &[u8], limit: u64) -> std::io::Result<Vec<u8>> {
@@ -110,6 +113,7 @@ impl Fetcher {
             policies,
             worker: format!("fetcher-{}", std::process::id()),
             lease,
+            unhashable: HashSet::new(),
         }
     }
 
@@ -267,7 +271,7 @@ impl Fetcher {
             return Ok(Some(file));
         }
 
-        let Some(bytes) = self.download(name, version, sha256).await? else {
+        let Some((bytes, sha512)) = self.download(name, version, sha256).await? else {
             return Ok(None);
         };
 
@@ -286,6 +290,7 @@ impl Fetcher {
 
         let file = CrateFile {
             sha256: *sha256,
+            sha512: Some(sha512),
             name: name.to_string(),
             version: version.to_string(),
             blake3: blob.as_ref().map(|b| b.blake3.clone()),
@@ -301,13 +306,14 @@ impl Fetcher {
     }
 
     /// Downloads a crate file and checks it against the digest from the
-    /// index. Returns `None` if crates.io no longer has it.
+    /// index. Returns the bytes and their SHA-512 in hex, which SBOMs need
+    /// (ADR 0012), or `None` if crates.io no longer has it.
     async fn download(
         &self,
         name: &CrateName,
         version: &semver::Version,
         sha256: &Sha256Digest,
-    ) -> Result<Option<Vec<u8>>, Failure> {
+    ) -> Result<Option<(Vec<u8>, String)>, Failure> {
         let url = download_url(&self.setup.dl, name, version);
         let Some(mut response) = self.downloads.stream(&url).await? else {
             return Ok(None);
@@ -315,6 +321,7 @@ impl Fetcher {
 
         let mut bytes = Vec::new();
         let mut hasher = sha2::Sha256::new();
+        let mut sha512 = sha2::Sha512::new();
 
         while let Some(chunk) = response.chunk().await.map_err(HttpError::from)? {
             if u64::try_from(bytes.len() + chunk.len()).unwrap_or(u64::MAX) > MAX_CRATE_BYTES {
@@ -324,6 +331,7 @@ impl Fetcher {
             }
 
             hasher.update(&chunk);
+            sha512.update(&chunk);
             bytes.extend_from_slice(&chunk);
         }
 
@@ -333,7 +341,56 @@ impl Fetcher {
             return Err(checksum_mismatch(name, version));
         }
 
-        Ok(Some(bytes))
+        let sha512 = sha512
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+
+        Ok(Some((bytes, sha512)))
+    }
+
+    /// Downloads one crate file fetched before SHA-512 was computed and
+    /// records its SHA-512, so older SBOMs can be completed. Files that
+    /// crates.io no longer serves or that fail are skipped until the
+    /// fetcher restarts. Returns `false` when there was nothing to hash.
+    ///
+    /// # Errors
+    ///
+    /// Fails only if the store fails.
+    pub async fn hash_one(&mut self) -> Result<bool, StoreError> {
+        let limit = i64::try_from(self.unhashable.len() + 1).unwrap_or(i64::MAX);
+        let Some(file) = self
+            .store
+            .unhashed_crate_files(limit)
+            .await?
+            .into_iter()
+            .find(|f| !self.unhashable.contains(&f.sha256))
+        else {
+            return Ok(false);
+        };
+
+        let (Ok(name), Ok(version)) = (
+            CrateName::parse(&file.name),
+            semver::Version::parse(&file.version),
+        ) else {
+            self.unhashable.insert(file.sha256);
+            return Ok(true);
+        };
+
+        match self.download(&name, &version, &file.sha256).await {
+            Ok(Some((_, sha512))) => self.store.record_sha512(&file.sha256, &sha512).await?,
+            Ok(None) => {
+                tracing::info!(%name, %version, "gone from crates.io, no SHA-512");
+                self.unhashable.insert(file.sha256);
+            }
+            Err(failure) => {
+                tracing::warn!(%name, %version, %failure, "cannot compute the SHA-512");
+                self.unhashable.insert(file.sha256);
+            }
+        }
+
+        Ok(true)
     }
 
     /// Validates a downloaded crate file in the sandbox. A sound archive is

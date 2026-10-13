@@ -217,6 +217,7 @@ fn static_report() -> Value {
 fn crate_file() -> CrateFile {
     CrateFile {
         sha256: CKSUM.parse().unwrap(),
+        sha512: None,
         name: "evil".to_owned(),
         version: "0.1.0".to_owned(),
         blake3: None,
@@ -1020,6 +1021,7 @@ async fn version(
     store
         .record_crate_file(&CrateFile {
             sha256: cksum.parse().unwrap(),
+            sha512: None,
             name: "masker".to_owned(),
             version: version.to_owned(),
             ..crate_file()
@@ -1149,6 +1151,76 @@ async fn a_version_is_compared_with_the_one_before() {
             .await
             .0,
         404
+    );
+
+    db.drop().await;
+}
+
+#[tokio::test]
+async fn a_finished_job_offers_its_sbom_and_findings_document() {
+    let Some(mut db) = Dashboard::start().await else {
+        return;
+    };
+
+    let job = seed_full_job(&mut db).await;
+    let page = db.page(job).await;
+    assert!(!page.contains("sbom.cdx.json"));
+    let (status, body) = db.get(&format!("/jobs/{}/vex.cdx.json", job.0)).await;
+    assert_eq!((status, body.as_str()), (404, "no SBOM for this job yet"));
+
+    let lock = format!(
+        "version = 4\n\n[[package]]\nname = \"evil\"\nversion = \"0.1.0\"\n\
+         source = \"registry+https://github.com/rust-lang/crates.io-index\"\n\
+         checksum = \"{CKSUM}\"\n"
+    );
+
+    db.store
+        .record_fetch(job, Some(&lock), None, &json!([]))
+        .await
+        .unwrap();
+    db.store.refresh_sbom(job, "0.1.0").await.unwrap();
+
+    let page = db.page(job).await;
+    assert!(page.contains(&format!(
+        "<a class=\"muted\" href=\"/jobs/{}/sbom.cdx.json\" download",
+        job.0
+    )));
+    assert!(page.contains(&format!("href=\"/jobs/{}/vex.cdx.json\" download", job.0)));
+
+    let (status, head, body) = db.fetch(&format!("/jobs/{}/sbom.cdx.json", job.0)).await;
+    assert_eq!(status, 200);
+    assert!(head.contains("content-type: application/vnd.cyclonedx+json"));
+    assert!(head.contains("filename=\"evil-0.1.0.cdx.json\""));
+    let sbom: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        sbom["metadata"]["component"]["purl"],
+        "pkg:cargo/evil@0.1.0"
+    );
+
+    let (status, head, body) = db.fetch(&format!("/jobs/{}/vex.cdx.json", job.0)).await;
+    assert_eq!(status, 200);
+    assert!(head.contains("filename=\"evil-0.1.0.vex.cdx.json\""));
+    let vex: Value = serde_json::from_str(&body).unwrap();
+
+    // Scored, confirmed and published: three changes.
+    assert_eq!(vex["version"], 3);
+    let serial = sbom["serialNumber"].as_str().unwrap();
+    let link = format!(
+        "urn:cdx:{}/1#pkg:cargo/evil@0.1.0",
+        serial.trim_start_matches("urn:uuid:")
+    );
+
+    let token = vex["vulnerabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["id"] == format!("CW-{}-honeytoken_left_vm", job.0))
+        .unwrap();
+    assert_eq!(token["affects"][0]["ref"], link);
+    assert_eq!(token["analysis"]["state"], "exploitable");
+    assert_eq!(
+        token["source"]["url"],
+        "https://crateward.com/findings/evil-0-1-0/"
     );
 
     db.drop().await;

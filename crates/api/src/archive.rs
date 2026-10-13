@@ -8,6 +8,8 @@
 //!
 //! A job whose previous version is archived too gets a comparison with it
 //! (ADR 0011), and only then, since a comparison names both versions.
+//! A job with an SBOM gets it and its findings document as JSON next to
+//! its page (ADR 0012).
 //!
 //! The archive names crates, so it holds only what may be published:
 //! [`ArchiveCandidate::refusal`] keeps out verdicts nobody reviewed yet and
@@ -23,7 +25,7 @@ use crateward_core::text::redact;
 
 use crate::diff::counterpart;
 use crate::export::format_utc;
-use crate::{FONTS, diff_page, job_page};
+use crate::{FONTS, diff_page, job_page, sbom, sbom_href, vex_href};
 
 /// The file that marks a directory as an archive, so writing again may
 /// replace it.
@@ -285,6 +287,17 @@ pub async fn write(
 
         let html = redact_page(&page.render()?, &tokens);
         std::fs::write(dir.join("jobs").join(format!("{}.html", c.id.0)), html)?;
+
+        // The SBOM and findings document, so they outlive the server too.
+        if let Some(documents) = sbom::documents(store, c.id.0).await? {
+            for (file, value) in [
+                (sbom_href(c.id.0, true), &documents.sbom),
+                (vex_href(c.id.0, true), &documents.vex),
+            ] {
+                let json = serde_json::to_string_pretty(value)? + "\n";
+                std::fs::write(dir.join("jobs").join(file), json)?;
+            }
+        }
 
         // The index shows the strongest evidence too.
         c.top_evidence = redact(&c.top_evidence, &tokens);

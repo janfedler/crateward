@@ -173,6 +173,7 @@ impl Lab {
     async fn crate_file(&self, job: &StoredJob, blake3: Option<String>, unpacked: usize) {
         let file = CrateFile {
             sha256: job.cksum,
+            sha512: None,
             name: job.name.clone(),
             version: job.version.clone(),
             blake3,
@@ -723,7 +724,7 @@ async fn old_and_damaged_reports_are_analyzed_again() {
 }
 
 #[tokio::test]
-async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
+async fn idle_time_refreshes_outdated_reports_except_failing_archives() {
     if !sandbox_available() {
         return;
     }
@@ -769,7 +770,9 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
         .await
         .unwrap();
 
-    assert_eq!(lab.analyzer.refresh_some().await.unwrap(), 1);
+    // Files without a verdict, such as dependencies, are refreshed too,
+    // since SBOMs list their licences.
+    assert_eq!(lab.analyzer.refresh_some().await.unwrap(), 2);
 
     let (version, report) = lab.stored_report(&waiting).await.unwrap();
 
@@ -777,7 +780,7 @@ async fn idle_time_refreshes_the_reports_of_scored_jobs_waiting_first() {
     assert_eq!(report, serde_json::to_value(report_of(&tar)).unwrap());
     assert_eq!(
         lab.stored_report(&unscored).await.unwrap().0,
-        ANALYZER_VERSION - 1
+        ANALYZER_VERSION
     );
     assert_eq!(
         lab.stored_report(&broken).await.unwrap().0,

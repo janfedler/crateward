@@ -53,6 +53,7 @@ rustix = "1.1"
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
+spdx = "0.13"
 tar = "0.4"
 thiserror = "2.0"
 toml = "1.1"

@@ -148,10 +148,11 @@ impl Analyzer {
         Ok(true)
     }
 
-    /// Analyzes again, a few per call, the crate files of scored jobs whose
-    /// report an older analyzer wrote, so the dashboard shows what the
-    /// current one adds, such as line numbers. Verdicts waiting for
-    /// review go first. In burst mode, VM runs wait and children run on
+    /// Analyzes again, a few per call, the crate files whose report an
+    /// older analyzer wrote, so the dashboard shows what the current one
+    /// adds, such as line numbers, and SBOMs get the licences of
+    /// dependencies. Scored jobs' own files go first, those waiting for
+    /// review before the others. In burst mode, VM runs wait and children run on
     /// all cores but one. Returns how many reports were written.
     ///
     /// # Errors

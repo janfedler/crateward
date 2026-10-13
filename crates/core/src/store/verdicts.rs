@@ -150,7 +150,9 @@ impl Store {
                  VALUES ($1, $2, $3, $4, $5)
                  ON CONFLICT (job_id) DO UPDATE
                  SET score = $2, level = $3, verdict = $4, analyzer_version = $5,
-                     scored_at = now()",
+                     scored_at = now(),
+                     revision = verdicts.revision
+                         + (verdicts.verdict IS DISTINCT FROM $4)::integer",
                 &[&job.0, &score, &verdict.level.name(), &value, &version],
             )
             .await?;
@@ -196,7 +198,8 @@ impl Store {
         let updated = self
             .client
             .execute(
-                "UPDATE verdicts SET review = $2, review_note = COALESCE($3, review_note),
+                "UPDATE verdicts SET revision = revision + (review IS DISTINCT FROM $2)::integer,
+                        review = $2, review_note = COALESCE($3, review_note),
                         reviewed_at = CASE WHEN $2 IN ('confirmed', 'false_positive')
                                            THEN now() ELSE reviewed_at END
                  WHERE job_id = $1",

@@ -44,7 +44,7 @@ async fn migrations_are_idempotent() {
     let mut store = db.store().await;
     assert_eq!(
         store.migrate().await.unwrap(),
-        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     );
     assert!(store.migrate().await.unwrap().is_empty());
 
@@ -416,6 +416,7 @@ async fn static_reports_fetches_and_popularity_round_trip() {
     store
         .record_crate_file(&CrateFile {
             sha256: sha,
+            sha512: None,
             name: "lib".into(),
             version: "1.1.0".into(),
             blake3: Some("ef".repeat(32)),
@@ -895,6 +896,7 @@ async fn scored_on_an_old_report(
     store
         .record_crate_file(&CrateFile {
             sha256: sha,
+            sha512: None,
             name: "lib".into(),
             version: "1.0.0".into(),
             blake3: blake3.map(str::to_owned),

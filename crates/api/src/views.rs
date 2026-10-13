@@ -336,6 +336,10 @@ pub struct JobPage {
     pub compare_href: String,
     /// The previous version, or empty.
     pub compare_version: String,
+    /// The SBOM's link, empty when the job has none yet.
+    pub sbom_href: String,
+    /// The findings document's link, empty with the SBOM's.
+    pub vex_href: String,
 }
 
 /// Another analyzed version of the crate, to compare with.

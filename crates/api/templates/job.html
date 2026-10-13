@@ -17,6 +17,8 @@
       {% if coverage != "" %}<span class="badge">{{ coverage }}</span>{% endif %}
       <span class="muted">job {{ id }}</span>
       <a class="muted" href="{{ crate_url }}" rel="noreferrer noopener" target="_blank">crates.io</a>
+      {% if !sbom_href.is_empty() %}<a class="muted" href="{{ sbom_href }}" download title="CycloneDX SBOM of the crate and its locked dependencies">SBOM</a>
+      <a class="muted" href="{{ vex_href }}" download title="Crateward's findings as CycloneDX VEX, pointing into the SBOM">Findings (VEX)</a>{% endif %}
       {% if !compare_href.is_empty() %}<a class="button compare" href="{{ compare_href }}">Compare with {{ compare_version }}</a>{% endif %}
     </p>
     {% if let Some(top) = evidence.first() %}<p class="headline">{{ top.summary }}</p>{% endif %}

@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 askama.workspace = true
 axum.workspace = true
-crateward_core = { workspace = true, features = ["app", "store"] }
+crateward_core = { workspace = true, features = ["app", "store", "sbom"] }
 futures-util.workspace = true
 secrecy.workspace = true
 serde.workspace = true
