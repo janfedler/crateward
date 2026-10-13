@@ -1,6 +1,8 @@
 //! Entry point of the `crateward-fake-internet` service. The logic lives in the
 //! library so that it can be tested without a process boundary.
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

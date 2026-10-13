@@ -1,6 +1,8 @@
 //! `crateward-vmjail`: builds one rootless jail and becomes Firecracker.
 //! Started only by the orchestrator. See `crateward_orchestrator::jail`.
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

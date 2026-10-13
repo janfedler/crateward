@@ -1,6 +1,8 @@
 //! Entry point of the guest agent, built as a static musl binary. In the
 //! microVM it runs as PID 1 (`init=/sbin/crateward-agent`).
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use crateward_core::protocol::AGENT_PORT;

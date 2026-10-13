@@ -5,6 +5,7 @@
 mod blank_lines;
 mod commit_lint;
 mod coverage;
+mod cyclonedx;
 mod deploy;
 mod diagram;
 mod docs_lint;
@@ -34,7 +35,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Task {
-    /// Run every check CI runs, in the same order.
+    /// Run the checks of CI in its order, plus the fuzz target type check.
+    /// The deployment checks run with `deploy-check`.
     Ci,
     /// Check the writing style of all documentation.
     DocsLint,
@@ -91,6 +93,9 @@ enum Task {
         #[arg(long, default_value_t = 30)]
         seconds: u32,
     },
+    /// Validate a sample SBOM and findings document against CycloneDX 1.6
+    /// and BSI TR-03183-2 with pinned `cyclonedx-cli` and `sbomqs`.
+    Cyclonedx,
     /// Run the canary: a fixture crate that steals a honeytoken inside a
     /// microVM must be caught.
     Canary,
@@ -138,6 +143,7 @@ fn main() -> ExitCode {
         Task::Rootfs => rootfs::run(&workspace_root()),
         Task::BumpDebianSnapshot => rootfs::bump_snapshot(&workspace_root()),
         Task::Soak { jobs } => soak(jobs),
+        Task::Cyclonedx => cyclonedx::run(&workspace_root()),
         Task::Canary => canary(),
         Task::Coverage => coverage::run_coverage(&workspace_root()),
         Task::DeployCheck => deploy::run(&workspace_root()),
@@ -302,6 +308,7 @@ fn ci() -> Result<(), TaskError> {
         &["test", "--workspace", "--all-features", "--locked"],
         &[],
     )?;
+    cyclonedx::run(&workspace_root())?;
     run(
         "cargo",
         &[
