@@ -179,6 +179,8 @@ pub fn render(
             "OFL.txt".into(),
             include_bytes!("../static/OFL.txt").to_vec(),
         ),
+        // The image that link previews of the site show.
+        ("og.png".into(), include_bytes!("../static/og.png").to_vec()),
         ("CNAME".into(), format!("{DOMAIN}\n").into_bytes()),
         // Serve the files as they are, without Jekyll processing.
         (".nojekyll".into(), Vec::new()),
@@ -497,6 +499,7 @@ mod tests {
                 "dm-sans-latin-wght.woff2",
                 "jetbrains-mono-latin-wght.woff2",
                 "OFL.txt",
+                "og.png",
                 "CNAME",
                 ".nojekyll"
             ]
@@ -697,8 +700,16 @@ mod tests {
             assert!(index.contains(link), "{link}");
         }
 
-        // Nothing points elsewhere but the contact address.
-        assert!(!index.contains("http://") && !index.contains("https://"));
+        // Link previews need absolute URLs, and they name only the site.
+        assert!(
+            index.contains(r#"<meta property="og:image" content="https://crateward.com/og.png">"#)
+        );
+        let (head, body) = index.split_once("</head>").unwrap();
+        let urls = head.split("https://").skip(1);
+        assert!(urls.clone().count() > 0 && urls.clone().all(|u| u.starts_with("crateward.com/")));
+
+        // Nothing else points elsewhere but the contact address.
+        assert!(!body.contains("http://") && !body.contains("https://"));
 
         let css = String::from_utf8(file(&files, "site.css").to_vec()).unwrap();
 
