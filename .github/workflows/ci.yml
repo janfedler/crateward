@@ -89,11 +89,11 @@ jobs:
         run: CRATEWARD_CYCLONEDX_SAMPLES="$RUNNER_TEMP/cyclonedx" cargo test -p crateward_core --features sbom --test cyclonedx_samples --locked
       - name: Validate both against the CycloneDX 1.6 schema with cyclonedx-cli
         run: |
-          curl -sSfLo "$RUNNER_TEMP/cyclonedx" https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.33.1/cyclonedx-linux-x64
-          echo "bfc8b2538da86fe239bc53658bbb63c1c8c510a293c1e6891aa5bea5d3c58746  $RUNNER_TEMP/cyclonedx" | sha256sum -c
-          chmod +x "$RUNNER_TEMP/cyclonedx"
+          curl -sSfLo "$RUNNER_TEMP/cyclonedx-cli" https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.33.1/cyclonedx-linux-x64
+          echo "bfc8b2538da86fe239bc53658bbb63c1c8c510a293c1e6891aa5bea5d3c58746  $RUNNER_TEMP/cyclonedx-cli" | sha256sum -c
+          chmod +x "$RUNNER_TEMP/cyclonedx-cli"
           for file in sample.cdx.json sample.vex.cdx.json; do
-            "$RUNNER_TEMP/cyclonedx" validate --input-file "$RUNNER_TEMP/cyclonedx/$file" --input-format json --input-version v1_6 --fail-on-errors
+            "$RUNNER_TEMP/cyclonedx-cli" validate --input-file "$RUNNER_TEMP/cyclonedx/$file" --input-format json --input-version v1_6 --fail-on-errors
           done
       - name: Check the SBOM against BSI TR-03183-2 v2.1.0 with sbomqs
         # The licence fields are left out of the gate: CycloneDX 1.6 holds
