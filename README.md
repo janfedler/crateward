@@ -19,6 +19,10 @@ scores the risk with reasons that link to file, line and trace evidence.
 * **A fake internet.** Every network attempt is answered and recorded.
 * **Honeytokens.** Decoy credentials reveal theft.
 * **Explainable verdicts.** Every score links to its evidence.
+* **Version diffs.** What changed in behavior since the previous version.
+* **SBOMs.** A CycloneDX SBOM per version after BSI TR-03183-2, with the
+  findings as a VEX document that points into it.
+* **A static archive.** Chosen job pages as files that outlive the server.
 * **Runs unattended.** Retries, breakers, canaries and quarantine.
 * **Defense in depth.** Jails, seccomp, Landlock and fuzzing.
 
@@ -30,11 +34,11 @@ flowchart LR
     subgraph server[Single bare metal server]
         direction LR
         subgraph trusted[Trusted zone: never runs crate code]
-            feed[feed] --> fetcher[fetcher<br/>verify, extract, vendor]
+            feed[feed] --> fetcher[fetcher<br/>verify, validate, resolve]
             fetcher --> sa[static analysis<br/>syn over all cfg branches,<br/>YARA-X, version diff]
         end
         subgraph untrusted[Untrusted zone]
-            orch[orchestrator<br/>rootless jail, limits, cleanup] --> vm[Firecracker microVM<br/>cargo check, eBPF tracing,<br/>honeytokens]
+            orch[orchestrator<br/>rootless jail, limits, cleanup] --> vm[Firecracker microVM<br/>cargo check or full build,<br/>eBPF tracing, honeytokens]
             vm --> fi[fake internet<br/>no uplink]
         end
         subgraph control[Control plane]
@@ -62,15 +66,15 @@ design, are in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 |-------|--------------|
 | [`crateward_core`](crates/core) | Shared types, typed configuration, the job state machine, the Postgres store, sandboxing primitives |
 | [`crateward_feed`](crates/feed) | Discovers new versions from the RSS feeds, the sparse index and the daily dump |
-| [`crateward_fetcher`](crates/fetcher) | Downloads, verifies, safely extracts and vendors crates |
+| [`crateward_fetcher`](crates/fetcher) | Downloads and verifies crates, validates their archives without extracting them, and resolves their dependencies |
 | [`crateward_static_analysis`](crates/static_analysis) | Parses sources without executing them and produces findings with evidence |
 | [`crateward_orchestrator`](crates/orchestrator) | Runs jobs in jailed Firecracker microVMs and guarantees their cleanup |
 | [`crateward_guest_agent`](crates/guest_agent) | Runs inside the VM: executes the job offline and streams output and trace to the host |
 | [`crateward_guest_ebpf`](crates/guest_ebpf) | The eBPF programs the guest agent loads |
 | [`crateward_fake_internet`](crates/fake_internet) | DNS, HTTP and HTTPS sinks that stand in for the internet |
-| [`crateward_analyzer`](crates/analyzer) | Scores runs with explainable reasons and keeps behavior profiles |
+| [`crateward_analyzer`](crates/analyzer) | Scores runs with explainable reasons, keeps behavior profiles and writes SBOMs |
 | [`crateward_supervisor`](crates/supervisor) | Health checks, breakers, canaries, retention and alerts |
-| [`crateward_api`](crates/api) | The dashboard: server rendered HTML with htmx and server sent events |
+| [`crateward_api`](crates/api) | The dashboard, the version diff, the archive and the public site: server rendered HTML with htmx and server sent events |
 | [`crateward_cli`](crates/cli) | `crateward`, the maintainer's command line tool |
 | [`crateward_xtask`](crates/xtask) | Local CI, documentation checks, guest images and release bundles |
 

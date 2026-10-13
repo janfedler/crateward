@@ -1,6 +1,6 @@
 [package]
 name = "crateward_xtask"
-description = "Developer tasks: local CI, documentation checks, vendoring and (later) guest image builds."
+description = "Developer tasks: local CI, documentation checks, vendoring, guest images and release bundles."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

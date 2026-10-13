@@ -1,6 +1,6 @@
 [package]
 name = "crateward_fetcher"
-description = "Downloads, verifies, safely extracts and vendors crates."
+description = "Downloads and verifies crates, validates their archives without extracting them, and resolves their dependencies."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
