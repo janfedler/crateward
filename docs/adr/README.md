@@ -23,3 +23,4 @@ changes go in the commit message, not in a record. New records use
 | [0008](0008-autonomy-and-escape-detection.md) | Autonomy and escape detection |
 | [0009](0009-scoring-and-dashboard.md) | Explainable scoring and a server rendered dashboard |
 | [0010](0010-license.md) | MIT OR Apache-2.0, with GPL-2.0-only for the eBPF programs |
+| [0011](0011-version-diff-view.md) | Proposed: a diff view against the previous version |
