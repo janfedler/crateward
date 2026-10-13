@@ -104,12 +104,6 @@ impl IndexDependency {
     pub fn kind(&self) -> DependencyKind {
         self.kind.unwrap_or_default()
     }
-
-    /// The crate this dependency refers to, whether renamed or not.
-    #[must_use]
-    pub fn package_name(&self) -> &str {
-        self.package.as_deref().unwrap_or(&self.name)
-    }
 }
 
 /// The raw form of one index line, before validation.
@@ -168,13 +162,6 @@ impl IndexEntry {
     #[must_use]
     pub fn has_build_dependencies(&self) -> bool {
         self.deps.iter().any(|d| d.kind() == DependencyKind::Build)
-    }
-
-    /// Whether any dependency comes from another registry. crates.io does
-    /// not allow this for published crates, so it is an anomaly.
-    #[must_use]
-    pub fn has_foreign_registry_dependency(&self) -> bool {
-        self.deps.iter().any(|d| d.registry.is_some())
     }
 }
 

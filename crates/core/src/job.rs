@@ -190,8 +190,7 @@ impl fmt::Display for JobState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunKind {
-    /// `cargo check`, plus cross target checks when the crate has platform
-    /// specific code. The default for every dynamic job.
+    /// `cargo check`, the default for every dynamic job.
     Check,
     /// `cargo build` in a fresh VM, the confirmation run after a verdict of
     /// medium or above (ADR 0009). Tests would need the crate's dev

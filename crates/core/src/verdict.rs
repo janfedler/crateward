@@ -60,30 +60,6 @@ impl fmt::Display for Coverage {
     }
 }
 
-/// Outcome of the cross target `cargo check` for one foreign target.
-/// Foreign code is only type checked, never executed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "reason")]
-pub enum TargetCoverage {
-    /// `cargo check` ran for the target (whether or not it succeeded).
-    Checked,
-    /// The target could not be checked. This is logged, never treated as an
-    /// infrastructure error.
-    NotApplicable(TargetNotApplicable),
-}
-
-/// Why a foreign target could not be checked.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TargetNotApplicable {
-    /// The version has no code specific to this target.
-    NoPlatformSpecificCode,
-    /// The Rust standard library for the target is not in the guest image.
-    MissingToolchain,
-    /// The check needs a platform SDK the guest image cannot contain.
-    MissingSdk,
-}
-
 /// How risky a version looks. Ordered from `None` to `Critical`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

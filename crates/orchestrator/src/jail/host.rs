@@ -1,7 +1,7 @@
 //! The orchestrator side of the jail: starts `crateward-vmjail`, writes the
 //! ID maps, and hands back the process that becomes Firecracker.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -195,10 +195,4 @@ pub fn prepare_root(root: &Path, vm_uid: u32) -> Result<(), JailError> {
     super::acl::grant_user(root, vm_uid).map_err(io("setting the jail root ACL"))?;
 
     super::decoy::plant(root).map_err(io("planting the jail decoy"))
-}
-
-/// Host path of a file Firecracker sees at `name` in the jail root.
-#[must_use]
-pub fn host_path(root: &Path, name: &str) -> PathBuf {
-    root.join(name.trim_start_matches('/'))
 }
