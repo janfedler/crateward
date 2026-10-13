@@ -195,6 +195,18 @@ pub struct EvidenceView {
     pub code_url: String,
 }
 
+impl EvidenceView {
+    /// How much the points weigh: `bad`, `warn` or `low`.
+    #[must_use]
+    pub fn tone(&self) -> &'static str {
+        match self.points {
+            30.. => "bad",
+            10.. => "warn",
+            _ => "low",
+        }
+    }
+}
+
 /// The parts of a job page that come from its verdict.
 #[derive(Debug, Default)]
 pub struct VerdictView {
@@ -212,21 +224,50 @@ pub struct VerdictView {
     pub profile: Vec<String>,
 }
 
-/// One static finding as shown.
+/// Static findings of one severity, kind and context.
 #[derive(Debug, Clone)]
-pub struct FindingView {
-    /// Severity.
+pub struct FindingGroup {
+    /// Severity as the report names it.
     pub severity: String,
-    /// Kind.
+    /// `critical`, `high`, `medium`, `low`, `info` or `other`, for the
+    /// filter and the colors.
+    pub tone: &'static str,
+    /// Kind, with the YARA rule.
     pub kind: String,
     /// Code context.
     pub context: String,
-    /// File and line.
-    pub location: String,
+    /// How many findings.
+    pub count: usize,
+    /// The findings by evidence.
+    pub items: Vec<FindingItem>,
+}
+
+impl FindingGroup {
+    /// Shown open: the severe ones.
+    #[must_use]
+    pub fn open(&self) -> bool {
+        matches!(self.tone, "critical" | "high")
+    }
+}
+
+/// Findings with the same evidence, and where they are.
+#[derive(Debug, Clone)]
+pub struct FindingItem {
     /// Evidence.
     pub evidence: String,
-    /// The file in the crates.io code viewer, or empty.
-    pub code_url: String,
+    /// File and line, and the place in the crates.io code viewer.
+    pub places: Vec<(String, String)>,
+    /// Places not listed.
+    pub more: usize,
+}
+
+/// How many static findings have a severity, for the filter.
+#[derive(Debug, Clone)]
+pub struct SeverityCount {
+    /// The filter's tone, as in [`FindingGroup::tone`].
+    pub tone: &'static str,
+    /// Findings.
+    pub count: usize,
 }
 
 /// A job's page.
@@ -249,14 +290,24 @@ pub struct JobPage {
     pub level: String,
     /// Review, or empty.
     pub review: String,
-    /// Evidence, strongest first.
+    /// Evidence with points, strongest first.
     pub evidence: Vec<EvidenceView>,
+    /// Evidence without points.
+    pub quiet: Vec<EvidenceView>,
     /// Behavior new against the previous version.
     pub new_behavior: Vec<String>,
     /// Behavior profile.
     pub profile: Vec<String>,
-    /// Static findings of the crate's own file.
-    pub findings: Vec<FindingView>,
+    /// Static findings of the crate's own file, grouped, severe first.
+    pub groups: Vec<FindingGroup>,
+    /// Findings per severity, severe first.
+    pub severities: Vec<SeverityCount>,
+    /// Static findings in all.
+    pub finding_total: usize,
+    /// Findings the analysis dropped over its limit.
+    pub findings_dropped: u64,
+    /// The crate version on crates.io.
+    pub crate_url: String,
     /// When, from, to, event, worker.
     pub timeline: Vec<(String, String, String, String, String)>,
     /// The VM runs shown.

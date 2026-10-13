@@ -207,6 +207,10 @@ fn static_report() -> Value {
         findings.push(json!({"severity": "info", "kind": "filler", "file": "src/f.rs", "evidence": format!("e{i}")}));
     }
 
+    for line in 1..=60 {
+        findings.push(json!({"severity": "medium", "kind": "process_spawn", "context": "build_script", "file": "build.rs", "line": line, "evidence": "Command::new"}));
+    }
+
     json!({"findings": findings})
 }
 
@@ -287,16 +291,58 @@ fn table(html: &str, heading: &str) -> Vec<Row> {
     let start = after.find("<table").unwrap();
     let end = after.find("</table>").unwrap();
 
-    after[start..end].split("<tr").skip(1).map(cells).collect()
+    let rows = after[start..end]
+        .replace("<thead>", "")
+        .replace("</thead>", "")
+        .replace("<tbody>", "")
+        .replace("</tbody>", "");
+
+    rows.split("<tr").skip(1).map(cells).collect()
 }
 
-/// The items of the list after `heading`.
-fn list(html: &str, heading: &str) -> Vec<String> {
+/// The label and value pairs of the facts after `heading`.
+fn facts(html: &str, heading: &str) -> Vec<Row> {
     let after = &html[html.find(heading).unwrap()..];
-    let end = after.find("</ul>").unwrap();
-    let item = |item: &str| unescape(item.trim_end_matches("</li>"));
+    let end = after.find("</dl>").unwrap();
+    let pair = |piece: &str| {
+        let (label, rest) = piece.split_once("</dt><dd>")?;
+        Some(row(&[label, &unescape(rest.split_once("</dd>")?.0)]))
+    };
 
-    after[..end].split("<li>").skip(1).map(item).collect()
+    after[..end]
+        .split("<dt>")
+        .skip(1)
+        .filter_map(pair)
+        .collect()
+}
+
+/// Each static finding group as its summary's text, then the text of each
+/// evidence with its places.
+fn groups(html: &str) -> Vec<Row> {
+    let start = html.find("<div class=\"findings\">").unwrap();
+    let rest = &html[start..];
+    let end = ["<section class=\"run\"", "<details class=\"section\""]
+        .iter()
+        .filter_map(|marker| rest.find(marker))
+        .min()
+        .unwrap();
+
+    let section = &rest[..end];
+
+    section
+        .split("<details class=\"group")
+        .skip(1)
+        .map(|group| {
+            let mut texts = vec![text(group, "<summary>", "</summary>")];
+            texts.extend(
+                group
+                    .split("<li>")
+                    .skip(1)
+                    .map(|item| text(item, "<code", "</li>")),
+            );
+            texts
+        })
+        .collect()
 }
 
 /// The text between `open` and `close`, tags removed, white space collapsed.
@@ -385,20 +431,38 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
     let day = db.store.disclosure(job).await.unwrap().unwrap();
 
     let html = db.page(job).await;
+    assert_eq!(text(&html, "<h1>", "</h1>"), "evil 0.1.0");
     assert_eq!(
-        text(&html, "<h1>", "</h1>"),
-        format!("evil 0.1.0 job {}", job.0)
+        text(&html, "<p class=\"meta\">", "</p>"),
+        format!("Scored static only job {} crates.io", job.0)
     );
-
-    let status = "State Scored, coverage static only. Score 85 (critical), review confirmed.";
-    assert_eq!(text(&html, "<p>State", "</p>"), status);
-    assert!(html.contains("class=\"level-critical\""));
+    assert!(html.contains("href=\"https://crates.io/crates/evil/0.1.0\""));
+    assert_eq!(
+        text(&html, "<p class=\"headline\">", "</p>"),
+        "a token went out"
+    );
+    assert_eq!(
+        text(
+            &html,
+            "<div class=\"verdict tone-critical\">",
+            "<div class=\"decision\">"
+        ),
+        "85 critical"
+    );
+    assert_eq!(
+        text(&html, "<div class=\"decision\">", "<form"),
+        "Review confirmed"
+    );
+    assert_eq!(
+        text(&html, "<nav class=\"toc\"", "</nav>"),
+        "Disclosure Evidence 6 Behavior 2 Static findings 365 Run: full 1 Timeline 3"
+    );
 
     let form = format!("action=\"/jobs/{}/review\"", job.0);
     assert_eq!(html.matches(&form).count(), 2);
 
     let reported_on = format!("{} to crates.io", day.reported_on.as_deref().unwrap());
-    let disclosure = table(&html, "<h2>Disclosure</h2>");
+    let disclosure = facts(&html, "<h2 id=\"disclosure\">");
 
     assert_eq!(
         disclosure,
@@ -413,62 +477,70 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
         ]
     );
 
+    // Points, the signal with its source and package, where, what.
     assert_eq!(
-        table(&html, "<h2>Evidence</h2>"),
+        table(&html, "<h2 id=\"evidence\">"),
         [
-            row(&["Points", "Signal", "Source", "Package", "Where", "What"]),
+            row(&["Points", "Signal", "Where", "What"]),
             row(&[
                 "60",
-                "honeytoken_left_vm",
-                "network",
-                "evil",
+                "honeytoken_left_vmnetwork · evil",
                 "203.0.113.9:443",
                 "a token went out"
             ]),
             row(&[
                 "10",
-                "exec_curl",
-                "trace",
-                "",
+                "exec_curltrace",
                 "build.rs:12",
                 "ran <curl> & \"more\""
             ]),
-            row(&["5", "obfuscation", "static", "dep", "", "packed string"]),
-            row(&["4", "new_network", "diff", "", "", "new since 0.0.9"]),
-            row(&["3", "disk_write", "disk", "", "", "wrote outside target"]),
-            row(&["3", "timeout", "run", "", "", "the run ended late"]),
+            row(&["5", "obfuscationstatic · dep", "", "packed string"]),
+            row(&["4", "new_networkdiff", "", "new since 0.0.9"]),
+            row(&["3", "disk_writedisk", "", "wrote outside target"]),
+            row(&["3", "timeoutrun", "", "the run ended late"]),
         ]
     );
+    assert!(html.contains("<span class=\"points bad\">60</span>"));
+    assert!(html.contains("<span class=\"points warn\">10</span>"));
+    assert!(html.contains("<span class=\"points low\">5</span>"));
+    assert!(!html.contains("without points"));
+    assert!(html.contains("<code class=\"chip new\">exec:curl</code>"));
+    assert!(html.contains("<code class=\"chip\">net:203.0.113.9:443</code>"));
+
+    // Grouped by severity, kind and context, severe and large groups
+    // first, with one filter button per severity.
     assert_eq!(
-        list(&html, "<h2>New since the previous version</h2>"),
-        ["exec:curl"]
+        text(&html, "<div class=\"filter\"", "</div>"),
+        "All 365 high 1 medium 60 low 1 info 301 other 2 6 groups"
     );
 
-    let profile = list(&html, "<h2>Behavior profile</h2>");
-    assert_eq!(profile, ["exec:curl", "net:203.0.113.9:443"]);
+    let groups = groups(&html);
+    assert_eq!(groups.len(), 6);
+    assert_eq!(
+        groups[0],
+        row(&[
+            "high build_script net_call fn main 1",
+            "Command::new(\"curl\") build.rs:12"
+        ])
+    );
+    assert!(html.contains("<details class=\"group sev-high\" open>"));
+    assert!(html.contains("<details class=\"group sev-medium\">"));
 
-    let findings = table(&html, "<h2>Static findings</h2>");
-    assert_eq!(findings.len(), 301);
+    let spawn = &groups[1];
+    assert_eq!(spawn.len(), 2);
+    assert_eq!(spawn[0], "medium process_spawn build_script 60");
+    assert!(spawn[1].starts_with("Command::new build.rs:1 build.rs:2 "));
+    assert!(spawn[1].ends_with(" build.rs:50 and 10 more"));
+
     assert_eq!(
-        findings[..5],
-        [
-            row(&["Severity", "Kind", "Context", "Where", "Evidence"]),
-            row(&[
-                "high",
-                "build_script net_call",
-                "fn main",
-                "build.rs:12",
-                "Command::new(\"curl\")"
-            ]),
-            row(&["low", "unsafe_block", "lib", "src/lib.rs", "unsafe { <x> }"]),
-            row(&["3", "odd", "null", "src/odd.rs", "true"]),
-            row(&["", "sparse", "", "", ""]),
-        ]
+        groups[2],
+        row(&["low unsafe_block lib 1", "unsafe { <x> } src/lib.rs"])
     );
-    assert_eq!(
-        findings[300],
-        row(&["info", "filler", "", "src/f.rs", "e299"])
-    );
+    assert_eq!(groups[3].len(), 302);
+    assert_eq!(groups[3][0], "info filler 301");
+    assert_eq!(groups[3][301], "e304 src/f.rs");
+    assert_eq!(groups[4], row(&["3 odd null 1", "true src/odd.rs"]));
+    assert_eq!(groups[5], row(&["sparse 1", ""]));
 
     let timeline = table(&html, "<h2>Timeline</h2>");
     assert_eq!(timeline[0], row(&["When", "From", "To", "Event", "Worker"]));
@@ -516,6 +588,7 @@ async fn a_scored_and_confirmed_job_shows_everything_the_store_knows() {
 
     let tree = table(full, "<h3>Processes");
     assert_eq!(tree.len(), 5);
+    assert_eq!(tree[3][0], "└build_script /w/build-script-build");
     assert_eq!(
         tree[4],
         row(&[
@@ -562,18 +635,24 @@ async fn a_new_job_shows_empty_sections() {
     let job = db.job().await;
 
     let html = db.page(job).await;
+    assert_eq!(text(&html, "<h1>", "</h1>"), "evil 0.1.0");
     assert_eq!(
-        text(&html, "<h1>", "</h1>"),
-        format!("evil 0.1.0 job {}", job.0)
+        text(&html, "<p class=\"meta\">", "</p>"),
+        format!("Discovered job {} crates.io", job.0)
     );
-    assert_eq!(text(&html, "<p>State", "</p>"), "State Discovered.");
     assert!(!html.contains("/review"));
-    assert!(!html.contains("<h2>Disclosure</h2>"));
+    assert!(!html.contains("class=\"verdict"));
+    assert!(!html.contains("class=\"headline\""));
+    assert!(!html.contains("id=\"disclosure\""));
     assert!(!html.contains("New since the previous version"));
     assert!(!html.contains("<h2>Run:"));
-    assert!(html.contains("<h2>Evidence</h2>\n<p class=\"muted\">No evidence.</p>"));
-    assert!(html.contains("<h2>Behavior profile</h2>\n<p class=\"muted\">Empty.</p>"));
-    assert!(html.contains("<h2>Static findings</h2>\n<p class=\"muted\">None.</p>"));
+    assert!(
+        html.contains("<h2 id=\"evidence\">Evidence</h2>\n<p class=\"muted\">No evidence.</p>")
+    );
+    assert!(html.contains("<h4>Profile</h4>\n<p class=\"muted\">Empty.</p>"));
+    assert!(
+        html.contains("<h2 id=\"findings\">Static findings</h2>\n<p class=\"muted\">None.</p>")
+    );
 
     let timeline = table(&html, "<h2>Timeline</h2>");
     assert_eq!(timeline, [row(&["When", "From", "To", "Event", "Worker"])]);
@@ -591,13 +670,23 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
     db.store.record_verdict(job, &verdict()).await.unwrap();
 
     let html = db.page(job).await;
-    let status = "State Discovered. Score 85 (critical), review none.";
 
-    assert_eq!(text(&html, "<p>State", "</p>"), status);
+    assert_eq!(
+        text(
+            &html,
+            "<div class=\"verdict tone-critical\">",
+            "<div class=\"decision\">"
+        ),
+        "85 critical"
+    );
+    assert_eq!(
+        text(&html, "<div class=\"decision\">", "<form"),
+        "Review none"
+    );
 
     let form = format!("action=\"/jobs/{}/review\"", job.0);
     assert_eq!(html.matches(&form).count(), 2);
-    assert!(!html.contains("<h2>Disclosure</h2>"));
+    assert!(!html.contains("id=\"disclosure\""));
 
     assert!(
         db.store
@@ -607,7 +696,11 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
     );
 
     let html = db.page(job).await;
-    assert!(html.contains("<h2>Disclosure</h2>\n\n<p class=\"muted\">Not reported yet."));
+    assert!(
+        html.contains(
+            "<h2 id=\"disclosure\">Disclosure</h2>\n\n<p class=\"muted\">Not reported yet."
+        )
+    );
 
     // Until the report is recorded, the inbox and a filter find it.
     let link = format!("<a href=\"/jobs/{}\">", job.0);
@@ -651,7 +744,7 @@ async fn a_scored_job_offers_a_review_and_a_confirmed_one_its_disclosure() {
 
     let html = db.page(job).await;
     assert_eq!(
-        table(&html, "<h2>Disclosure</h2>"),
+        facts(&html, "<h2 id=\"disclosure\">"),
         [
             row(&["Kind", "vulnerability"]),
             row(&["Reported", &format!("{day} to the maintainer")]),
@@ -841,7 +934,7 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
 
     let html = db.page(job).await;
     let evidence = &html
-        [html.find("<h2>Evidence</h2>").unwrap()..html.find("<h2>Static findings</h2>").unwrap()];
+        [html.find("<h2 id=\"evidence\">").unwrap()..html.find("<h2 id=\"findings\">").unwrap()];
 
     let viewer = "https://crates.io/crates/evil/0.1.0/code/build.rs";
 
@@ -850,10 +943,8 @@ async fn static_evidence_links_to_its_line_on_crates_io() {
     // The old verdict names only the file. The finding knows the line.
     assert!(evidence.contains(&format!("<a href=\"{viewer}#L9\"")));
 
-    let findings = &html[html.find("<h2>Static findings</h2>").unwrap()..];
-    assert!(
-        findings.contains("<a href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs#L3\"")
-    );
+    let findings = &html[html.find("<h2 id=\"findings\">").unwrap()..];
+    assert!(findings.contains("href=\"https://crates.io/crates/evil/0.1.0/code/src/lib.rs#L3\""));
 
     db.drop().await;
 }

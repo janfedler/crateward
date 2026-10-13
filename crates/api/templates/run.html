@@ -1,5 +1,5 @@
 {# One VM run, from `run_view::RunView`. #}
-<section class="run">
+<section class="run" id="run-{{ run.kind }}">
 <div class="run-head">
   <h2>Run: {{ run.kind }}</h2>
   <span class="badge {{ run.outcome_class }}">{{ run.outcome }}</span>
@@ -16,85 +16,116 @@
 </dl>
 
 <div class="panel proc">
-<h3>Processes <span class="muted">{{ run.processes.len() }}</span></h3>
+<h3>Processes <span class="muted">{{ run.process_total }}</span></h3>
 {% if run.processes.is_empty() %}<p class="muted">No processes traced.</p>{% else %}
-{% if run.compilers > 0 %}<label class="toggle"><input type="checkbox" checked> Hide the {{ run.compilers }} compiler processes (rustc, C toolchain)</label>{% endif %}
+<p class="hint">Siblings that ran the same program with the same result and the same processes below are folded into one row, with their number.{% if run.compilers > 0 %}
+<label class="toggle"><input type="checkbox" checked> Hide the {{ run.compilers }} compiler processes (rustc, C toolchain)</label>{% endif %}</p>
+<div class="scroll">
 <table class="tree">
-<tr><th>Process</th><th>Arguments</th><th>Start</th><th>Took</th><th>Exit</th></tr>
+<thead><tr><th>Process</th><th>Arguments</th><th>Start</th><th>Took</th><th>Exit</th></tr></thead>
+<tbody>
 {% for p in run.processes %}
-<tr class="role-{{ p.role }}{% if p.compiler() %} compiler{% endif %}{% if p.root %} root{% endif %}{% if p.disguised() %} disguised{% endif %}">
-<td class="d{{ p.depth }}">{% if p.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ p.role }}</span> <span class="mono" title="pid {{ p.pid }}">{{ p.exe }}</span></td>
-<td class="mono">{{ p.args }}</td>
+<tr class="role-{{ p.role }}{% if p.compiler() %} compiler{% endif %}{% if p.root %} root{% endif %}{% if p.disguised() %} disguised{% endif %}{% if p.foreign() %} foreign{% endif %}">
+<td class="d{{ p.depth }}">{% if p.depth > 0 %}<span class="branch">└</span>{% endif %}<span class="badge role">{{ p.role }}</span> <span class="mono" title="pid {{ p.pid }}: {{ p.exe }}">{{ p.label() }}</span>{% if p.count > 1 %} <span class="times" title="{{ p.count }} similar processes, the first one shown">×{{ p.count }}</span>{% endif %}</td>
+<td class="mono args">{{ p.args }}</td>
 <td class="nowrap muted">{{ p.start }}</td>
 <td class="nowrap">{{ p.duration }}</td>
 <td class="nowrap">{{ p.exit }}</td>
 </tr>
 {% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 {% for n in run.trace_notes %}<p class="muted">{{ n }}</p>{% endfor %}
 </div>
 
 <div class="panel">
-<h3>Network</h3>
+<h3>Network <span class="muted">{{ run.dns.len() + run.connections.len() }}</span></h3>
 {% if run.dns.is_empty() && run.connections.is_empty() && run.sockets.is_empty() && run.network_notes.is_empty() %}
 <p class="muted">No network activity.</p>
 {% else %}
-<p class="muted">The VM has no internet. Every name it looks up resolves to 10.0.2.1, the fake internet, which accepts every connection and records what was sent. Below, it is shown by its port alone, such as <code>:443</code>. The name the build wanted is in the lookups, the HTTP host and the TLS SNI.</p>
-{% if !run.dns.is_empty() %}<p>Looked up {% for d in run.dns %}<code class="chip">{{ d }}</code> {% endfor %}</p>{% endif %}
+<p class="hint">The VM has no internet. Every name it looks up resolves to 10.0.2.1, the fake internet, which accepts every connection and records what was sent. Below, it is shown by its port alone, such as <code>:443</code>. The name the build wanted is in the lookups, the HTTP host and the TLS SNI.</p>
+{% if !run.dns.is_empty() %}<p class="chips">Looked up {% for d in run.dns %}<code class="chip">{{ d }}</code> {% endfor %}</p>{% endif %}
 {% if !run.connections.is_empty() %}
+<div class="scroll">
 <table>
-<tr><th>Destination</th><th>Protocol</th><th>What was sent</th><th>Bytes</th></tr>
+<thead><tr><th>Destination</th><th>Protocol</th><th>What was sent</th><th>Bytes</th></tr></thead>
+<tbody>
 {% for c in run.connections %}<tr><td class="mono nowrap">{{ c.dst }}</td><td class="nowrap">{{ c.protocol }}</td><td class="mono">{{ c.detail }}</td><td class="nowrap">{{ c.bytes }}</td></tr>{% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 {% if !run.sockets.is_empty() %}
-<h4>Sockets in the trace</h4>
+<details class="more">
+<summary>Sockets in the trace <span class="count">{{ run.sockets.len() }}</span></summary>
+<div class="scroll">
 <table>
-<tr><th>When</th><th>Program</th><th>How</th><th>Address</th><th>Type</th></tr>
+<thead><tr><th>When</th><th>Program</th><th>How</th><th>Address</th><th>Type</th></tr></thead>
+<tbody>
 {% for (at, exe, how, address, kind) in run.sockets %}<tr><td class="nowrap muted">{{ at }}</td><td class="mono">{{ exe }}</td><td class="nowrap">{{ how }}</td><td class="mono">{{ address }}</td><td class="nowrap">{{ kind }}</td></tr>{% endfor %}
+</tbody>
 </table>
+</div>
+</details>
 {% endif %}
 {% if !run.network_notes.is_empty() %}<ul>{% for n in run.network_notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
 {% endif %}
 </div>
 
 <div class="panel">
-<h3>Files</h3>
+<h3>Files <span class="muted">{{ run.sensitive.len() + run.writes.len() + run.tamper.len() }}</span></h3>
 <h4>Secrets opened</h4>
 {% if run.sensitive.is_empty() %}<p class="muted">None.</p>{% else %}
+<div class="scroll">
 <table>
-<tr><th>When</th><th>Program</th><th>Path</th><th>Mode</th></tr>
+<thead><tr><th>When</th><th>Program</th><th>Path</th><th>Mode</th></tr></thead>
+<tbody>
 {% for a in run.sensitive %}<tr><td class="nowrap muted">{{ a.at }}</td><td class="mono">{{ a.exe }}</td><td class="mono">{{ a.path }}</td><td class="nowrap">{{ a.mode }}</td></tr>{% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 <h4>Written outside the build directories</h4>
 {% if run.writes.is_empty() %}<p class="muted">None.</p>{% else %}
+<div class="scroll">
 <table>
-<tr><th>When</th><th>Program</th><th>Path</th><th>Mode</th></tr>
+<thead><tr><th>When</th><th>Program</th><th>Path</th><th>Mode</th></tr></thead>
+<tbody>
 {% for a in run.writes %}<tr><td class="nowrap muted">{{ a.at }}</td><td class="mono">{{ a.exe }}</td><td class="mono">{{ a.path }}</td><td class="nowrap">{{ a.mode }}</td></tr>{% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 {% if !run.tamper.is_empty() %}
 <h4>Tamper attempts</h4>
+<div class="scroll">
 <table>
-<tr><th>When</th><th>Process</th><th>What</th></tr>
+<thead><tr><th>When</th><th>Process</th><th>What</th></tr></thead>
+<tbody>
 {% for (at, pid, what) in run.tamper %}<tr><td class="nowrap muted">{{ at }}</td><td class="nowrap">{{ pid }}</td><td class="mono">{{ what }}</td></tr>{% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 </div>
 
 <div class="panel">
-<h3>Scratch disk</h3>
+<h3>Scratch disk <span class="muted">{{ run.entries.len() }}</span></h3>
 {% if run.scratch.is_empty() %}<p class="muted">Not scanned.</p>{% else %}
 <dl class="facts">
 {% for (label, value) in run.scratch %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
 </dl>
 {% if run.entries.is_empty() %}<p class="muted">Nothing outside the build areas.</p>{% else %}
+<div class="scroll">
 <table>
-<tr><th>Why</th><th>Path</th><th>Kind</th><th>Size</th><th>Mode</th></tr>
+<thead><tr><th>Why</th><th>Path</th><th>Kind</th><th>Size</th><th>Mode</th></tr></thead>
+<tbody>
 {% for e in run.entries %}<tr><td class="word">{{ e.why }}</td><td class="mono">{{ e.path }}</td><td class="word">{{ e.kind }}</td><td class="nowrap">{{ e.size }}</td><td class="nowrap mono">{{ e.mode }}</td></tr>{% endfor %}
+</tbody>
 </table>
+</div>
 {% endif %}
 {% endif %}
 </div>

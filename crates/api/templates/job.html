@@ -1,70 +1,133 @@
 {% extends "base.html" %}
 {% block title %}Crateward: {{ name }} {{ version }}{% endblock %}
 {% block content %}
-<h1>{{ name }} {{ version }} <span class="muted">job {{ id }}</span></h1>
-<p>State <b>{{ state }}</b>{% if coverage != "" %}, coverage <b>{{ coverage }}</b>{% endif %}.
-{% if score != "" %} Score <span class="level-{{ level }}">{{ score }} ({{ level }})</span>, review <b>{{ review }}</b>.{% endif %}</p>
+<div class="report-head">
+  <div class="report-title">
+    <h1>{{ name }} <span class="version">{{ version }}</span></h1>
+    <p class="meta">
+      <span class="badge">{{ state }}</span>
+      {% if coverage != "" %}<span class="badge">{{ coverage }}</span>{% endif %}
+      <span class="muted">job {{ id }}</span>
+      <a class="muted" href="{{ crate_url }}" rel="noreferrer noopener" target="_blank">crates.io</a>
+    </p>
+    {% if let Some(top) = evidence.first() %}<p class="headline">{{ top.summary }}</p>{% endif %}
+  </div>
+  {% if score != "" %}
+  <div class="verdict tone-{{ level }}">
+    <div class="score">{{ score }}</div>
+    <div class="level">{{ level }}</div>
+  </div>
+  {% endif %}
+</div>
 
 {% if score != "" %}
-<form class="inline" method="post" action="/jobs/{{ id }}/review">
-  <input type="hidden" name="decision" value="confirmed"><button type="submit">Confirm</button>
-</form>
-<form class="inline" method="post" action="/jobs/{{ id }}/review">
-  <input type="hidden" name="decision" value="false_positive"><button type="submit">False positive</button>
-</form>
+<div class="decision">
+  <span>Review <b class="review-{{ review }}">{{ review }}</b></span>
+  <form class="inline" method="post" action="/jobs/{{ id }}/review">
+    <input type="hidden" name="decision" value="confirmed"><button type="submit" class="danger">Confirm</button>
+  </form>
+  <form class="inline" method="post" action="/jobs/{{ id }}/review">
+    <input type="hidden" name="decision" value="false_positive"><button type="submit">False positive</button>
+  </form>
+</div>
 {% endif %}
 
+<nav class="toc" aria-label="Sections">
+  {% if review == "confirmed" %}<a href="#disclosure">Disclosure</a>{% endif %}
+  <a href="#evidence">Evidence <span class="count">{{ evidence.len() + quiet.len() }}</span></a>
+  <a href="#behavior">Behavior <span class="count">{{ profile.len() }}</span></a>
+  <a href="#findings">Static findings <span class="count">{{ finding_total }}</span></a>
+  {% for run in runs %}<a href="#run-{{ run.kind }}">Run: {{ run.kind }}{% if !run.alerts.is_empty() %} <span class="count bad">{{ run.alerts.len() }}</span>{% endif %}</a>{% endfor %}
+  <a href="#timeline">Timeline <span class="count">{{ timeline.len() }}</span></a>
+</nav>
+
 {% if review == "confirmed" %}
-<h2>Disclosure</h2>
+<h2 id="disclosure">Disclosure</h2>
 {% if disclosure.is_empty() %}
 <p class="muted">Not reported yet. Write the evidence pack with
 <code>crateward evidence {{ id }} --out &lt;dir&gt;</code>, report it
 (DISCLOSURE.md), then record it with
 <code>crateward disclosure report {{ id }} --kind &lt;malicious|vulnerability&gt; --to &lt;recipient&gt;</code>.</p>
 {% else %}
-<table>
-{% for (label, value) in disclosure %}<tr><th>{{ label }}</th><td>{{ value }}</td></tr>{% endfor %}
-</table>
+<dl class="facts">
+{% for (label, value) in disclosure %}<div><dt>{{ label }}</dt><dd>{{ value }}</dd></div>{% endfor %}
+</dl>
 {% endif %}
 {% endif %}
 
-<h2>Evidence</h2>
-{% if evidence.is_empty() %}<p class="muted">No evidence.</p>{% else %}
-<table>
-<tr><th>Points</th><th>Signal</th><th>Source</th><th>Package</th><th>Where</th><th>What</th></tr>
+<h2 id="evidence">Evidence</h2>
+{% if evidence.is_empty() && quiet.is_empty() %}<p class="muted">No evidence.</p>{% else %}
+{% if !evidence.is_empty() %}
+<table class="evidence">
+<thead><tr><th class="num">Points</th><th>Signal</th><th>Where</th><th>What</th></tr></thead>
+<tbody>
 {% for e in evidence %}
-<tr><td class="nowrap">{{ e.points }}</td><td class="word">{{ e.signal }}</td><td class="word">{{ e.source }}</td><td class="word">{{ e.package }}</td><td>{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
+<tr><td class="num"><span class="points {{ e.tone() }}">{{ e.points }}</span></td><td class="signal"><span class="word">{{ e.signal }}</span><div class="sub">{{ e.source }}{% if !e.package.is_empty() %} · {{ e.package }}{% endif %}</div></td><td class="mono where">{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
 {% endfor %}
+</tbody>
 </table>
 {% endif %}
+{% if !quiet.is_empty() %}
+<details class="more"{% if evidence.is_empty() %} open{% endif %}>
+<summary>{{ quiet.len() }} without points</summary>
+<table class="evidence">
+<thead><tr><th>Signal</th><th>Where</th><th>What</th></tr></thead>
+<tbody>
+{% for e in quiet %}
+<tr><td class="signal"><span class="word">{{ e.signal }}</span><div class="sub">{{ e.source }}{% if !e.package.is_empty() %} · {{ e.package }}{% endif %}</div></td><td class="mono where">{% if e.code_url.is_empty() %}{{ e.location }}{% else %}<a href="{{ e.code_url }}" rel="noreferrer noopener" target="_blank">{{ e.location }}</a>{% endif %}</td><td>{{ e.summary }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</details>
+{% endif %}
+{% endif %}
 
+<h2 id="behavior">Behavior</h2>
+<div class="behavior">
 {% if !new_behavior.is_empty() %}
-<h2>New since the previous version</h2>
-<ul>{% for b in new_behavior %}<li>{{ b }}</li>{% endfor %}</ul>
+<div><h4>New since the previous version</h4>
+<p class="chips">{% for b in new_behavior %}<code class="chip new">{{ b }}</code> {% endfor %}</p></div>
 {% endif %}
+<div><h4>Profile</h4>
+{% if profile.is_empty() %}<p class="muted">Empty.</p>{% else %}<p class="chips">{% for b in profile %}<code class="chip">{{ b }}</code> {% endfor %}</p>{% endif %}</div>
+</div>
 
-<h2>Behavior profile</h2>
-{% if profile.is_empty() %}<p class="muted">Empty.</p>{% else %}<ul>{% for b in profile %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
-
-<h2>Static findings</h2>
-{% if findings.is_empty() %}<p class="muted">None.</p>{% else %}
-<table>
-<tr><th>Severity</th><th>Kind</th><th>Context</th><th>Where</th><th>Evidence</th></tr>
-{% for f in findings %}
-<tr><td class="nowrap">{{ f.severity }}</td><td class="word">{{ f.kind }}</td><td class="word">{{ f.context }}</td><td><a href="{{ f.code_url }}" rel="noreferrer noopener" target="_blank">{{ f.location }}</a></td><td>{{ f.evidence }}</td></tr>
+<h2 id="findings">Static findings</h2>
+{% if groups.is_empty() %}<p class="muted">None.</p>{% else %}
+<div class="findings">
+<div class="filter" role="radiogroup" aria-label="Severity">
+  <input type="radio" name="severity" id="sev-all" checked><label for="sev-all">All <span class="count">{{ finding_total }}</span></label>
+  {% for s in severities %}
+  <input type="radio" name="severity" id="sev-{{ s.tone }}"><label for="sev-{{ s.tone }}" class="tone-{{ s.tone }}">{{ s.tone }} <span class="count">{{ s.count }}</span></label>{% endfor %}
+  <span class="muted">{{ groups.len() }} groups{% if findings_dropped > 0 %}, {{ findings_dropped }} more dropped by the analysis limit{% endif %}</span>
+</div>
+{% for g in groups %}
+<details class="group sev-{{ g.tone }}"{% if g.open() %} open{% endif %}>
+<summary><span class="badge tone-{{ g.tone }}">{{ g.severity }}</span> <span class="kind">{{ g.kind }}</span>{% if !g.context.is_empty() %} <span class="context">{{ g.context }}</span>{% endif %} <span class="count">{{ g.count }}</span></summary>
+<ul class="items">
+{% for i in g.items %}
+<li><code class="evidence-text">{{ i.evidence }}</code>
+<span class="places">{% for (place, url) in i.places %}<a class="place" href="{{ url }}" rel="noreferrer noopener" target="_blank">{{ place }}</a> {% endfor %}{% if i.more > 0 %}<span class="muted">and {{ i.more }} more</span>{% endif %}</span></li>
 {% endfor %}
-</table>
+</ul>
+</details>
+{% endfor %}
+</div>
 {% endif %}
-
-<h2>Timeline</h2>
-<table>
-<tr><th>When</th><th>From</th><th>To</th><th>Event</th><th>Worker</th></tr>
-{% for t in timeline %}
-<tr><td class="muted nowrap">{{ t.0 }}</td><td class="nowrap">{{ t.1 }}</td><td class="nowrap">{{ t.2 }}</td><td>{{ t.3 }}</td><td class="muted">{{ t.4 }}</td></tr>
-{% endfor %}
-</table>
 
 {% for run in runs %}
 {% include "run.html" %}
 {% endfor %}
+
+<details class="section" id="timeline">
+<summary><h2>Timeline</h2> <span class="count">{{ timeline.len() }}</span></summary>
+<table>
+<thead><tr><th>When</th><th>From</th><th>To</th><th>Event</th><th>Worker</th></tr></thead>
+<tbody>
+{% for t in timeline %}
+<tr><td class="muted nowrap">{{ t.0 }}</td><td class="nowrap">{{ t.1 }}</td><td class="nowrap">{{ t.2 }}</td><td>{{ t.3 }}</td><td class="muted">{{ t.4 }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</details>
 {% endblock %}

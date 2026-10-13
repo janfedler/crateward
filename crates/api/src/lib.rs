@@ -47,8 +47,8 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::views::{
-    EvidenceView, FindingView, InboxPage, JobPage, JobsPage, OverviewBody, OverviewData,
-    OverviewPage, PageLink, Row, StateCount, VerdictView, ago,
+    EvidenceView, FindingGroup, FindingItem, InboxPage, JobPage, JobsPage, OverviewBody,
+    OverviewData, OverviewPage, PageLink, Row, SeverityCount, StateCount, VerdictView, ago,
 };
 
 /// The component this package implements.
@@ -605,26 +605,114 @@ fn report_findings(report: &serde_json::Value) -> &[serde_json::Value] {
         .map_or(&[], Vec::as_slice)
 }
 
-fn findings(report: &serde_json::Value, name: &str, version: &str) -> Vec<FindingView> {
-    report_findings(report)
-        .iter()
-        .take(300)
-        .map(|f| {
-            let kind = match f.get("rule").and_then(serde_json::Value::as_str) {
-                Some(rule) => format!("{} {rule}", text(f, "kind")),
-                None => text(f, "kind"),
-            };
+/// Places listed per evidence before the rest is counted.
+const PLACES: usize = 50;
 
-            FindingView {
-                severity: text(f, "severity"),
-                kind,
-                context: text(f, "context"),
-                location: finding_location(f),
-                evidence: text(f, "evidence"),
-                code_url: finding_url(f, name, version),
+/// A severity as the filter and the colors know it.
+fn severity_tone(severity: &str) -> &'static str {
+    match severity {
+        "critical" => "critical",
+        "high" => "high",
+        "medium" => "medium",
+        "low" => "low",
+        "info" => "info",
+        _ => "other",
+    }
+}
+
+fn severity_rank(tone: &str) -> u8 {
+    match tone {
+        "critical" => 0,
+        "high" => 1,
+        "medium" => 2,
+        "low" => 3,
+        "info" => 4,
+        _ => 5,
+    }
+}
+
+/// The findings grouped by severity, kind and context, and inside a group
+/// by evidence, severe and frequent groups first.
+fn finding_groups(report: &serde_json::Value, name: &str, version: &str) -> Vec<FindingGroup> {
+    let mut groups: Vec<FindingGroup> = Vec::new();
+    for f in report_findings(report) {
+        let severity = text(f, "severity");
+        let kind = match f.get("rule").and_then(serde_json::Value::as_str) {
+            Some(rule) => format!("{} {rule}", text(f, "kind")),
+            None => text(f, "kind"),
+        };
+
+        let context = text(f, "context");
+        let same = |g: &&mut FindingGroup| {
+            g.severity == severity && g.kind == kind && g.context == context
+        };
+
+        let group = match groups.iter_mut().position(|g| same(&g)) {
+            Some(i) => groups.get_mut(i),
+            None => {
+                groups.push(FindingGroup {
+                    tone: severity_tone(&severity),
+                    severity: severity.clone(),
+                    kind: kind.clone(),
+                    context: context.clone(),
+                    count: 0,
+                    items: Vec::new(),
+                });
+                groups.last_mut()
             }
-        })
-        .collect()
+        };
+
+        let Some(group) = group else { continue };
+        group.count += 1;
+
+        let evidence = text(f, "evidence");
+        let item = match group.items.iter().position(|i| i.evidence == evidence) {
+            Some(i) => group.items.get_mut(i),
+            None => {
+                group.items.push(FindingItem {
+                    evidence,
+                    places: Vec::new(),
+                    more: 0,
+                });
+                group.items.last_mut()
+            }
+        };
+
+        let Some(item) = item else { continue };
+
+        let place = finding_location(f);
+        if item.places.len() < PLACES {
+            item.places.push((place, finding_url(f, name, version)));
+        } else {
+            item.more += 1;
+        }
+    }
+
+    groups.sort_by(|a, b| {
+        (severity_rank(a.tone), std::cmp::Reverse(a.count), &a.kind).cmp(&(
+            severity_rank(b.tone),
+            std::cmp::Reverse(b.count),
+            &b.kind,
+        ))
+    });
+
+    groups
+}
+
+/// Findings per severity, in the groups' order.
+fn severity_counts(groups: &[FindingGroup]) -> Vec<SeverityCount> {
+    let mut counts: Vec<SeverityCount> = Vec::new();
+    for g in groups {
+        match counts.iter_mut().find(|c| c.tone == g.tone) {
+            Some(c) => c.count += g.count,
+            None => counts.push(SeverityCount {
+                tone: g.tone,
+                count: g.count,
+            }),
+        }
+    }
+
+    counts
 }
 
 /// Links each piece of static evidence to its code in the crates.io code
@@ -739,10 +827,23 @@ async fn job(
         attach_links(&mut verdict.evidence, report, &job.name, &job.version);
     }
 
-    let findings = static_report
+    let groups = static_report
         .as_ref()
-        .map(|r| findings(r, &job.name, &job.version))
+        .map(|r| finding_groups(r, &job.name, &job.version))
         .unwrap_or_default();
+
+    let findings_dropped = static_report
+        .as_ref()
+        .and_then(|r| r.get("findings_dropped"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    let (evidence, quiet) = verdict.evidence.into_iter().partition(|e| e.points > 0);
+    let crate_url = format!(
+        "https://crates.io/crates/{}/{}",
+        encode(&job.name),
+        encode(&job.version).replace('/', "%2F")
+    );
 
     let disclosure = store.disclosure(job.id).await?;
     let events = store.events(job.id).await?;
@@ -761,10 +862,15 @@ async fn job(
         score: verdict.score,
         level: verdict.level,
         review: verdict.review,
-        evidence: verdict.evidence,
+        evidence,
+        quiet,
         new_behavior: verdict.new_behavior,
         profile: verdict.profile,
-        findings,
+        severities: severity_counts(&groups),
+        finding_total: groups.iter().map(|g| g.count).sum(),
+        findings_dropped,
+        groups,
+        crate_url,
         timeline: events.into_iter().map(|e| timeline_row(e, now)).collect(),
         runs: run_view::run_views(id, &runs),
         disclosure: disclosure.map(disclosure_rows).unwrap_or_default(),

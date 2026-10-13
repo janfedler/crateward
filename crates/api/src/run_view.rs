@@ -7,6 +7,7 @@
 //! escapes it again for HTML.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use serde_json::Value;
 
@@ -64,6 +65,9 @@ pub struct ProcessRow {
     pub exit: String,
     /// It ran as root.
     pub root: bool,
+    /// How many sibling processes this row stands for: siblings that ran
+    /// the same program with the same exit and the same tree below.
+    pub count: usize,
 }
 
 impl ProcessRow {
@@ -80,6 +84,40 @@ impl ProcessRow {
     #[must_use]
     pub fn disguised(&self) -> bool {
         self.compiler_name() && !self.compiler()
+    }
+
+    /// A program from outside the guest image that is neither cargo's nor a
+    /// build script, such as one the build wrote to `/tmp`.
+    #[must_use]
+    pub fn foreign(&self) -> bool {
+        let image = ["/usr/", "/bin/", "/sbin/", "/lib/"]
+            .iter()
+            .any(|dir| self.exe.starts_with(dir));
+
+        !image && !self.exe.is_empty() && self.role != "build_script" && self.role != "cargo"
+    }
+
+    /// The program as listed: a build script by its package, since cargo
+    /// names it `target/debug/build/<package>-<hash>/build-script-build`.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        let package = || {
+            let (_, rest) = self.exe.rsplit_once("/build/")?;
+            let (dir, _) = rest.split_once('/')?;
+            let (name, hash) = dir.rsplit_once('-')?;
+
+            hash.chars().all(|c| c.is_ascii_hexdigit()).then_some(name)
+        };
+
+        match self.role.as_str() {
+            "build_script" => package().unwrap_or(&self.exe),
+            _ => &self.exe,
+        }
+    }
+
+    /// What makes siblings the same for [`fold`], arguments aside.
+    fn shape(&self) -> (&str, &str, bool, &str) {
+        (&self.role, &self.exe, self.root, &self.exit)
     }
 
     fn compiler_name(&self) -> bool {
@@ -146,8 +184,10 @@ pub struct RunView {
     pub facts: Vec<(String, String)>,
     /// What a reviewer must see first: honeytokens, tampering, root.
     pub alerts: Vec<String>,
-    /// Processes in tree order.
+    /// Processes in tree order, repeated subtrees folded into one row.
     pub processes: Vec<ProcessRow>,
+    /// How many processes were traced.
+    pub process_total: usize,
     /// How many of them are compilers.
     pub compilers: usize,
     /// Notes on the trace: missing processes, dropped events.
@@ -308,6 +348,90 @@ fn process_rows(trace: &Value) -> Vec<ProcessRow> {
     rows
 }
 
+/// Folds sibling subtrees of the same shape into the first of them, which
+/// then counts them all. A C build runs `sh` and `cmake` hundreds of times
+/// with only the arguments changing. Depths are capped afterwards, since
+/// subtrees follow the real depth.
+fn fold(rows: Vec<ProcessRow>) -> Vec<ProcessRow> {
+    let n = rows.len();
+    let depth = |i: usize| rows.get(i).map_or(0, |r| r.depth);
+
+    // One past the last row of each row's subtree.
+    let mut end = vec![n; n];
+    let mut open: Vec<usize> = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        while let Some(top) = open.pop_if(|top| depth(*top) >= row.depth) {
+            if let Some(e) = end.get_mut(top) {
+                *e = i;
+            }
+        }
+
+        open.push(i);
+    }
+
+    let end_of = |i: usize| end.get(i).copied().unwrap_or(n);
+
+    // A hash of each subtree's shape, children before parents.
+    let mut shape = vec![0_u64; n];
+    for (i, row) in rows.iter().enumerate().rev() {
+        let mut hasher = DefaultHasher::new();
+        row.shape().hash(&mut hasher);
+        let mut child = i + 1;
+        while child < end_of(i) {
+            shape.get(child).hash(&mut hasher);
+            child = end_of(child);
+        }
+
+        if let Some(s) = shape.get_mut(i) {
+            *s = hasher.finish();
+        }
+    }
+
+    enum Step {
+        Siblings(usize, usize),
+        Row(usize, usize),
+    }
+
+    let mut out = Vec::new();
+    let mut steps = vec![Step::Siblings(0, n)];
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Siblings(mut i, stop) => {
+                // Groups in the order of their first member.
+                let mut groups: Vec<(usize, usize)> = Vec::new();
+                let mut index: BTreeMap<u64, usize> = BTreeMap::new();
+                while i < stop {
+                    let key = shape.get(i).copied().unwrap_or_default();
+                    match index.get(&key).and_then(|g| groups.get_mut(*g)) {
+                        Some(group) => group.1 += 1,
+                        None => {
+                            index.insert(key, groups.len());
+                            groups.push((i, 1));
+                        }
+                    }
+
+                    i = end_of(i);
+                }
+
+                steps.extend(groups.iter().rev().map(|&(i, count)| Step::Row(i, count)));
+            }
+            Step::Row(i, count) => {
+                if let Some(row) = rows.get(i) {
+                    out.push(ProcessRow {
+                        count,
+                        depth: row.depth.min(MAX_DEPTH),
+                        ..row.clone()
+                    });
+                }
+
+                steps.push(Step::Siblings(i + 1, end_of(i)));
+            }
+        }
+    }
+
+    out
+}
+
 fn process_row(p: &Value, depth: usize) -> ProcessRow {
     let argv: Vec<String> = list(p, "argv")
         .iter()
@@ -325,7 +449,7 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
     };
 
     ProcessRow {
-        depth: depth.min(MAX_DEPTH),
+        depth,
         pid: u64_of(p, "pid").unwrap_or(0),
         role,
         exe,
@@ -339,6 +463,7 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
             .get("became_root")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        count: 1,
     }
 }
 
@@ -493,13 +618,16 @@ fn network(view: &mut RunView, net: &Value) {
 }
 
 fn trace(view: &mut RunView, trace: &Value) {
-    view.processes = process_rows(trace);
-    view.compilers = view.processes.iter().filter(|p| p.compiler()).count();
+    let rows = process_rows(trace);
+    view.process_total = rows.len();
+    view.compilers = rows.iter().filter(|p| p.compiler()).count();
 
-    for p in view.processes.iter().filter(|p| p.root) {
+    for p in rows.iter().filter(|p| p.root) {
         view.alerts
             .push(format!("Process {} ({}) ran as root", p.pid, p.exe));
     }
+
+    view.processes = fold(rows);
 
     if trace.get("complete").and_then(Value::as_bool) == Some(false) {
         view.trace_notes
@@ -748,6 +876,84 @@ mod tests {
         );
         assert_eq!(rows[1].duration, "1.5 s");
         assert!(rows[3].compiler());
+    }
+
+    #[test]
+    fn repeated_subtrees_fold_into_their_first() {
+        let mut processes = vec![
+            json!({"pid": 1, "exe": "/usr/bin/make", "role": "other"}),
+            json!({"pid": 2, "ppid": 1, "exe": "/bin/sh", "argv": ["sh", "a"], "role": "other", "started_ms": 1}),
+            json!({"pid": 3, "ppid": 2, "exe": "/usr/bin/cmake", "role": "other", "started_ms": 2}),
+            json!({"pid": 4, "ppid": 1, "exe": "/usr/bin/cut", "role": "other", "started_ms": 3}),
+            json!({"pid": 5, "ppid": 1, "exe": "/bin/sh", "argv": ["sh", "b"], "role": "other", "started_ms": 4}),
+            json!({"pid": 6, "ppid": 5, "exe": "/usr/bin/cmake", "role": "other", "started_ms": 5}),
+            json!({"pid": 7, "ppid": 1, "exe": "/bin/sh", "role": "other", "started_ms": 6}),
+            json!({"pid": 8, "ppid": 7, "exe": "/usr/bin/curl", "role": "other", "started_ms": 7}),
+            json!({"pid": 9, "ppid": 1, "exe": "/bin/sh", "role": "other", "started_ms": 8, "exit": 1}),
+            json!({"pid": 10, "ppid": 9, "exe": "/usr/bin/cmake", "role": "other", "started_ms": 9}),
+        ];
+
+        // A chain deeper than the indentation, folded by its real depth.
+        for pid in 20..32 {
+            processes.push(json!({"pid": pid, "ppid": if pid == 20 { 1 } else { pid - 1 }, "exe": "/bin/sh", "role": "other", "started_ms": 10}));
+        }
+
+        let rows = fold(process_rows(&json!({ "processes": processes })));
+        let shown: Vec<(u64, usize, usize)> =
+            rows.iter().map(|r| (r.pid, r.depth, r.count)).collect();
+
+        // The second sh with a cmake below folds into the first. The one
+        // with curl below and the one that failed stay.
+        assert_eq!(
+            shown[..8],
+            [
+                (1, 0, 1),
+                (2, 1, 2),
+                (3, 2, 1),
+                (4, 1, 1),
+                (7, 1, 1),
+                (8, 2, 1),
+                (9, 1, 1),
+                (10, 2, 1)
+            ]
+        );
+        assert_eq!(rows.len(), 8 + 12);
+        assert!(rows.iter().all(|r| r.depth <= MAX_DEPTH));
+    }
+
+    #[test]
+    fn build_scripts_show_their_package_and_outside_programs_stand_out() {
+        let row = |exe: &str, role: &str| ProcessRow {
+            depth: 0,
+            pid: 1,
+            role: role.to_owned(),
+            exe: exe.to_owned(),
+            args: String::new(),
+            start: String::new(),
+            duration: String::new(),
+            exit: String::new(),
+            root: false,
+            count: 1,
+        };
+
+        let script = row(
+            "/work/target/debug/build/lbug-d67017e6973f78cf/build-script-build",
+            "build_script",
+        );
+        assert_eq!(script.label(), "lbug");
+        assert!(!script.foreign());
+        assert_eq!(
+            row("/w/build-script-build", "build_script").label(),
+            "/w/build-script-build"
+        );
+        assert_eq!(
+            row("/work/build/x-notahash/b", "build_script").label(),
+            "/work/build/x-notahash/b"
+        );
+        assert!(row("/tmp/code-helper", "other").foreign());
+        assert!(!row("/usr/bin/sh", "other").foreign());
+        assert!(!row("/bin/sh", "other").foreign());
+        assert!(!row("", "unknown").foreign());
     }
 
     #[test]
