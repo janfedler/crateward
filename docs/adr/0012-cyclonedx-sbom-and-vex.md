@@ -16,7 +16,17 @@ compliant SBOM holds:
   expressions, the SHA-512 of the deployable file, and whether it is
   executable, an archive and structured. BSI's CycloneDX property taxonomy
   names the last ones `bsi:component:filename`, `bsi:component:executable`,
-  `bsi:component:archive` and `bsi:component:structured`.
+  `bsi:component:archive` and `bsi:component:structured`. A component
+  without dependencies still needs an empty entry in the graph.
+* The component creator is the email address of whoever created and
+  maintains it. Without one it MUST be a URL, "e.g. the creator's home
+  page or the project's web page" (table 3). A maintainer who took over a
+  project counts as its creator (section 8.1.8). In CycloneDX it is the
+  component's `manufacturer`, with either `url` or `contact.email`.
+* Licences come in three kinds. The distribution licence is required and
+  maps to `acknowledgement: concluded`. The original licence, as the
+  creator assigned it, is required when known and maps to `declared`. The
+  effective licence, the one the SBOM's creator chose, is optional.
 * When known: source code URI, URI of the deployable form, and other
   identifiers such as a purl.
 * No vulnerability data inside the SBOM. It goes into a separate document
@@ -38,9 +48,10 @@ What Crateward already stores, and what is missing:
   not computed, and the `.crate` files of dependencies are not kept
   (`supervisor.keep_originals` keeps only the analyzed crate's file), so
   older rows cannot be hashed again without downloading them again.
-* **Licences, repository, authors.** Every locked package gets a static
+* **Licences, authors, links.** Every locked package gets a static
   report (`static_reports`), but `ManifestFacts` does not read `license`,
-  `license-file`, `repository` or `authors` yet.
+  `license-file`, `authors`, `homepage` or `repository` yet. `authors` is
+  optional and empty in many crates.
 * **Findings.** A verdict's evidence names a signal, a summary, a source
   and the responsible package by name only (`Evidence.package`). The
   review state is `none`, `pending`, `confirmed` or `false_positive`, and
@@ -66,13 +77,24 @@ release. Support for 1.6 is an open pull request.
      `metadata.component`.
    * One component per locked package. Its `bom-ref` and `purl` are
      `pkg:cargo/{name}@{version}`. It carries the SHA-512 and SHA-256 of
-     the `.crate` file, the declared licence as an SPDX expression with
-     `acknowledgement: declared`, the `distribution` URL on
-     static.crates.io, a `vcs` reference from `repository` when the
-     manifest has one, and the four `bsi:component:*` properties. A
-     `.crate` file is a compressed tar of sources, so it is
-     `non-executable`, `archive` and `structured`.
-   * `dependencies` gives each package's edges from the lockfile.
+     the `.crate` file, the `distribution` URL on static.crates.io, a
+     `vcs` reference from `repository` when the manifest has one, and the
+     four `bsi:component:*` properties. A `.crate` file is a compressed
+     tar of sources, so it is `non-executable`, `archive` and
+     `structured`.
+   * The licence expression from `Cargo.toml` appears twice, as
+     `concluded` and as `declared`: a crate's users get it under the
+     licence its author assigned, so distribution and original licence are
+     the same. The effective licence is left out. For `MIT OR Apache-2.0`
+     it would be a choice that only the crate's user can make.
+   * The component creator is the first of these that exists: an email
+     address from `authors`, `homepage`, `repository`, and the crate's page
+     on crates.io. The last always exists, names the crate's owners and is
+     the project's web page in the registry, so no component is without a
+     creator. The SBOM records which source was used in the property
+     `crateward:creator`.
+   * `dependencies` gives each package's edges from the lockfile, with an
+     empty `dependsOn` for packages without dependencies.
    * `compositions` declares the graph `complete` for the analyzed crate.
      A property `crateward:resolution` says what complete means here:
      default features, all targets, no dev dependencies. A job without a
@@ -114,8 +136,8 @@ release. Support for 1.6 is an open pull request.
 6. **Data to add first:**
    * The fetcher computes SHA-512 while it downloads, next to SHA-256,
      into a new column `crate_files.sha512`.
-   * `ManifestFacts` reads `license`, `license-file`, `repository` and
-     `authors`. Old `/` separators become `OR` as crates.io does, and the
+   * `ManifestFacts` reads `license`, `license-file`, `authors`,
+     `homepage` and `repository`. Old `/` separators become `OR` as crates.io does, and the
      result is checked with the `spdx` crate. A crate with only a licence
      file gets `LicenseRef-crateward-license-file`. Static reports from
      before are recomputed on demand through the analyzer version, like
@@ -148,6 +170,12 @@ release. Support for 1.6 is an open pull request.
 * **Generating the SBOM on every request.** Pure and with no storage, but
   a later change to the generator would change a document that others
   may already reference by serial and version.
+* **The owners' GitHub profiles as creators.** The crates.io owners API
+  returns each owner's GitHub login, and `https://github.com/{login}` is
+  the creator's home page in the TR's sense. It costs one API request per
+  crate name at the one request per second crates.io allows, and owners
+  change over time, so the SBOM would depend on when it was made. The
+  crate's page on crates.io lists the same owners without a request.
 * **`not_affected` for clean crates.** It states more than a sandbox run
   can know (see 5).
 * **CSAF instead of VEX.** TR-03183-3 asks vendors for CSAF advisories.
@@ -162,13 +190,10 @@ release. Support for 1.6 is an open pull request.
   runs, older jobs have components without SHA-512 or licence, and the
   generator lists them in its log. Such a document is still valid
   CycloneDX but not TR-03183-2 compliant.
-* Component creators are often unknown: `authors` is optional in
-  `Cargo.toml` and frequently empty. The SBOM then falls back to the
-  repository URL, or leaves the field out.
-* Open question: the BSI taxonomy lists `bsi:component:effectiveLicence`.
-  For a dual licence such as `MIT OR Apache-2.0` the effective licence is
-  the user's choice, which Crateward cannot make. Until that is decided,
-  it is left out.
+* Every component has a creator, but for crates without `authors`,
+  `homepage` and `repository` it is only the crates.io page. That meets
+  the TR's wording, though a reader learns less from it than from an
+  address.
 * The CWE table is a judgment per signal and needs review like the
   scoring weights.
 * One new table, one new column, one migration, and the `spdx` crate and
