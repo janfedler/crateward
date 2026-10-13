@@ -1,6 +1,6 @@
 # NNNN: Title
 
-* Status: Accepted
+* Status: Proposed
 * Date: `YYYY-MM-DD`
 
 ## Context

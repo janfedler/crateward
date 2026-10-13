@@ -4,8 +4,7 @@ Crateward exists to run hostile code. The design assumes that a crate will
 eventually try to escape, and aims for an escape to gain nothing: no
 credentials, no internet, no persistence, no influence on later jobs.
 
-Every mitigation below has a status. **Planned** means designed but not
-built. **Built** means implemented. **Tested** means covered by an automated
+Every mitigation below has a status. **Built** means implemented. **Tested** means covered by an automated
 test. Nothing is marked Built before the code exists.
 
 ## Assets
