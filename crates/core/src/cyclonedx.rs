@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 use crate::digest::Sha256Digest;
@@ -25,6 +25,9 @@ pub const SPEC_VERSION: &str = "1.6";
 /// What a complete dependency graph means here: the consumer probe's
 /// lockfile (ADR 0004).
 pub const RESOLUTION: &str = "default features, all targets, no dev dependencies";
+
+/// Each package's `bom-ref` and the `bom-ref`s it depends on.
+type Graph = BTreeMap<String, BTreeSet<String>>;
 
 /// The source of the crates.io registry in a lockfile.
 const CRATES_IO: &str = "registry+https://github.com/rust-lang/crates.io-index";
@@ -155,7 +158,7 @@ fn uuid(parts: &[&[u8]]) -> String {
         *b = (*b & 0x3f) | 0x80;
     }
 
-    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let hex = crate::bytes::hex(&bytes);
     let part = |range: std::ops::Range<usize>| hex.get(range).unwrap_or_default().to_owned();
 
     format!(
@@ -245,7 +248,10 @@ fn creator(name: &str, meta: Option<&PackageMeta>) -> (Value, &'static str) {
 /// The original licence is `declared`. For a crate both are the manifest's
 /// expression. CycloneDX 1.6 allows one expression only, so both are
 /// written only when the licence is a single identifier.
-fn licences(meta: &PackageMeta) -> Result<Value, String> {
+fn licences(meta: Option<&PackageMeta>) -> Result<Value, String> {
+    let meta =
+        meta.ok_or("no licence and authors yet, the static report predates them".to_owned())?;
+
     let Some(raw) = meta.license.as_deref() else {
         return match &meta.license_file {
             Some(_) => Ok(json!([{
@@ -277,31 +283,22 @@ fn licences(meta: &PackageMeta) -> Result<Value, String> {
     })
 }
 
-/// One component: the analyzed crate or a locked package.
-fn component(
+/// The hashes of a crate file: the SHA-512 TR-03183-2 asks for and the
+/// SHA-256 the index names.
+fn hashes(sha512: Option<&str>, sha256: Option<&Sha256Digest>) -> Vec<Value> {
+    let sha512 = sha512.map(|h| json!({ "alg": "SHA-512", "content": h }));
+    let sha256 = sha256.map(|h| json!({ "alg": "SHA-256", "content": h.to_string() }));
+
+    sha512.into_iter().chain(sha256).collect()
+}
+
+/// Where a crate file and its project live.
+fn references(
     name: &str,
     version: &str,
-    sha256: Option<&Sha256Digest>,
-    facts: Option<&FileFacts>,
-    gaps: &mut Vec<String>,
-) -> Value {
-    let reference = purl(name, version);
-    let mut gap = |what: &str| gaps.push(format!("{name} {version}: {what}"));
-    let meta = facts.and_then(|f| f.meta.as_ref());
-
-    let mut hashes = Vec::new();
-    match facts.and_then(|f| f.sha512.as_deref()) {
-        Some(sha512) => hashes.push(json!({ "alg": "SHA-512", "content": sha512 })),
-        None => gap("no SHA-512"),
-    }
-
-    if let Some(sha256) = sha256 {
-        hashes.push(json!({ "alg": "SHA-256", "content": sha256.to_string() }));
-    }
-
-    let (manufacturer, creator_source) = creator(name, meta);
-    let filename = format!("{name}-{version}.crate");
-
+    hashes: &[Value],
+    meta: Option<&PackageMeta>,
+) -> Vec<Value> {
     // TR-03183-2 puts the deployable file's hash on its distribution
     // reference. A `.crate` file is also the crate's source code, so the
     // same file is its source distribution.
@@ -323,42 +320,62 @@ fn component(
         references.push(json!({ "type": "website", "url": url }));
     }
 
+    references
+}
+
+/// One component: the analyzed crate or a locked package.
+fn component(
+    name: &str,
+    version: &str,
+    sha256: Option<&Sha256Digest>,
+    facts: Option<&FileFacts>,
+    gaps: &mut Vec<String>,
+) -> Value {
+    let reference = purl(name, version);
+    let mut gap = |what: &str| gaps.push(format!("{name} {version}: {what}"));
+    let meta = facts.and_then(|f| f.meta.as_ref());
+    let sha512 = facts.and_then(|f| f.sha512.as_deref());
+    let hashes = hashes(sha512, sha256);
+    let (manufacturer, creator_source) = creator(name, meta);
+
+    if sha512.is_none() {
+        gap("no SHA-512");
+    }
+
     let mut properties = vec![
-        json!({ "name": "bsi:component:filename", "value": filename }),
+        json!({ "name": "bsi:component:filename", "value": format!("{name}-{version}.crate") }),
         json!({ "name": "bsi:component:executable", "value": "non-executable" }),
         json!({ "name": "bsi:component:archive", "value": "archive" }),
         json!({ "name": "bsi:component:structured", "value": "structured" }),
         json!({ "name": "crateward:creator", "value": creator_source }),
     ];
 
-    let mut component = Map::new();
-    component.insert("type".into(), json!("library"));
-    component.insert("bom-ref".into(), json!(reference));
-    component.insert("manufacturer".into(), manufacturer);
-    component.insert("name".into(), json!(name));
-    component.insert("version".into(), json!(version));
-    component.insert("purl".into(), json!(reference));
-
-    match meta {
-        None => gap("no licence and authors yet, the static report predates them"),
-        Some(meta) => {
-            if let Some(file) = &meta.license_file {
-                properties.push(json!({ "name": "crateward:license-file", "value": file }));
-            }
-
-            match licences(meta) {
-                Ok(licences) => {
-                    component.insert("licenses".into(), licences);
-                }
-                Err(why) => gap(&why),
-            }
-        }
+    if let Some(file) = meta.and_then(|m| m.license_file.as_ref()) {
+        properties.push(json!({ "name": "crateward:license-file", "value": file }));
     }
 
-    component.insert("hashes".into(), Value::Array(hashes));
-    component.insert("externalReferences".into(), Value::Array(references));
-    component.insert("properties".into(), Value::Array(properties));
-    Value::Object(component)
+    let licences = licences(meta);
+    if let Err(why) = &licences {
+        gap(why);
+    }
+
+    let mut component = json!({
+        "type": "library",
+        "bom-ref": reference,
+        "manufacturer": manufacturer,
+        "name": name,
+        "version": version,
+        "purl": reference,
+        "externalReferences": references(name, version, &hashes, meta),
+        "hashes": hashes,
+        "properties": properties,
+    });
+
+    if let (Ok(licences), Some(fields)) = (licences, component.as_object_mut()) {
+        fields.insert("licenses".into(), licences);
+    }
+
+    component
 }
 
 /// The `bom-ref` a lockfile dependency entry names, given the packages by
@@ -377,6 +394,64 @@ fn resolve(entry: &str, by_name: &BTreeMap<&str, Vec<&str>>) -> Option<String> {
     Some(purl(name, version))
 }
 
+/// The locked registry packages other than the analyzed crate as
+/// components, and the dependency graph of all of them.
+fn locked_components(
+    packages: &[Locked],
+    root_ref: &str,
+    files: &BTreeMap<Sha256Digest, FileFacts>,
+    gaps: &mut Vec<String>,
+) -> (Vec<Value>, Graph) {
+    let registry: Vec<&Locked> = packages.iter().filter(|p| p.checksum.is_some()).collect();
+    let mut by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for p in &registry {
+        by_name.entry(&p.name).or_default().push(&p.version);
+    }
+
+    let components = registry
+        .iter()
+        .filter(|p| purl(&p.name, &p.version) != root_ref)
+        .map(|p| {
+            let sha = p.checksum.as_ref();
+            let facts = sha.and_then(|s| files.get(s));
+            component(&p.name, &p.version, sha, facts, gaps)
+        })
+        .collect();
+
+    let mut graph = single(root_ref);
+    for p in &registry {
+        let targets = p.dependencies.iter().filter_map(|d| resolve(d, &by_name));
+        graph
+            .entry(purl(&p.name, &p.version))
+            .or_default()
+            .extend(targets);
+    }
+
+    (components, graph)
+}
+
+/// The components besides the analyzed crate, the dependency graph and
+/// whether it is complete.
+fn dependencies(
+    input: &SbomInput<'_>,
+    root_ref: &str,
+    gaps: &mut Vec<String>,
+) -> (Vec<Value>, Graph, &'static str) {
+    let Some(lockfile) = input.lockfile else {
+        gaps.push("cargo could not resolve the dependencies".to_owned());
+        return (Vec::new(), single(root_ref), "unknown");
+    };
+
+    let Some(packages) = locked(lockfile) else {
+        gaps.push("the lockfile does not parse".to_owned());
+        return (Vec::new(), single(root_ref), "unknown");
+    };
+
+    let (components, graph) = locked_components(&packages, root_ref, input.files, gaps);
+
+    (components, graph, "complete")
+}
+
 /// The SBOM of a crate version.
 #[must_use]
 pub fn sbom(input: &SbomInput<'_>) -> Sbom {
@@ -390,47 +465,7 @@ pub fn sbom(input: &SbomInput<'_>) -> Sbom {
         &mut gaps,
     );
 
-    let packages = input.lockfile.map(|text| locked(text).ok_or(()));
-    let (components, dependencies, aggregate) = match packages {
-        Some(Ok(packages)) => {
-            let registry: Vec<&Locked> = packages.iter().filter(|p| p.checksum.is_some()).collect();
-            let mut by_name: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-            for p in &registry {
-                by_name.entry(&p.name).or_default().push(&p.version);
-            }
-
-            let components: Vec<Value> = registry
-                .iter()
-                .filter(|p| purl(&p.name, &p.version) != root_ref)
-                .map(|p| {
-                    let sha = p.checksum.as_ref();
-                    let facts = sha.and_then(|s| input.files.get(s));
-                    component(&p.name, &p.version, sha, facts, &mut gaps)
-                })
-                .collect();
-
-            let mut graph: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-            graph.entry(root_ref.clone()).or_default();
-
-            for p in &registry {
-                let targets = p.dependencies.iter().filter_map(|d| resolve(d, &by_name));
-                graph
-                    .entry(purl(&p.name, &p.version))
-                    .or_default()
-                    .extend(targets);
-            }
-
-            (components, graph, "complete")
-        }
-        Some(Err(())) => {
-            gaps.push("the lockfile does not parse".to_owned());
-            (Vec::new(), single(&root_ref), "unknown")
-        }
-        None => {
-            gaps.push("cargo could not resolve the dependencies".to_owned());
-            (Vec::new(), single(&root_ref), "unknown")
-        }
-    };
+    let (components, dependencies, aggregate) = dependencies(input, &root_ref, &mut gaps);
 
     let all: Vec<&String> = dependencies.keys().collect();
     let serial = sbom_serial(&input.sha256, input.lockfile);
@@ -462,7 +497,7 @@ pub fn sbom(input: &SbomInput<'_>) -> Sbom {
 }
 
 /// A graph of only the analyzed crate, with unknown dependencies.
-fn single(root: &str) -> BTreeMap<String, BTreeSet<String>> {
+fn single(root: &str) -> Graph {
     BTreeMap::from([(root.to_owned(), BTreeSet::new())])
 }
 
@@ -542,6 +577,131 @@ fn severity(points: u32) -> &'static str {
     }
 }
 
+/// The link from a findings document into an SBOM component.
+fn bom_link((serial, version): (&str, i32), reference: &str) -> String {
+    format!(
+        "urn:cdx:{}/{version}#{reference}",
+        serial.trim_start_matches("urn:uuid:")
+    )
+}
+
+/// The versions of each registry package in a lockfile.
+fn locked_versions(lockfile: Option<&str>) -> BTreeMap<String, Vec<String>> {
+    let mut versions: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for p in lockfile.and_then(locked).unwrap_or_default() {
+        if p.checksum.is_some() {
+            versions.entry(p.name).or_default().push(p.version);
+        }
+    }
+
+    versions
+}
+
+/// The `bom-ref`s of the packages the evidence is about. Evidence of no
+/// package, or of one the lockfile lacks, is about the analyzed crate.
+fn affected(
+    evidence: &[&Evidence],
+    versions: &BTreeMap<String, Vec<String>>,
+    root: &str,
+) -> BTreeSet<String> {
+    evidence
+        .iter()
+        .flat_map(|e| match e.package.as_deref() {
+            Some(name) => versions
+                .get(name)
+                .map(|vs| vs.iter().map(|v| purl(name, v)).collect())
+                .unwrap_or_else(|| vec![root.to_owned()]),
+            None => vec![root.to_owned()],
+        })
+        .collect()
+}
+
+/// The properties of one entry: its signal and points, and where each
+/// piece of evidence came from.
+fn entry_properties(
+    signal: &str,
+    points: u32,
+    evidence: &[&Evidence],
+    honeytokens: &[String],
+) -> Vec<Value> {
+    let mut properties = vec![
+        json!({ "name": "crateward:signal", "value": signal }),
+        json!({ "name": "crateward:points", "value": points.to_string() }),
+    ];
+
+    for e in evidence {
+        properties.push(json!({ "name": "crateward:source", "value": e.source.name() }));
+
+        if let Some(location) = &e.location {
+            properties.push(json!({
+                "name": "crateward:location",
+                "value": redact(location, honeytokens),
+            }));
+        }
+    }
+
+    properties
+}
+
+/// The CycloneDX analysis state of a review.
+fn analysis_state(review: Review) -> &'static str {
+    match review {
+        Review::None | Review::Pending => "in_triage",
+        Review::Confirmed => "exploitable",
+        Review::FalsePositive => "false_positive",
+    }
+}
+
+/// The entry of one signal with points.
+fn vulnerability(
+    input: &VexInput<'_>,
+    signal: &str,
+    evidence: &[&Evidence],
+    versions: &BTreeMap<String, Vec<String>>,
+    root: &str,
+) -> Value {
+    let points: u32 = evidence.iter().map(|e| e.points).sum();
+    let affects: Vec<Value> = affected(evidence, versions, root)
+        .iter()
+        .map(|r| json!({ "ref": bom_link(input.sbom, r) }))
+        .collect();
+
+    let description = evidence
+        .iter()
+        .map(|e| redact(&e.summary, input.honeytokens))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let source_url = input
+        .finding_url
+        .map_or_else(|| format!("https://{DOMAIN}"), str::to_owned);
+
+    let id = format!("CW-{}-{signal}", input.job);
+    let mut entry = json!({
+        "bom-ref": id,
+        "id": id,
+        "source": { "name": "Crateward", "url": source_url },
+        "ratings": [{
+            "source": { "name": "Crateward" },
+            "severity": severity(points),
+            "method": "other",
+        }],
+        "description": description,
+        "affects": affects,
+        "analysis": { "state": analysis_state(input.review) },
+        "properties": entry_properties(signal, points, evidence, input.honeytokens),
+    });
+
+    let cwes = cwes(signal, input.review);
+    if !cwes.is_empty()
+        && let Some(entry) = entry.as_object_mut()
+    {
+        entry.insert("cwes".into(), json!(cwes));
+    }
+
+    entry
+}
+
 /// The findings document of a job: one vulnerability per signal that
 /// scored points, pointing at the responsible packages in the SBOM. A job
 /// without such evidence has an empty list and says in `metadata` what was
@@ -549,100 +709,18 @@ fn severity(points: u32) -> &'static str {
 #[must_use]
 pub fn vex(input: &VexInput<'_>) -> Value {
     let root = purl(input.name, input.version);
-    let (serial, sbom_version) = input.sbom;
-    let mut versions: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for p in input.lockfile.and_then(locked).unwrap_or_default() {
-        if p.checksum.is_some() {
-            versions.entry(p.name).or_default().push(p.version);
-        }
-    }
+    let versions = locked_versions(input.lockfile);
+    let verdict = input.verdict;
 
     let mut by_signal: BTreeMap<&str, Vec<&Evidence>> = BTreeMap::new();
-    for e in input.verdict.evidence.iter().filter(|e| e.points > 0) {
+    for e in verdict.evidence.iter().filter(|e| e.points > 0) {
         by_signal.entry(&e.signal).or_default().push(e);
     }
 
-    let link = |reference: &str| {
-        format!(
-            "urn:cdx:{}/{sbom_version}#{reference}",
-            serial.trim_start_matches("urn:uuid:")
-        )
-    };
-
-    let state = match input.review {
-        Review::None | Review::Pending => "in_triage",
-        Review::Confirmed => "exploitable",
-        Review::FalsePositive => "false_positive",
-    };
-
-    let source_url = input
-        .finding_url
-        .map_or_else(|| format!("https://{DOMAIN}"), str::to_owned);
-
     let vulnerabilities: Vec<Value> = by_signal
-        .into_iter()
-        .map(|(signal, evidence)| {
-            let points: u32 = evidence.iter().map(|e| e.points).sum();
-            let affects: BTreeSet<String> = evidence
-                .iter()
-                .flat_map(|e| match e.package.as_deref() {
-                    Some(name) => versions
-                        .get(name)
-                        .map(|vs| vs.iter().map(|v| purl(name, v)).collect())
-                        .unwrap_or_else(|| vec![root.clone()]),
-                    None => vec![root.clone()],
-                })
-                .collect();
-
-            let description = evidence
-                .iter()
-                .map(|e| redact(&e.summary, input.honeytokens))
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            let mut properties = vec![
-                json!({ "name": "crateward:signal", "value": signal }),
-                json!({ "name": "crateward:points", "value": points.to_string() }),
-            ];
-            for e in &evidence {
-                properties.push(json!({ "name": "crateward:source", "value": e.source.name() }));
-
-                if let Some(location) = &e.location {
-                    properties.push(json!({
-                        "name": "crateward:location",
-                        "value": redact(location, input.honeytokens),
-                    }));
-                }
-            }
-
-            let id = format!("CW-{}-{signal}", input.job);
-            let mut entry = json!({
-                "bom-ref": id,
-                "id": id,
-                "source": { "name": "Crateward", "url": source_url },
-                "ratings": [{
-                    "source": { "name": "Crateward" },
-                    "severity": severity(points),
-                    "method": "other",
-                }],
-                "description": description,
-                "affects": affects.iter().map(|r| json!({ "ref": link(r) })).collect::<Vec<_>>(),
-                "analysis": { "state": state },
-                "properties": properties,
-            });
-
-            let cwes = cwes(signal, input.review);
-            if !cwes.is_empty()
-                && let Some(entry) = entry.as_object_mut()
-            {
-                entry.insert("cwes".into(), json!(cwes));
-            }
-
-            entry
-        })
+        .iter()
+        .map(|(signal, evidence)| vulnerability(input, signal, evidence, &versions, &root))
         .collect();
-
-    let verdict = input.verdict;
 
     json!({
         "bomFormat": "CycloneDX",
@@ -661,7 +739,7 @@ pub fn vex(input: &VexInput<'_>) -> Value {
                 "purl": root,
             },
             "properties": [
-                { "name": "crateward:sbom", "value": link("").trim_end_matches('#') },
+                { "name": "crateward:sbom", "value": bom_link(input.sbom, "").trim_end_matches('#') },
                 { "name": "crateward:score", "value": verdict.score.to_string() },
                 { "name": "crateward:level", "value": verdict.level.name() },
                 { "name": "crateward:coverage", "value": input.coverage },

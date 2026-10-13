@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use crateward_core::blobs::BlobStore;
 use crateward_core::breaker::BreakerState;
+use crateward_core::bytes::unhex;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::Failure;
@@ -22,7 +23,7 @@ use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClo
 use crateward_core::store::{PauseReason, Policies, Store, StoreError, StoredJob, heartbeat};
 use serde::{Deserialize, Serialize};
 
-use crateward_fake_internet::server::{Event, EventKind, MAX_CAPTURE, MAX_EVENTS, unhex};
+use crateward_fake_internet::server::{Event, EventKind, MAX_CAPTURE, MAX_EVENTS};
 use crateward_fake_internet::sniff::Sniffed;
 
 use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
@@ -1086,8 +1087,8 @@ async fn make_scratch(mib: u64, path: &Path) -> Result<(), Failure> {
 mod tests {
     use super::*;
     use crate::firecracker::agent::RunOutcome;
+    use crateward_core::bytes::hex;
     use crateward_core::failure::FailureClass;
-    use crateward_fake_internet::server::hex;
 
     fn finished(exit: ExitStatus) -> JobEnd {
         JobEnd::Finished(RunOutcome {

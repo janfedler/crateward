@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::{Store, StoreError, digest_column};
-use crate::cyclonedx::{self, FileFacts, SbomInput};
+use crate::cyclonedx::{self, FileFacts, Sbom, SbomInput};
 use crate::digest::Sha256Digest;
 use crate::job::JobId;
 use crate::package::PackageMeta;
@@ -38,6 +38,21 @@ pub enum SbomOutcome {
         /// What TR-03183-2 asks for and the data lacks.
         gaps: Vec<String>,
     },
+}
+
+/// How many fields an SBOM lacks, as the `gaps` column stores it.
+fn gap_count(sbom: &Sbom) -> i32 {
+    i32::try_from(sbom.gaps.len()).unwrap_or(i32::MAX)
+}
+
+/// What a job's SBOM is made from.
+struct SbomSource {
+    name: String,
+    version: String,
+    sha256: Sha256Digest,
+    lockfile: Option<String>,
+    /// The database's clock, in seconds since the epoch.
+    now: i64,
 }
 
 impl Store {
@@ -104,6 +119,30 @@ impl Store {
         .transpose()
     }
 
+    /// What the SBOM of a job is made from, if the job was fetched.
+    async fn sbom_source(&self, job: JobId) -> Result<Option<SbomSource>, StoreError> {
+        let row = self
+            .client
+            .query_opt(
+                "SELECT j.crate_name, j.version, j.cksum, f.lockfile,
+                        extract(epoch FROM now())::bigint
+                 FROM jobs j JOIN job_fetches f ON f.job_id = j.id WHERE j.id = $1",
+                &[&job.0],
+            )
+            .await?;
+
+        row.map(|r| {
+            Ok(SbomSource {
+                name: r.try_get(0)?,
+                version: r.try_get(1)?,
+                sha256: digest_column(r.try_get(2)?)?,
+                lockfile: r.try_get(3)?,
+                now: r.try_get(4)?,
+            })
+        })
+        .transpose()
+    }
+
     /// Writes the SBOM of a job, unless a stored one is complete or the new
     /// one lacks as much. A replaced document keeps its serial number and
     /// gets the next version.
@@ -116,56 +155,28 @@ impl Store {
         job: JobId,
         tool_version: &str,
     ) -> Result<SbomOutcome, StoreError> {
-        let Some(row) = self
-            .client
-            .query_opt(
-                "SELECT j.crate_name, j.version, j.cksum, f.lockfile,
-                        extract(epoch FROM now())::bigint
-                 FROM jobs j JOIN job_fetches f ON f.job_id = j.id WHERE j.id = $1",
-                &[&job.0],
-            )
-            .await?
-        else {
+        let Some(source) = self.sbom_source(job).await? else {
             return Ok(SbomOutcome::NotFetched);
         };
 
-        let name: String = row.try_get(0)?;
-        let version: String = row.try_get(1)?;
-        let sha256 = digest_column(row.try_get(2)?)?;
-        let lockfile: Option<String> = row.try_get(3)?;
-        let now: i64 = row.try_get(4)?;
         let stored = self.job_sbom(job).await?;
         if stored.as_ref().is_some_and(|s| s.gaps == 0) {
             return Ok(SbomOutcome::Kept);
         }
 
-        let mut wanted = vec![sha256];
-        let locked = lockfile.as_deref().and_then(cyclonedx::locked);
-        wanted.extend(locked.iter().flatten().filter_map(|p| p.checksum));
-        let files = self.file_facts(&wanted).await?;
+        let mut sbom = self.build_sbom(&source, tool_version).await?;
+        let key = cyclonedx::lockfile_key(source.lockfile.as_deref());
+        let gaps = gap_count(&sbom);
 
-        let mut sbom = cyclonedx::sbom(&SbomInput {
-            name: &name,
-            version: &version,
-            sha256,
-            lockfile: lockfile.as_deref(),
-            files: &files,
-            timestamp: now,
-            tool_version,
-        });
-
-        let gaps = i32::try_from(sbom.gaps.len()).unwrap_or(i32::MAX);
         if stored.as_ref().is_some_and(|s| s.gaps <= gaps) {
             self.client
                 .execute(
                     "UPDATE sboms SET checked_at = now()
                      WHERE crate_sha256 = $1 AND lockfile_key = $2",
-                    &[
-                        &sha256.as_bytes().as_slice(),
-                        &cyclonedx::lockfile_key(lockfile.as_deref()).as_slice(),
-                    ],
+                    &[&source.sha256.as_bytes().as_slice(), &key.as_slice()],
                 )
                 .await?;
+
             return Ok(SbomOutcome::Kept);
         }
 
@@ -174,6 +185,47 @@ impl Store {
             document.insert("version".into(), next.into());
         }
 
+        self.write_sbom(&source.sha256, &key, &sbom, next).await?;
+
+        Ok(SbomOutcome::Written {
+            version: next,
+            gaps: sbom.gaps,
+        })
+    }
+
+    /// Builds the SBOM of a job from its lockfile and the facts of its
+    /// crate files.
+    async fn build_sbom(
+        &self,
+        source: &SbomSource,
+        tool_version: &str,
+    ) -> Result<Sbom, StoreError> {
+        let lockfile = source.lockfile.as_deref();
+        let locked = lockfile.and_then(cyclonedx::locked);
+        let mut wanted = vec![source.sha256];
+        wanted.extend(locked.iter().flatten().filter_map(|p| p.checksum));
+        let files = self.file_facts(&wanted).await?;
+
+        Ok(cyclonedx::sbom(&SbomInput {
+            name: &source.name,
+            version: &source.version,
+            sha256: source.sha256,
+            lockfile,
+            files: &files,
+            timestamp: source.now,
+            tool_version,
+        }))
+    }
+
+    /// Stores an SBOM, unless the stored one has no more gaps.
+    async fn write_sbom(
+        &self,
+        sha256: &Sha256Digest,
+        key: &[u8],
+        sbom: &Sbom,
+        version: i32,
+    ) -> Result<(), StoreError> {
+        let gaps = gap_count(sbom);
         self.client
             .execute(
                 "INSERT INTO sboms (crate_sha256, lockfile_key, serial, version, gaps, document)
@@ -184,19 +236,16 @@ impl Store {
                  WHERE sboms.gaps > $5",
                 &[
                     &sha256.as_bytes().as_slice(),
-                    &cyclonedx::lockfile_key(lockfile.as_deref()).as_slice(),
+                    &key,
                     &sbom.serial,
-                    &next,
+                    &version,
                     &gaps,
                     &sbom.document,
                 ],
             )
             .await?;
 
-        Ok(SbomOutcome::Written {
-            version: next,
-            gaps: sbom.gaps,
-        })
+        Ok(())
     }
 
     /// Finished jobs without an SBOM, the newest first, then jobs whose

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crateward_core::bytes::hex;
 use crateward_core::cratesio::download_url;
 use crateward_core::digest::Sha256Digest;
 use crateward_core::failure::Failure;
@@ -341,11 +342,7 @@ impl Fetcher {
             return Err(checksum_mismatch(name, version));
         }
 
-        let sha512 = sha512
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let sha512 = hex(&sha512.finalize());
 
         Ok(Some((bytes, sha512)))
     }

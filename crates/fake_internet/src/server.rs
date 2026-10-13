@@ -16,6 +16,8 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crateward_core::bytes::hex;
+
 use crate::dns;
 use crate::sniff::{Sniffed, content_length, http_header_end, sniff};
 
@@ -122,37 +124,6 @@ pub enum EventKind {
     PacketLimit,
     /// Events beyond [`MAX_EVENTS`] were not logged.
     Truncated,
-}
-
-/// Hex encoding of a byte slice.
-#[must_use]
-pub fn hex(data: &[u8]) -> String {
-    use std::fmt::Write as _;
-
-    let mut out = String::with_capacity(data.len() * 2);
-    for b in data {
-        let _ = write!(out, "{b:02x}");
-    }
-
-    out
-}
-
-/// Decodes [`hex`] output. Invalid input gives `None`.
-#[must_use]
-pub fn unhex(text: &str) -> Option<Vec<u8>> {
-    let (pairs, rest) = text.as_bytes().as_chunks::<2>();
-
-    if !rest.is_empty() {
-        return None;
-    }
-
-    pairs
-        .iter()
-        .map(|[a, b]| {
-            let digit = |c: u8| char::from(c).to_digit(16);
-            u8::try_from(digit(*a)? * 16 + digit(*b)?).ok()
-        })
-        .collect()
 }
 
 struct Log {
@@ -500,15 +471,6 @@ pub fn serve(
 mod tests {
     use super::*;
 
-    #[test]
-    fn hex_round_trips() {
-        let data = b"\x00\xffabc";
-
-        assert_eq!(unhex(&hex(data)).unwrap(), data);
-        assert!(unhex("abc").is_none());
-        assert!(unhex("zz").is_none());
-    }
-
     /// A shared buffer the test can read after the server wrote to it.
     #[derive(Clone, Default)]
     struct Sink(Arc<Mutex<Vec<u8>>>);
@@ -573,6 +535,10 @@ mod tests {
 
         assert!(matches!(sniffed, Sniffed::Http { .. }));
         assert_eq!(bytes, request.len() as u64);
-        assert!(unhex(&data).unwrap().ends_with(b"token"));
+        assert!(
+            crateward_core::bytes::unhex(&data)
+                .unwrap()
+                .ends_with(b"token")
+        );
     }
 }

@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crateward_core::bytes::hex;
 use crateward_core::child::ChildError;
 use crateward_core::config::{SandboxConfig, WarmConfig};
 use crateward_core::digest::Sha256Digest;
@@ -34,7 +35,6 @@ use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::paths::guest;
 use crateward_core::store::Store;
-use crateward_fake_internet::server::hex;
 
 use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
