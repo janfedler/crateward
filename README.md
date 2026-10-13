@@ -27,19 +27,6 @@ scores the risk with reasons that link to file, line and trace evidence.
 * **Runs unattended.** Retries, breakers, canaries and quarantine.
 * **Defense in depth.** Jails, seccomp, Landlock and fuzzing.
 
-## Screenshots
-
-The pages are the maintainer's dashboard on the production server, with
-real data. `monica_rand_core` is a malicious crate that Crateward caught and
-published a finding about.
-
-| | |
-|---|---|
-| ![The process tree of the VM run, where the build script of monica_rand_core starts the program it dropped](docs/images/job-run.png) | ![The comparison of monica_rand_core 0.10.3 with 0.10.2: which evidence and findings changed](docs/images/diff.png) |
-| The process tree of the VM run: the build script starts `/tmp/code-helper`, which it dropped. | The diff view: what changed since the previous version. |
-| ![The overview: over 150,000 crate versions analyzed, verdicts by level, stage breakers and canaries](docs/images/overview.png) | ![The jobs list filtered to critical verdicts, each confirmed or marked a false positive by review](docs/images/jobs.png) |
-| The overview of the pipeline. | Every critical verdict, confirmed or found a false positive by review. |
-
 ## How it works
 
 ```mermaid
