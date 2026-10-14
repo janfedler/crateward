@@ -125,6 +125,13 @@ cargo xtask soak --jobs 50  # sequential jailed jobs, then a check for leaks
 cargo xtask canary          # a crate that steals a honeytoken must be caught
 ```
 
+## How this was built
+
+Crateward was written with [Claude Code](https://claude.com/claude-code),
+which is why its commits name Claude as the author. Jan Fedler designed
+the architecture and the threat model, made the decisions in the ADRs,
+reviewed every change, and runs the server and its reviews.
+
 ## Documentation
 
 * [Architecture](docs/ARCHITECTURE.md) and [threat model](docs/THREAT_MODEL.md)
