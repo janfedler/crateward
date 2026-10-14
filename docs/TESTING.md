@@ -106,6 +106,11 @@ runs, in this order:
    ([Conventional Commits](../CONTRIBUTING.md#commits))
 9. `cargo deny` for both lockfiles, `cargo audit` and `cargo vet`
 
+Neither `cargo xtask ci` nor GitHub CI runs the microVM tests (the
+Firecracker, canary and soak tests). They need KVM, the guest images and a
+delegated cgroup, and run on the server before a release, so CI does not
+cover the code that only runs with a real VM.
+
 GitHub CI runs the same checks except the fuzz type check, which is too
 slow there. It also runs `cargo xtask deploy-check`, which needs
 `ansible-playbook`, `systemd-analyze`, `nft` and `unshare` on the host.

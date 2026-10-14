@@ -42,6 +42,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
+  # The microVM tests (Firecracker, canary, soak) need KVM and run on the
+  # server, not here. See docs/TESTING.md.
   test:
     name: tests
     runs-on: ubuntu-24.04
