@@ -1,8 +1,12 @@
 /* The public site, on the tokens of brand.css. */
-body { font-size: 16px; line-height: 1.7; background: var(--bg-deep); }
+body { font-size: 16px; line-height: 1.7; }
 main { max-width: 760px; margin: 0 auto; padding: 4.5rem 1.25rem 4rem; }
-h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 8vw, 72px); line-height: 1.05;
-     letter-spacing: -.01em; margin: 0 0 1.5rem; }
+/* Page titles as the dashboard has them. Only the site's own name takes the
+   display face, a crate name on a finding page stays in the body face. */
+h1 { font-size: clamp(30px, 5vw, 40px); font-weight: 600; line-height: 1.15; letter-spacing: -.01em;
+     margin: 0 0 1.5rem; }
+h1.display { font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 8vw, 72px);
+             line-height: 1.05; }
 h1 + p { font-size: 17px; }
 /* Section labels, as the design system has them. */
 h2 { font-size: 11px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase;

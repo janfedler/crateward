@@ -5,7 +5,7 @@ body { font-size: 14px; line-height: 1.55; --header: 3.5rem; }
 header { position: sticky; top: 0; z-index: 10; display: flex; gap: .25rem; align-items: center;
          box-sizing: border-box; height: var(--header);
          flex-wrap: wrap; padding: .6rem 1.5rem; border-bottom: 1px solid var(--border-default);
-         background: oklch(15% 0.012 265 / 0.88); backdrop-filter: blur(12px); }
+         background: color-mix(in oklch, var(--bg-base) 88%, transparent); backdrop-filter: blur(12px); }
 header a { color: var(--fg-secondary); text-decoration: none; font-size: 11px; font-weight: 600;
            letter-spacing: .09em; text-transform: uppercase; padding: 6px 14px; border-radius: var(--radius-base);
            transition: color var(--ease), background var(--ease); }
@@ -193,7 +193,7 @@ input[type="checkbox"] { accent-color: var(--accent); padding: 0; }
 
 .toc { position: sticky; top: var(--header); z-index: 5; display: flex; gap: .25rem; overflow-x: auto;
        margin: 1.25rem -1.5rem 0; padding: .45rem 1.5rem; border-bottom: 1px solid var(--border-default);
-       background: oklch(15% 0.012 265 / 0.92); backdrop-filter: blur(12px); scrollbar-width: none; }
+       background: color-mix(in oklch, var(--bg-base) 92%, transparent); backdrop-filter: blur(12px); scrollbar-width: none; }
 .toc a { flex: none; padding: 4px 10px; border-radius: var(--radius-base); color: var(--fg-secondary);
          text-decoration: none; font-size: 13px; white-space: nowrap; }
 .toc a:hover { color: var(--fg-primary); background: var(--bg-overlay); }
