@@ -387,15 +387,9 @@ async fn an_unreadable_package_list_counts_as_empty() {
     lab.finish().await;
 }
 
-/// Earlier versions, statistics and tracked jobs decide which dependencies
-/// with build time code are unfamiliar, and the newest earlier version is
-/// the diff base.
-#[tokio::test]
-async fn familiar_dependencies_and_the_diff_base() {
-    let Some(lab) = Lab::start().await else {
-        return;
-    };
-
+/// What the store knows before `app` 2.0.0: earlier versions with their
+/// lockfiles, crate statistics and tracked jobs.
+async fn seed_history(lab: &Lab) {
     // Earlier versions. Only 1.0.0 and 1.5.0 count, and 1.5.0 is the base.
     let first = lab.analyzed("app", "1.0.0", false).await;
     lab.lock(
@@ -423,6 +417,18 @@ async fn familiar_dependencies_and_the_diff_base() {
     lab.job("tracked", "1.0.0").await;
     lab.job("wrong", "1.0.0").await;
     lab.analyzed("plain-dep", "1.0.0", false).await;
+}
+
+/// Earlier versions, statistics and tracked jobs decide which dependencies
+/// with build time code are unfamiliar, and the newest earlier version is
+/// the diff base.
+#[tokio::test]
+async fn familiar_dependencies_and_the_diff_base() {
+    let Some(lab) = Lab::start().await else {
+        return;
+    };
+
+    seed_history(&lab).await;
 
     let tar = tar_of("app", "2.0.0", true);
     let job = lab.publish("app", "2.0.0", &tar).await;

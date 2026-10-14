@@ -139,6 +139,46 @@ fn client() -> PoliteClient {
     .unwrap()
 }
 
+/// The feeds and index files of the first poll: a new crate with a native
+/// link, an update of a popular crate, one the CDN has not caught up with,
+/// and an invalid name.
+fn serve_first_poll(state: &Shared, base: &str) {
+    let mut s = state.lock().unwrap();
+    s.files.insert(
+        "/index/config.json".into(),
+        format!(r#"{{"dl":"{base}/crates"}}"#),
+    );
+    s.files
+        .insert("/rss/crates.xml".into(), rss(&[("brand-new", "")]));
+    s.files.insert(
+        "/rss/updates.xml".into(),
+        rss(&[
+            ("brand-new", "0.1.0"),
+            ("Popular", "2.0.0"),
+            ("lagging", "1.1.0"),
+            ("../evil", "1.0.0"),
+        ]),
+    );
+    s.files.insert(
+        "/index/br/an/brand-new".into(),
+        index_line("brand-new", "0.1.0", r#","links":"z""#),
+    );
+    s.files.insert(
+        "/index/po/pu/popular".into(),
+        format!(
+            "{}\n{}\n",
+            index_line("Popular", "1.0.0", ""),
+            index_line("Popular", "2.0.0", "")
+        ),
+    );
+
+    // The CDN has not caught up with 1.1.0 yet.
+    s.files.insert(
+        "/index/la/gg/lagging".into(),
+        index_line("lagging", "1.0.0", ""),
+    );
+}
+
 #[tokio::test]
 async fn new_versions_become_prioritized_jobs_exactly_once() {
     let Some(db) = TestDb::new("feed").await else {
@@ -148,42 +188,7 @@ async fn new_versions_become_prioritized_jobs_exactly_once() {
     let store = db.migrated().await;
     let state: Shared = Arc::default();
     let base = start_mock(Arc::clone(&state)).await;
-    {
-        let mut s = state.lock().unwrap();
-        s.files.insert(
-            "/index/config.json".into(),
-            format!(r#"{{"dl":"{base}/crates"}}"#),
-        );
-        s.files
-            .insert("/rss/crates.xml".into(), rss(&[("brand-new", "")]));
-        s.files.insert(
-            "/rss/updates.xml".into(),
-            rss(&[
-                ("brand-new", "0.1.0"),
-                ("Popular", "2.0.0"),
-                ("lagging", "1.1.0"),
-                ("../evil", "1.0.0"),
-            ]),
-        );
-        s.files.insert(
-            "/index/br/an/brand-new".into(),
-            index_line("brand-new", "0.1.0", r#","links":"z""#),
-        );
-        s.files.insert(
-            "/index/po/pu/popular".into(),
-            format!(
-                "{}\n{}\n",
-                index_line("Popular", "1.0.0", ""),
-                index_line("Popular", "2.0.0", "")
-            ),
-        );
-
-        // The CDN has not caught up with 1.1.0 yet.
-        s.files.insert(
-            "/index/la/gg/lagging".into(),
-            index_line("lagging", "1.0.0", ""),
-        );
-    }
+    serve_first_poll(&state, &base);
 
     let urls = Urls {
         rss_updates: format!("{base}/rss/updates.xml"),

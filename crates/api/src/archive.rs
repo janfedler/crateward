@@ -25,7 +25,8 @@ use crateward_core::text::redact;
 
 use crate::diff::counterpart;
 use crate::export::format_utc;
-use crate::{FONTS, diff_page, job_page, sbom, sbom_href, vex_href};
+use crate::job_detail::{job_page, sbom_href, vex_href};
+use crate::{FONTS, diff_page, sbom};
 
 /// The file that marks a directory as an archive, so writing again may
 /// replace it.

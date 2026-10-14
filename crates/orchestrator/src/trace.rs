@@ -423,9 +423,9 @@ mod tests {
         assert!(!tamper_entry("ptrace x").is_read_check());
     }
 
-    #[test]
-    fn every_event_kind_lands_in_the_summary() {
-        let mut b = TraceBuilder::default();
+    /// One event of every kind, with the path of the AWS credentials it
+    /// opens.
+    fn every_event_kind() -> (Vec<TraceEvent>, String) {
         let open = |ms: u32, path: &str, flags: u32| {
             event(
                 2,
@@ -453,7 +453,7 @@ mod tests {
 
         let ip = |text: &str| SocketAddress::Ip(text.parse().unwrap());
         let aws = format!("{HOME}/.aws/credentials");
-        let events = [
+        let events = vec![
             event(1, 0, 0, TraceKind::Fork { child: 2 }),
             exec(2, "/usr/bin/curl", &["curl", "-d", "x"]),
             open(2, &aws, 0),
@@ -498,6 +498,13 @@ mod tests {
             event(99, BUILDER_UID, 10, TraceKind::Exit { code: 0 }),
         ];
 
+        (events, aws)
+    }
+
+    #[test]
+    fn every_event_kind_lands_in_the_summary() {
+        let (events, aws) = every_event_kind();
+        let mut b = TraceBuilder::default();
         for event in &events {
             b.add(event);
         }

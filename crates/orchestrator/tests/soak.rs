@@ -19,7 +19,12 @@
 //! It also ends one job through the host side wall clock and checks that
 //! reconciliation removes a slot left behind by a simulated crash.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
 mod common;
 
@@ -112,6 +117,56 @@ fn percentile(sorted: &[Duration], p: usize) -> Duration {
     sorted[(sorted.len() - 1) * p / 100]
 }
 
+/// The jail setup of the soak test.
+fn soak_config(slots_dir: &Path) -> FirecrackerConfig {
+    FirecrackerConfig {
+        firecracker: root().join(build::FIRECRACKER),
+        launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
+        slots_dir: slots_dir.to_path_buf(),
+        slots: SLOTS,
+        uid_base: 160_010,
+        gid_base: 160_010,
+        limits: SlotLimits {
+            cpus: 1,
+            memory_mib: 512 + 256,
+            pids: 64,
+        },
+        max_file_size: 1 << 30,
+        fake_internet: None,
+        authority: None,
+    }
+}
+
+/// Runs `jobs` jobs across the slots and returns their restore and run times.
+async fn run_jobs(backend: &FirecrackerBackend, jobs: usize) -> (Vec<Duration>, Vec<Duration>) {
+    let mut restores = Vec::with_capacity(jobs);
+    let mut runs = Vec::with_capacity(jobs);
+
+    for i in 0..jobs {
+        let slot = u32::try_from(i).unwrap() % SLOTS;
+        let run = backend
+            .run_job(
+                slot,
+                job("head -c 8388608 /dev/urandom > /tmp/blob && sha256sum /tmp/blob | cut -c1-8"),
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap();
+        match &run.end {
+            JobEnd::Finished(outcome) => {
+                assert_eq!(outcome.exit, ExitStatus::Code(0), "job {i}: {outcome:?}");
+                assert_eq!(outcome.stdout.len(), 9, "job {i}: {outcome:?}");
+            }
+            other => panic!("job {i} ended with {other:?}"),
+        }
+
+        restores.push(run.restore);
+        runs.push(run.run);
+    }
+
+    (restores, runs)
+}
+
 #[tokio::test]
 #[ignore = "run through `cargo xtask soak`"]
 async fn sequential_jobs_leave_nothing_behind() {
@@ -138,22 +193,7 @@ async fn sequential_jobs_leave_nothing_behind() {
         network: false,
     };
 
-    let config = FirecrackerConfig {
-        firecracker: root().join(build::FIRECRACKER),
-        launcher: PathBuf::from(env!("CARGO_BIN_EXE_crateward-vmjail")),
-        slots_dir: slots_dir.clone(),
-        slots: SLOTS,
-        uid_base: 160_010,
-        gid_base: 160_010,
-        limits: SlotLimits {
-            cpus: 1,
-            memory_mib: 512 + 256,
-            pids: 64,
-        },
-        max_file_size: 1 << 30,
-        fake_internet: None,
-        authority: None,
-    };
+    let config = soak_config(&slots_dir);
 
     let cgroups = CgroupTree::own().expect("run through `cargo xtask soak` for a delegated cgroup");
 
@@ -191,32 +231,8 @@ async fn sequential_jobs_leave_nothing_behind() {
     let rss = rss_kib();
     let links = host_links();
 
-    let mut restores = Vec::with_capacity(jobs);
-    let mut runs = Vec::with_capacity(jobs);
     let started = Instant::now();
-
-    for i in 0..jobs {
-        let slot = u32::try_from(i).unwrap() % SLOTS;
-        let run = backend
-            .run_job(
-                slot,
-                job("head -c 8388608 /dev/urandom > /tmp/blob && sha256sum /tmp/blob | cut -c1-8"),
-                Duration::from_secs(30),
-            )
-            .await
-            .unwrap();
-        match &run.end {
-            JobEnd::Finished(outcome) => {
-                assert_eq!(outcome.exit, ExitStatus::Code(0), "job {i}: {outcome:?}");
-                assert_eq!(outcome.stdout.len(), 9, "job {i}: {outcome:?}");
-            }
-            other => panic!("job {i} ended with {other:?}"),
-        }
-
-        restores.push(run.restore);
-        runs.push(run.run);
-    }
-
+    let (mut restores, mut runs) = run_jobs(&backend, jobs).await;
     let total = started.elapsed();
 
     // The host side wall clock ends a job that would run for a minute.
