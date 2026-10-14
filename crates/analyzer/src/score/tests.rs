@@ -48,6 +48,7 @@ fn inputs<'a>(runs: &'a [RunReport]) -> Inputs<'a> {
         diff: None,
         runs,
         previous_profile: None,
+        dismissed: &[],
     }
 }
 
@@ -80,6 +81,47 @@ fn theft_is_critical_and_attributed() {
     assert_eq!(read.package.as_deref(), Some("evil"));
     assert!(v.profile.contains(&"read:cargo-credentials".to_owned()));
     assert!(!should_escalate(&v));
+}
+
+/// The same leak a reviewer dismissed in an earlier version scores
+/// nothing, wherever the line moved. A new leak still counts.
+#[test]
+fn evidence_a_reviewer_dismissed_scores_nothing_again() {
+    let leak = |via: &str| json!({"kind": "github_token", "via": via});
+    let runs = [run(json!({"leaked": [leak("https://api.github.com")]}))];
+    let earlier = score(&inputs(&runs));
+
+    assert_eq!(earlier.level, RiskLevel::Critical);
+
+    let mut moved = earlier.evidence.clone();
+    moved[0].location = moved[0].location.as_ref().map(|l| format!("{l}:12"));
+    let dismissed = [("2.41.0".to_owned(), moved)];
+    let mut again = inputs(&runs);
+    again.dismissed = &dismissed;
+    let v = score(&again);
+
+    assert_eq!(v.score, 0);
+    assert_eq!(v.level, RiskLevel::None);
+    assert!(
+        v.evidence[0]
+            .summary
+            .ends_with("A reviewer marked this a false positive in 2.41.0.")
+    );
+
+    let runs = [run(json!({"leaked": [
+        leak("https://api.github.com"),
+        leak("http://exfil.example"),
+    ]}))];
+
+    let mut new = inputs(&runs);
+    new.dismissed = &dismissed;
+    let v = score(&new);
+
+    assert_eq!(v.level, RiskLevel::Critical);
+    assert_eq!(
+        v.evidence[0].location.as_deref(),
+        Some("http://exfil.example")
+    );
 }
 
 /// A scan of the scratch disk that found the given environment dumps,

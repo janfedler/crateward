@@ -202,6 +202,7 @@ impl Analyzer {
 
         let canonical = job.name.to_ascii_lowercase().replace('-', "_");
         let previous = self.store.previous_profile(&canonical, &version).await?;
+        let dismissed = self.store.dismissed_evidence(&canonical, &version).await?;
 
         Ok(score(&Inputs {
             name: &job.name,
@@ -210,6 +211,7 @@ impl Analyzer {
             diff: diff.as_ref(),
             runs: &runs,
             previous_profile: previous.as_deref(),
+            dismissed: &dismissed,
         }))
     }
 

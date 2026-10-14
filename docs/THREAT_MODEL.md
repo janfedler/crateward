@@ -175,6 +175,10 @@ forge them. It cannot reach the server or read undisclosed findings.
 * A crate that detects the sandbox (VM artifacts, fake network, fresh uptime,
   snapshot clock skew) can stay dormant. Host side ground truth limits what
   an active crate can hide, not what a dormant crate never does.
+* A crate whose behavior a reviewer marked as a false positive can repeat
+  exactly that behavior in later versions without scoring, for example a
+  token sent to the same host. New behavior still scores, and the dismissed
+  evidence stays on the job page ([ADR 0009](adr/0009-scoring-and-dashboard.md)).
 * A zero day in KVM or the Firecracker device model could escape the VM. The
   rootless jail, seccomp and the unprivileged, air gapped slot namespace limit what
   such an escape reaches, but do not make it impossible.

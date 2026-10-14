@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::{Store, StoreError};
 use crate::job::JobId;
-use crate::verdict::{STATIC_ANALYZER_VERSION, Verdict};
+use crate::verdict::{Evidence, STATIC_ANALYZER_VERSION, Verdict};
 
 /// Where a verdict stands in the "needs you" inbox.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,6 +237,52 @@ impl Store {
             .await?;
 
         rows.iter().map(super::stored).collect()
+    }
+
+    /// The evidence of earlier versions of the crate that a reviewer marked
+    /// as a false positive, each with its version, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Fails on database errors.
+    pub async fn dismissed_evidence(
+        &self,
+        canonical_name: &str,
+        version: &semver::Version,
+    ) -> Result<Vec<(String, Vec<Evidence>)>, StoreError> {
+        let rows = self
+            .client
+            .query(
+                "SELECT j.version, v.verdict->'evidence' FROM verdicts v
+                 JOIN jobs j ON j.id = v.job_id
+                 WHERE j.canonical_name = $1 AND v.review = 'false_positive'",
+                &[&canonical_name],
+            )
+            .await?;
+
+        let mut dismissed = Vec::new();
+
+        for row in rows {
+            let text: String = row.try_get(0)?;
+            let Ok(other) = semver::Version::parse(&text) else {
+                continue;
+            };
+
+            let Ok(evidence) = serde_json::from_value(row.try_get(1)?) else {
+                continue;
+            };
+
+            if other < *version {
+                dismissed.push((other, text, evidence));
+            }
+        }
+
+        dismissed.sort_by(|a, b| b.0.cmp(&a.0));
+
+        Ok(dismissed
+            .into_iter()
+            .map(|(_, text, e)| (text, e))
+            .collect())
     }
 
     /// The behavior profile of the newest scored version of the crate

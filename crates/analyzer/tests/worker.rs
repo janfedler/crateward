@@ -17,16 +17,20 @@ use crateward_core::verdict::{
     Coverage, Evidence, EvidenceSource, RiskLevel, STATIC_ANALYZER_VERSION, StaticOnlyReason,
     Verdict,
 };
+use std::collections::BTreeMap;
+
+use crateward_core::report::findings::{CodeContext, Finding, FindingKind, Platform, Severity};
+use crateward_core::report::static_report::{ManifestFacts, StaticReport};
 use serde_json::{Value, json};
 
 const LEASE: Duration = Duration::from_secs(30);
 
-/// A static only job of `name`, moved through `events` after the fetch and
-/// static analysis.
+/// A static only job of `name` at version `0.<n>.0`, moved through
+/// `events` after the fetch and static analysis.
 async fn job(store: &mut Store, name: &str, n: u8, events: &[(Stage, JobEvent)]) -> JobId {
     let new = NewJob {
         name: name.parse().unwrap(),
-        version: "0.1.0".parse().unwrap(),
+        version: format!("0.{n}.0").parse().unwrap(),
         cksum: format!("{n:02x}").repeat(32).parse().unwrap(),
         published_at: None,
         priority: 0,
@@ -244,6 +248,67 @@ async fn the_sweep_writes_missing_sboms_then_pauses() {
     let later = job(&mut store, "later", 7, &finished()).await;
     assert_eq!(analyzer.refresh_sboms().await.unwrap(), 0);
     assert!(store.job_sbom(later).await.unwrap().is_none());
+
+    db.drop().await;
+}
+
+/// A static report with one high finding in the build script.
+fn exfiltrating() -> Value {
+    let finding = Finding {
+        kind: FindingKind::ExfiltrationEndpoint,
+        severity: Severity::High,
+        file: "build.rs".to_owned(),
+        line: Some(12),
+        context: CodeContext::BuildScript,
+        cfg: None,
+        platform: Platform::Any,
+        evidence: "discord.com/api/webhooks".to_owned(),
+    };
+
+    serde_json::to_value(StaticReport {
+        analyzer_version: STATIC_ANALYZER_VERSION,
+        manifest: ManifestFacts::default(),
+        files: 2,
+        rust_files: 1,
+        skipped: Vec::new(),
+        findings: vec![finding],
+        findings_dropped: 0,
+        library_platform: Platform::Any,
+        platforms: BTreeMap::new(),
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_dismissed_finding_scores_nothing_in_the_next_version() {
+    let Some(db) = TestDb::new("analyzer_dismissed").await else {
+        return;
+    };
+
+    let (mut analyzer, mut store) = analyzer(&db).await;
+    let first = job(&mut store, "hooked", 8, &[]).await;
+    report(&store, 8, &exfiltrating()).await;
+    analyzer.analyze_once().await.unwrap();
+
+    let (scored, _) = store.verdict(first).await.unwrap().unwrap();
+    assert!(scored.score > 0);
+
+    store
+        .set_review(first, Review::FalsePositive, None)
+        .await
+        .unwrap();
+
+    let next = job(&mut store, "hooked", 9, &[]).await;
+    report(&store, 9, &exfiltrating()).await;
+    analyzer.analyze_once().await.unwrap();
+
+    let (rescored, _) = store.verdict(next).await.unwrap().unwrap();
+    assert_eq!(rescored.score, 0);
+    assert!(
+        rescored.evidence[0]
+            .summary
+            .ends_with("false positive in 0.8.0.")
+    );
 
     db.drop().await;
 }

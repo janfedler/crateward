@@ -39,12 +39,17 @@ the one person who can act on it.
 4. **Review inbox.** High and critical verdicts wait for a human, who marks
    them confirmed or a false positive. A high verdict from `cargo check`
    gets one confirmation run with `cargo build` and fresh honeytokens.
-5. **Dashboard:** server rendered HTML (askama, escaping at compile time)
+5. **Dismissed evidence stays dismissed.** Evidence of a later version that
+   matches evidence of an earlier version marked as a false positive keeps
+   its row with no points and names that version. It matches by signal,
+   package and place, without unit hashes and line numbers. Evidence the
+   earlier version did not have still counts.
+6. **Dashboard:** server rendered HTML (askama, escaping at compile time)
    with vendored htmx and server sent events, on loopback only, reached
    through an SSH tunnel. A `Host` check, same origin checks for writes, a
    strict Content Security Policy and read only page queries. The only
    writes are a review decision and the burst mode switch.
-6. **Public site:** a static export of counts only. Findings reach it by
+7. **Public site:** a static export of counts only. Findings reach it by
    hand, after disclosure.
 
 ## Alternatives
@@ -55,6 +60,13 @@ the one person who can act on it.
   That was 44 of the first 104 high and critical verdicts. A copy that
   comes with the rest of the environment counts as a dump, and what such a
   build does next (running a program it wrote, sending the token) decides.
+* **Review every version again:** in the first two weeks, 36 of the 39 high
+  and critical verdicts were false positives, most of them repeats of the
+  same crate, such as five critical releases of one crate whose build
+  script sends its `GITHUB_TOKEN` to `api.github.com`. Allowing that
+  destination in general would be wrong, since gists are a known
+  exfiltration channel. The reviewer's decision about one crate is the
+  narrower rule.
 * **Count every finding instance:** large crates reached medium by volume
   alone (108 medium verdicts in the first live run).
 * **A single page app with a JSON API:** an npm dependency tree in the
@@ -67,6 +79,10 @@ the one person who can act on it.
 
 * Every point of a score links to its evidence and its package, so a
   malicious dependency is named as such.
+* A crate that passed review once can repeat the dismissed behavior
+  unnoticed, for example sending a token to the same host. Anything new
+  around it still scores, and the dismissed rows stay visible on the job
+  page.
 * Library code weighs little: code that runs only when a library is called
   is out of reach of build time analysis, though static analysis lists it.
 * Verdicts carry the analyzer version and are recomputed when it changes,

@@ -56,6 +56,9 @@ pub struct Inputs<'a> {
     pub runs: &'a [RunReport],
     /// The previous analyzed version's behavior profile.
     pub previous_profile: Option<&'a [String]>,
+    /// Evidence of earlier versions that a reviewer marked as a false
+    /// positive, with their versions, newest first.
+    pub dismissed: &'a [(String, Vec<Evidence>)],
 }
 
 /// The processes of a run by pid.
@@ -178,6 +181,44 @@ fn without_unit_hash(path: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// What makes two pieces of evidence the same finding across versions: the
+/// signal, the package, and the place without unit hashes and line numbers,
+/// which change with every build and edit.
+fn fingerprint(e: &Evidence) -> (&str, Option<&str>, Option<String>) {
+    let place = e.location.as_deref().map(|l| {
+        let l = without_unit_hash(l);
+        match l.rsplit_once(':') {
+            Some((file, line)) if !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) => {
+                file.to_owned()
+            }
+            _ => l,
+        }
+    });
+
+    (e.signal.as_str(), e.package.as_deref(), place)
+}
+
+/// Evidence that a reviewer already marked as a false positive in an
+/// earlier version keeps its row but no points, so the same behavior does
+/// not raise the same alert with every release. New evidence still counts.
+fn dismiss(groups: &mut Groups, dismissed: &[(String, Vec<Evidence>)]) {
+    for (_, evidence) in &mut groups.items {
+        let print = fingerprint(evidence);
+        let Some((version, _)) = dismissed
+            .iter()
+            .find(|(_, earlier)| earlier.iter().any(|d| fingerprint(d) == print))
+        else {
+            continue;
+        };
+
+        evidence.points = 0;
+        evidence.summary = format!(
+            "{} A reviewer marked this a false positive in {version}.",
+            evidence.summary
+        );
+    }
 }
 
 /// `<package>` from a path inside a build script's directory,
@@ -938,6 +979,7 @@ pub fn score(inputs: &Inputs<'_>) -> Verdict {
         );
     }
 
+    dismiss(&mut groups, inputs.dismissed);
     let (score, evidence) = groups.finish();
 
     Verdict {
