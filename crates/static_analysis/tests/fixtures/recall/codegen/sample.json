@@ -1,0 +1,6 @@
+{
+  "technique": "A build script generates code into its build output.",
+  "after": "the most common legitimate use of build scripts",
+  "max": "low",
+  "run": {}
+}

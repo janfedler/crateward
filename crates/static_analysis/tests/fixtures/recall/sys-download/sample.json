@@ -1,0 +1,16 @@
+{
+  "technique": "A -sys crate's build script downloads a prebuilt library from its releases.",
+  "after": "a common, legitimate pattern of -sys crates",
+  "max": "medium",
+  "run": {
+    "network": {"dns": ["github.com"], "connections": [
+        {"dst": "10.0.2.1:443", "protocol": "tls", "sni": "github.com", "bytes": 517}],
+      "udp_datagrams": 0, "refused": 0, "truncated": false},
+    "trace": {
+      "processes": [
+        {"pid": 3, "ppid": 2, "exe": "/usr/bin/curl", "argv": ["curl", "-sL"],
+         "role": "other", "started_ms": 20, "became_root": false}
+      ]
+    }
+  }
+}

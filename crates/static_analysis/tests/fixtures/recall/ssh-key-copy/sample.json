@@ -1,0 +1,15 @@
+{
+  "technique": "The build script copies the SSH key into its build output.",
+  "after": "the staging step of credential stealers",
+  "min": "critical",
+  "run": {
+    "tokens_on_disk": [
+      {"kind": "ssh_private_key", "via": "/work/target/debug/build/recall-ssh-key-copy-0123456789abcdef/out/data.bin"}
+    ],
+    "trace": {
+      "sensitive_opens": [
+        {"pid": 2, "exe": "$SCRIPT", "path": "/work/home/.ssh/id_ed25519", "flags": 0, "ms": 5}
+      ]
+    }
+  }
+}

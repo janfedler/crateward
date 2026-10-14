@@ -1,0 +1,7 @@
+{
+  "technique": "Library code downloads and runs a second stage when it sees a CI runner.",
+  "after": "rustdecimal (2022)",
+  "min": "none",
+  "gap": "Library code runs only when a dependent calls it, so the build shows nothing, and static analysis scores process spawns and network calls in library code at no points.",
+  "run": {}
+}

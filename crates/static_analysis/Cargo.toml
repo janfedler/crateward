@@ -29,6 +29,8 @@ toml.workspace = true
 yara-x.workspace = true
 
 [dev-dependencies]
+# Scores the recall corpus. The analyzer links only core.
+crateward_analyzer.workspace = true
 crateward_core = { workspace = true, features = ["testing"] }
 
 [lints]

@@ -1032,6 +1032,7 @@ dependencies = [
 name = "crateward_static_analysis"
 version = "0.1.0"
 dependencies = [
+ "crateward_analyzer",
  "crateward_core",
  "proc-macro2",
  "secrecy",

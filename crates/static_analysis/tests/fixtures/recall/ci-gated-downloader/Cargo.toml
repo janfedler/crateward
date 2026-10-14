@@ -1,0 +1,4 @@
+[package]
+name = "recall-ci-gated-downloader"
+version = "0.1.0"
+edition = "2021"

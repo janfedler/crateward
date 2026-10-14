@@ -1,0 +1,7 @@
+{
+  "technique": "Library code scans source files for private keys and posts them.",
+  "after": "faster_log and async_println (2025)",
+  "min": "none",
+  "gap": "Library code runs only when a dependent calls it, so the build shows nothing, and static analysis scores process spawns and network calls in library code at no points.",
+  "run": {}
+}

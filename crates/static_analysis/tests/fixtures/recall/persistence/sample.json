@@ -1,0 +1,19 @@
+{
+  "technique": "The build script adds itself to the shell profile and to autostart.",
+  "after": "the persistence step of developer machine stealers",
+  "min": "high",
+  "run": {
+    "trace": {
+      "writes_outside_work": [
+        {"pid": 2, "exe": "$SCRIPT", "path": "/work/home/.bashrc", "flags": 1025, "ms": 5},
+        {"pid": 2, "exe": "$SCRIPT", "path": "/work/home/.config/autostart/recall.desktop", "flags": 577, "ms": 6}
+      ]
+    },
+    "scratch": {"files": 2, "directories": 2, "bytes": 30, "incomplete": false,
+      "outside_build": [
+        {"path": "/work/home/.config/autostart/recall.desktop", "kind": "file", "size": 16, "mode": 420, "uid": 1000}
+      ],
+      "executables_outside_target": [], "setid": [], "special": [], "links_outside": [],
+      "planted_changed": [], "tokens_found": [], "omitted": 0}
+  }
+}

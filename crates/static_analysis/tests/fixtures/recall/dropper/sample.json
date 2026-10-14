@@ -1,0 +1,16 @@
+{
+  "technique": "The build script writes an executable into /tmp and runs it.",
+  "after": "monica_rand_core 0.10.1 to 0.10.3 (2026, found by Crateward)",
+  "min": "high",
+  "run": {
+    "trace": {
+      "processes": [
+        {"pid": 3, "ppid": 2, "exe": "/tmp/code-helper", "argv": ["/tmp/code-helper"],
+         "role": "other", "started_ms": 40, "became_root": false}
+      ],
+      "writes_outside_work": [
+        {"pid": 2, "exe": "$SCRIPT", "path": "/tmp/code-helper", "flags": 577, "ms": 30}
+      ]
+    }
+  }
+}

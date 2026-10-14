@@ -1,0 +1,20 @@
+{
+  "technique": "The build script reads the cargo registry token and posts it.",
+  "after": "the common stealer pattern of token stealing crates",
+  "min": "critical",
+  "run": {
+    "leaked": [{"kind": "cargo_registry_token", "via": "http://collect.recall.invalid"}],
+    "network": {"dns": ["collect.recall.invalid"], "connections": [
+        {"dst": "10.0.2.1:80", "protocol": "http", "method": "POST", "target": "/collect",
+         "host": "collect.recall.invalid", "user_agent": null, "bytes": 120}],
+      "udp_datagrams": 0, "refused": 0, "truncated": false},
+    "trace": {
+      "sensitive_opens": [
+        {"pid": 2, "exe": "$SCRIPT", "path": "/work/home/.cargo/credentials.toml", "flags": 0, "ms": 5}
+      ],
+      "sockets": [
+        {"pid": 2, "exe": "$SCRIPT", "how": "connect", "address": "10.0.2.1:80", "sock_type": 1, "ms": 6}
+      ]
+    }
+  }
+}
