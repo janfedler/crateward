@@ -869,6 +869,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tokio",
  "tracing",
 ]
 
@@ -1056,6 +1057,7 @@ dependencies = [
  "reqwest",
  "rustix",
  "secrecy",
+ "serde_json",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
