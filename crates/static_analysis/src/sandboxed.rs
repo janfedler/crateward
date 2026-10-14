@@ -18,8 +18,9 @@ use crateward_core::child::{self, Child, ChildError};
 use crateward_core::sandbox::{self, FsAccess, Limits};
 use serde::{Deserialize, Serialize};
 
-use crate::analyze::{AnalyzeLimits, StaticReport, analyze};
+use crate::analyze::{AnalyzeLimits, analyze};
 use crate::yara::Rules;
+use crateward_core::report::static_report::StaticReport;
 
 /// First argument of the analysis child.
 pub const ANALYZE: &str = "sandbox-analyze";

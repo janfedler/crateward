@@ -7,30 +7,8 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use serde::{Deserialize, Serialize};
-
-use crate::analyze::StaticReport;
-use crate::findings::{Finding, FindingKind};
-
-/// Changes against the previous version's report.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VersionDiff {
-    /// The version compared against.
-    pub previous_version: String,
-    /// A build script exists now and did not before.
-    pub build_script_added: bool,
-    /// The crate became a proc macro.
-    pub proc_macro_added: bool,
-    /// The `links` value changed.
-    pub links_changed: bool,
-    /// Findings that the previous version did not have, highest severity
-    /// first.
-    pub new_findings: Vec<Finding>,
-    /// Count of findings that disappeared.
-    pub removed_findings: u32,
-    /// Locked dependencies (by name) that are new.
-    pub new_dependencies: Vec<String>,
-}
+use crateward_core::report::findings::{Finding, FindingKind};
+use crateward_core::report::static_report::{StaticReport, VersionDiff};
 
 fn key(f: &Finding) -> (&FindingKind, &str, &str) {
     // A pattern's evidence names the lines of its parts, which move with

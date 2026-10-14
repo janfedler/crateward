@@ -7,8 +7,8 @@
 //! taxonomy ([`failure`]) and retry policy ([`retry`]), verdict coverage
 //! labels ([`verdict`]), the closed list of human escalations
 //! ([`escalation`]), the typed configuration ([`config`]), every
-//! fixed path ([`paths`]) and the wire protocol between host and guest
-//! ([`protocol`]).
+//! fixed path ([`paths`]), the wire protocol between host and guest
+//! ([`protocol`]) and the reports the stages store ([`report`]).
 //!
 //! By default the package is pure: no I/O besides reading the configuration
 //! file, no async runtime and no database. That keeps it cheap to test
@@ -46,6 +46,7 @@ pub mod name;
 pub mod package;
 pub mod paths;
 pub mod protocol;
+pub mod report;
 pub mod retry;
 #[cfg(feature = "sandbox")]
 pub mod sandbox;

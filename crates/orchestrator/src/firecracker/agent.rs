@@ -62,7 +62,7 @@ pub struct RunOutcome {
     /// Whether output was dropped, by the agent or by the host.
     pub truncated: bool,
     /// The guest's eBPF trace.
-    pub trace: Box<crate::trace::TraceSummary>,
+    pub trace: Box<crateward_core::report::trace::TraceSummary>,
 }
 
 /// An open conversation with the guest agent.

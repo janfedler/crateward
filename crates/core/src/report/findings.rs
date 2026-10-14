@@ -6,7 +6,7 @@
 //! that caused it, and platform specific behavior stays visible even though
 //! Crateward only executes code on Linux.
 
-use crateward_core::text;
+use crate::text;
 use serde::{Deserialize, Serialize};
 
 /// How much a finding matters on its own.

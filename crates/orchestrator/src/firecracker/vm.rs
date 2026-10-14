@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use crateward_core::paths::host;
 use crateward_core::protocol::{AGENT_PORT, Limits};
+use crateward_core::report::network::{GUEST_ADDRESS, HOST_ADDRESS};
 use tokio::process::{Child, Command};
 use tokio::time::Instant;
 
@@ -51,11 +52,6 @@ const WARM: &str = "warm.img";
 /// the name is the same everywhere, as the snapshot requires.
 pub const TAP: &str = "tap0";
 
-/// Guest side addresses. Every slot uses the same ones in its own network
-/// namespace. The fake internet answers at [`HOST_ADDRESS`].
-pub const GUEST_ADDRESS: &str = "10.0.2.2";
-/// Host side address of the tap device, the guest's gateway and resolver.
-pub const HOST_ADDRESS: &str = "10.0.2.1";
 /// The guest's host name. Without one the kernel names the guest after its
 /// address, and the C library then appends the domain part (`0.2.2`) to
 /// names it fails to resolve, so every lookup shows up twice.

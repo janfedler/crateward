@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use crateward_core::job::Triage;
 use crateward_core::verdict::StaticOnlyReason;
 
-use crate::analyze::StaticReport;
-use crate::findings::{Platform, Severity};
+use crateward_core::report::findings::{Platform, Severity};
+use crateward_core::report::static_report::StaticReport;
 
 /// A locked dependency as triage sees it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

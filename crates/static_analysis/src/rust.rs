@@ -15,7 +15,9 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
-use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, evidence};
+use crateward_core::report::findings::{
+    CodeContext, Finding, FindingKind, Platform, Severity, evidence,
+};
 
 const NETWORK: &[&str] = &[
     "std::net::TcpStream",

@@ -862,8 +862,6 @@ name = "crateward_analyzer"
 version = "0.1.0"
 dependencies = [
  "crateward_core",
- "crateward_orchestrator",
- "crateward_static_analysis",
  "secrecy",
  "semver",
  "serde",

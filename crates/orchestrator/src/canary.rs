@@ -17,10 +17,10 @@
 use crateward_core::blobs::{BlobError, BlobStore};
 use crateward_core::job::BuildOutcome;
 use crateward_core::name::{CrateName, CrateNameError};
+use crateward_core::report::run::RunReport;
+use crateward_core::report::trace::{Role, TraceSummary};
 
 use crate::payload::{Package, PayloadSpec};
-use crate::trace::{Role, TraceSummary};
-use crate::worker::RunReport;
 
 /// A fixture crate and what its run must show.
 #[derive(Debug, Clone, Copy)]
@@ -340,12 +340,11 @@ fn check_known_good(report: &RunReport) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use crateward_fake_internet::sniff::Sniffed;
+    use crateward_core::report::network::{Connection, Leak, NetworkSummary, Sniffed};
+    use crateward_core::report::scratch::{Entry, ScratchReport};
+    use crateward_core::report::trace::{FileAccess, Process, SocketUse, Tamper};
 
     use super::*;
-    use crate::scratch::{Entry, ScratchReport};
-    use crate::trace::{FileAccess, Process, SocketUse, Tamper, TraceSummary};
-    use crate::worker::{Connection, Leak, NetworkSummary};
 
     #[test]
     fn fixtures_pack_and_name_themselves() {

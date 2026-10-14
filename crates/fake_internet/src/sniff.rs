@@ -2,31 +2,7 @@
 //! request line and `Host`), a TLS ClientHello (its server name), or
 //! something else.
 
-use serde::{Deserialize, Serialize};
-
-/// What the first bytes of a connection look like.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "protocol", rename_all = "snake_case")]
-pub enum Sniffed {
-    /// A plain HTTP request.
-    Http {
-        /// Method.
-        method: String,
-        /// Request target.
-        target: String,
-        /// The `Host` header, if present.
-        host: Option<String>,
-        /// The `User-Agent` header, if present.
-        user_agent: Option<String>,
-    },
-    /// A TLS ClientHello.
-    Tls {
-        /// Server name indication, if present.
-        sni: Option<String>,
-    },
-    /// Anything else, or nothing yet.
-    Unknown,
-}
+use crateward_core::report::network::Sniffed;
 
 const METHODS: &[&str] = &[
     "GET", "POST", "PUT", "HEAD", "DELETE", "OPTIONS", "PATCH", "CONNECT", "TRACE",

@@ -9,12 +9,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 
-use serde::{Deserialize, Serialize};
-
-use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, evidence};
-use crate::manifest::{self, ManifestFacts};
+use crate::manifest;
 use crate::rust::{self, Include};
 use crate::yara::Rules;
+use crateward_core::report::findings::{
+    CodeContext, Finding, FindingKind, Platform, Severity, evidence,
+};
+use crateward_core::report::static_report::{ManifestFacts, Skipped, StaticReport};
 
 pub use crateward_core::verdict::STATIC_ANALYZER_VERSION as ANALYZER_VERSION;
 
@@ -39,53 +40,6 @@ impl Default for AnalyzeLimits {
             max_yara_file_bytes: 32 * 1024 * 1024,
             max_findings: 2_000,
         }
-    }
-}
-
-/// A file that was not analyzed completely, and why.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Skipped {
-    /// Path relative to the crate root.
-    pub file: String,
-    /// Why.
-    pub reason: String,
-}
-
-/// The result of analyzing one archive.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StaticReport {
-    /// [`ANALYZER_VERSION`] that produced it.
-    pub analyzer_version: i32,
-    /// Manifest facts.
-    pub manifest: ManifestFacts,
-    /// Files in the archive.
-    pub files: u32,
-    /// Rust files parsed.
-    pub rust_files: u32,
-    /// Files skipped, fully or partly.
-    pub skipped: Vec<Skipped>,
-    /// Findings, highest severity first.
-    pub findings: Vec<Finding>,
-    /// Findings dropped by [`AnalyzeLimits::max_findings`].
-    pub findings_dropped: u32,
-    /// Platform of the crate level `#![cfg]` in `src/lib.rs`, if any.
-    pub library_platform: Platform,
-    /// Findings per platform, to show platform specific behavior that a
-    /// Linux run cannot observe.
-    pub platforms: BTreeMap<String, u32>,
-}
-
-impl StaticReport {
-    /// Whether building the crate runs its own code.
-    #[must_use]
-    pub fn has_build_time_code(&self) -> bool {
-        self.manifest.has_build_time_code()
-    }
-
-    /// The highest severity of any finding.
-    #[must_use]
-    pub fn max_severity(&self) -> Option<Severity> {
-        self.findings.iter().map(|f| f.severity).max()
     }
 }
 

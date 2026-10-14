@@ -12,11 +12,10 @@ use std::time::{Duration, Instant};
 use crateward_core::escalation::HumanEscalation;
 use crateward_core::failure::FailureClass;
 use crateward_core::job::{JobEvent, JobId, RunKind, Stage};
+use crateward_core::report::run::RunReport;
+use crateward_core::report::static_report::{StaticReport, VersionDiff};
 use crateward_core::store::{Policies, Review, SbomOutcome, Store, StoreError, StoredJob};
 use crateward_core::verdict::Verdict;
-use crateward_orchestrator::worker::RunReport;
-use crateward_static_analysis::analyze::StaticReport;
-use crateward_static_analysis::diff::VersionDiff;
 
 use crate::score::{Inputs, score, should_escalate};
 

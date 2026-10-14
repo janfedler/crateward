@@ -9,40 +9,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
+use crateward_core::report::network::HOST_ADDRESS;
+use crateward_core::report::trace::TOOLCHAIN;
 use serde_json::Value;
 
 /// Deepest indentation of the process tree.
 const MAX_DEPTH: usize = 8;
-
-/// C compilers, linkers and their helpers, as in the orchestrator's trace,
-/// which classified fewer of them in older reports.
-const TOOLCHAIN: [&str; 25] = [
-    "cc",
-    "gcc",
-    "g++",
-    "c++",
-    "clang",
-    "clang++",
-    "cpp",
-    "cc1",
-    "cc1plus",
-    "collect2",
-    "lto-wrapper",
-    "lto1",
-    "as",
-    "ld",
-    "ld.bfd",
-    "ld.gold",
-    "ld.lld",
-    "lld",
-    "rust-lld",
-    "ld.mold",
-    "mold",
-    "ar",
-    "ranlib",
-    "strip",
-    "objcopy",
-];
 
 /// One process in tree order.
 #[derive(Debug, Clone)]
@@ -450,6 +422,8 @@ fn process_row(p: &Value, depth: usize) -> ProcessRow {
     let started = u64_of(p, "started_ms").unwrap_or(0);
     let exe = str_of(p, "exe");
     let name = exe.rsplit('/').next().unwrap_or_default();
+
+    // Older reports classified fewer toolchain programs.
     let role = if TOOLCHAIN.contains(&name) {
         "toolchain".to_owned()
     } else {
@@ -519,16 +493,12 @@ fn end_text(raw: &str) -> String {
     }
 }
 
-/// The fake internet's address in every slot (the orchestrator's
-/// `HOST_ADDRESS`). Every name the guest looks up resolves to it.
-const FAKE_INTERNET: &str = "10.0.2.1";
-
 /// An address as a reader should see it: the fake internet's by its port
 /// alone (`:443`), since its address says nothing about where the build
 /// wanted to go.
 #[must_use]
 pub fn address(text: &str) -> String {
-    match text.strip_prefix(FAKE_INTERNET) {
+    match text.strip_prefix(HOST_ADDRESS) {
         Some("") => "fake internet".to_owned(),
         Some(rest) => rest
             .strip_prefix(':')

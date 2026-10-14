@@ -8,32 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crateward_core::package::PackageMeta;
-use serde::{Deserialize, Serialize};
-
-use crate::findings::CodeContext;
-
-/// What the manifest says about build time code and platforms.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ManifestFacts {
-    /// Path of the build script, if any.
-    pub build_script: Option<String>,
-    /// Whether the library is a proc macro.
-    pub proc_macro: bool,
-    /// The `links` key.
-    pub links: Option<String>,
-    /// Edition.
-    pub edition: Option<String>,
-    /// Dependencies per `cfg` or target triple of `[target.*]` tables.
-    pub target_dependencies: BTreeMap<String, Vec<String>>,
-    /// Targets listed for docs.rs, a hint at the platforms the author cares
-    /// about.
-    pub docs_rs_targets: Vec<String>,
-    /// Licence, authors and links for the SBOM (ADR 0012). `None` in
-    /// reports from before they were read.
-    pub package: Option<PackageMeta>,
-    /// Whether the manifest parsed at all.
-    pub parsed: bool,
-}
+use crateward_core::report::static_report::ManifestFacts;
 
 fn table_keys(value: Option<&toml::Value>) -> Vec<String> {
     value
@@ -106,43 +81,10 @@ pub fn parse(manifest: &str, files: &BTreeSet<String>) -> ManifestFacts {
     }
 }
 
-impl ManifestFacts {
-    /// The code context of a file, by its path relative to the crate root.
-    #[must_use]
-    pub fn context_of(&self, path: &str) -> CodeContext {
-        let build_dir = self
-            .build_script
-            .as_deref()
-            .and_then(|b| b.rsplit_once('/').map(|(dir, _)| format!("{dir}/")));
-        if self.build_script.as_deref() == Some(path)
-            || path.starts_with("build/")
-            || build_dir.is_some_and(|d| !d.starts_with("src/") && path.starts_with(&d))
-        {
-            CodeContext::BuildScript
-        } else if path.starts_with("tests/") {
-            CodeContext::Test
-        } else if path.starts_with("examples/")
-            || path.starts_with("benches/")
-            || path.starts_with("src/bin/")
-            || path == "src/main.rs"
-        {
-            CodeContext::Binary
-        } else if self.proc_macro {
-            CodeContext::ProcMacro
-        } else {
-            CodeContext::Library
-        }
-    }
-
-    /// Whether building the crate runs any of its own code.
-    #[must_use]
-    pub fn has_build_time_code(&self) -> bool {
-        self.build_script.is_some() || self.proc_macro
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use crateward_core::report::findings::CodeContext;
+
     use super::*;
 
     fn files(list: &[&str]) -> BTreeSet<String> {

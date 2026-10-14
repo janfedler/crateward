@@ -18,11 +18,13 @@ use crateward_core::store::{Policies, Store, StoreError, StoredJob, heartbeat};
 use crateward_core::verdict::StaticOnlyReason;
 use serde::Deserialize;
 
-use crate::analyze::{ANALYZER_VERSION, StaticReport};
-use crate::diff::{VersionDiff, diff};
-use crate::findings::Severity;
+use crate::analyze::ANALYZER_VERSION;
+use crate::diff::diff;
 use crate::sandboxed::{MAX_TAR_BYTES, Outcome, analyze_in_sandbox};
 use crate::triage::{Decision, Dependency, decide};
+use crateward_core::report::findings::Severity;
+use crateward_core::report::static_report::StaticReport;
+use crateward_core::report::static_report::VersionDiff;
 
 /// Tar bytes handed to one child at most. More start another child.
 const BATCH_BYTES: usize = 512 * 1024 * 1024;

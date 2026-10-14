@@ -17,9 +17,10 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crateward_core::bytes::hex;
+use crateward_core::report::network::Sniffed;
 
 use crate::dns;
-use crate::sniff::{Sniffed, content_length, http_header_end, sniff};
+use crate::sniff::{content_length, http_header_end, sniff};
 
 /// Bytes of a connection or datagram kept in the log.
 pub const MAX_CAPTURE: usize = 64 * 1024;

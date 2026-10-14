@@ -22,7 +22,6 @@
 
 pub mod analyze;
 pub mod diff;
-pub mod findings;
 pub mod manifest;
 pub mod rust;
 pub mod sandboxed;

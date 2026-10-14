@@ -30,7 +30,8 @@ use crateward_core::store::{CrateFile, NewJob, Review, Store, StoredJob};
 use crateward_core::testing::{TestDb, policies};
 use crateward_core::verdict::{Coverage, RiskLevel, StaticOnlyReason, Verdict};
 
-use crateward_static_analysis::analyze::{ANALYZER_VERSION, AnalyzeLimits, StaticReport, analyze};
+use crateward_core::report::static_report::StaticReport;
+use crateward_static_analysis::analyze::{ANALYZER_VERSION, AnalyzeLimits, analyze};
 use crateward_static_analysis::diff::diff;
 use crateward_static_analysis::sandboxed::analyze_in_sandbox;
 use crateward_static_analysis::triage::Decision;

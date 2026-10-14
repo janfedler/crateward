@@ -20,8 +20,9 @@ use rustix::mount::{MountFlags, MountPropagationFlags, UnmountFlags};
 use rustix::process::{Resource, Rlimit};
 
 use super::{FAKE_INTERNET_IN_JAIL, FIRECRACKER_IN_JAIL, INSIDE_VM_ID, JailSpec, MAX_SPEC_BYTES};
-use crate::firecracker::vm::{HOST_ADDRESS, PREFIX_LEN};
+use crate::firecracker::vm::PREFIX_LEN;
 use crateward_core::paths::host::{IP, NFT};
+use crateward_core::report::network::HOST_ADDRESS;
 use crateward_core::sandbox::{Namespaces, unshare};
 
 /// Redirects everything the guest sends to the fake internet's ports

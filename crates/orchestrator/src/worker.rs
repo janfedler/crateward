@@ -20,19 +20,21 @@ use crateward_core::job::{BuildOutcome, JobEvent, RunKind, Stage};
 use crateward_core::name::CrateName;
 use crateward_core::paths::{guest, host};
 use crateward_core::protocol::{ExitStatus, JobSpec, MountSpec, PathSpec, WallClock, Workspace};
+use crateward_core::report::network::{Connection, Leak, NetworkSummary, Sniffed};
+use crateward_core::report::run::RunReport;
+use crateward_core::report::scratch::ScratchReport;
+use crateward_core::report::trace::TraceSummary;
 use crateward_core::store::{PauseReason, Policies, Store, StoreError, StoredJob, heartbeat};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crateward_fake_internet::server::{Event, EventKind, MAX_CAPTURE, MAX_EVENTS};
-use crateward_fake_internet::sniff::Sniffed;
 
 use crate::backend::{FirecrackerBackend, JobEnd, JobInput, VmBackend};
 use crate::canary::Canary;
 use crate::firecracker::vm::JobDrives;
 use crate::honeytokens::{Honeytokens, Token};
 use crate::payload::{Package, PayloadSpec, PayloadStats, build_image};
-use crate::scratch::{ScanSpec, ScratchReport};
-use crate::trace::TraceSummary;
+use crate::scratch::ScanSpec;
 
 /// Output kept per stream in the report.
 const OUTPUT_TAIL: usize = 16 * 1024;
@@ -42,122 +44,6 @@ const OUTPUT_LIMIT: u32 = 4 * 1024 * 1024;
 
 /// Extra wall clock the host allows beyond the guest's own timeout.
 const HOST_MARGIN: Duration = Duration::from_secs(60);
-
-/// What one VM run produced, as stored in `job_runs.report`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RunReport {
-    /// How the build ended.
-    pub outcome: BuildOutcome,
-    /// How the run ended from the host's view.
-    pub end: String,
-    /// The guest's exit status, when the agent reported one.
-    pub exit: Option<ExitStatus>,
-    /// Restore to ready agent, in milliseconds.
-    pub restore_ms: u64,
-    /// The run itself, in milliseconds.
-    pub run_ms: u64,
-    /// The last bytes of stdout.
-    pub stdout_tail: String,
-    /// The last bytes of stderr.
-    pub stderr_tail: String,
-    /// Output beyond the limit was dropped.
-    pub truncated: bool,
-    /// Files and bytes in the payload.
-    pub payload_files: u64,
-    /// Bytes of file contents in the payload.
-    pub payload_bytes: u64,
-    /// Locked crates missing from the payload (not stored by the fetcher).
-    pub missing_packages: Vec<String>,
-    /// What the guest tried to reach, from the fake internet's log.
-    pub network: NetworkSummary,
-    /// Honeytokens that left the VM.
-    pub leaked: Vec<Leak>,
-    /// The guest's eBPF trace. Absent when the run ended without a report.
-    #[serde(default)]
-    pub trace: TraceSummary,
-    /// Honeytokens the trace shows inside the VM, for example in a
-    /// program's arguments. `via` names the process or path.
-    #[serde(default)]
-    pub tokens_in_trace: Vec<Leak>,
-    /// What the job left on its scratch disk, read by the host. `None` if
-    /// the scanner itself failed.
-    #[serde(default)]
-    pub scratch: Option<ScratchReport>,
-    /// Honeytokens copied into files on the scratch disk. `via` is the path.
-    #[serde(default)]
-    pub tokens_on_disk: Vec<Leak>,
-}
-
-/// The guest's network activity, as the fake internet saw it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NetworkSummary {
-    /// Names looked up, in order, without repeats.
-    pub dns: Vec<String>,
-    /// TCP connections, in order.
-    pub connections: Vec<Connection>,
-    /// UDP datagrams other than DNS.
-    pub udp_datagrams: u32,
-    /// Connections refused because too many were open.
-    pub refused: u32,
-    /// Frames no proxy saw (IPv6, ICMP, other protocols), described.
-    #[serde(default)]
-    pub packets: Vec<String>,
-    /// More such frames arrived than the fake internet logs.
-    #[serde(default)]
-    pub packets_truncated: bool,
-    /// The log hit its event limit.
-    pub truncated: bool,
-    /// Connections and frames the guest sent more of than the fake
-    /// internet keeps.
-    #[serde(default)]
-    pub cut: u32,
-    /// The log was longer than the host reads.
-    #[serde(default)]
-    pub log_cut: bool,
-}
-
-impl NetworkSummary {
-    /// Why the honeytoken search did not see everything the guest sent.
-    /// A guest can make the log drop what follows by flooding it, so any
-    /// of these may hide a leak.
-    #[must_use]
-    pub fn unsearched(&self) -> Vec<&'static str> {
-        [
-            (self.truncated, "more events than the fake internet logs"),
-            (self.packets_truncated, "more raw frames than it logs"),
-            (self.refused > 0, "connections it refused"),
-            (self.cut > 0, "connections or frames longer than it keeps"),
-            (self.log_cut, "a log longer than the host reads"),
-        ]
-        .into_iter()
-        .filter_map(|(hit, reason)| hit.then_some(reason))
-        .collect()
-    }
-}
-
-/// One TCP connection.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Connection {
-    /// Destination the guest dialed.
-    pub dst: String,
-    /// What it sent, as recognized.
-    #[serde(flatten)]
-    pub sniffed: Sniffed,
-    /// Bytes it sent.
-    pub bytes: u64,
-    /// Inside TLS, when the fake internet could terminate it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inner: Option<Box<Sniffed>>,
-}
-
-/// A honeytoken found outside the VM.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Leak {
-    /// Which token.
-    pub kind: String,
-    /// Where it was seen: a DNS name, a TCP destination or `udp`.
-    pub via: String,
-}
 
 /// Entries kept per list in the summary.
 const MAX_LISTED: usize = 200;

@@ -34,13 +34,14 @@ use crateward_core::failure::Failure;
 use crateward_core::job::BuildOutcome;
 use crateward_core::name::CrateName;
 use crateward_core::paths::guest;
+use crateward_core::report::run::RunReport;
+use crateward_core::report::scratch::ScratchReport;
+use crateward_core::report::trace::TraceSummary;
 use crateward_core::store::Store;
 
 use crate::honeytokens::Honeytokens;
 use crate::payload::{Package, PayloadSpec, ProbeSpec};
-use crate::scratch::ScratchReport;
-use crate::trace::TraceSummary;
-use crate::worker::{JobFiles, Locked, RunPlan, RunReport, Sandbox};
+use crate::worker::{JobFiles, Locked, RunPlan, Sandbox};
 
 /// A crate version.
 type Key = (String, String);
@@ -772,9 +773,9 @@ mod tests {
         assert!(plan(&samples, &all, &blobs, 2, 10).probes.is_empty());
     }
 
-    use crate::scratch::Entry;
-    use crate::trace::{FileAccess, Process, Role, SocketUse, Tamper};
-    use crate::worker::{Connection, Leak, NetworkSummary};
+    use crateward_core::report::network::{Connection, Leak, NetworkSummary, Sniffed};
+    use crateward_core::report::scratch::Entry;
+    use crateward_core::report::trace::{FileAccess, Process, Role, SocketUse, Tamper};
 
     /// A run the warm build accepts.
     fn clean() -> RunReport {
@@ -858,7 +859,7 @@ mod tests {
     fn connection() -> Connection {
         Connection {
             dst: "1.2.3.4:80".into(),
-            sniffed: crateward_fake_internet::sniff::Sniffed::Unknown,
+            sniffed: Sniffed::Unknown,
             bytes: 0,
             inner: None,
         }

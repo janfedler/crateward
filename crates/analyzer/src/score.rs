@@ -31,14 +31,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crateward_core::job::BuildOutcome;
 use crateward_core::paths::guest;
+use crateward_core::report::findings::{Finding, FindingKind, Severity};
+use crateward_core::report::network::{GUEST_ADDRESS, Leak};
+use crateward_core::report::run::RunReport;
+use crateward_core::report::scratch::{Entry, ScratchReport};
+use crateward_core::report::static_report::{StaticReport, VersionDiff};
+use crateward_core::report::trace::{Process, Role};
 use crateward_core::verdict::{Coverage, Evidence, EvidenceSource, RiskLevel, Verdict};
-use crateward_orchestrator::firecracker::vm::GUEST_ADDRESS;
-use crateward_orchestrator::scratch::{Entry, ScratchReport};
-use crateward_orchestrator::trace::{Process, Role};
-use crateward_orchestrator::worker::{Leak, RunReport};
-use crateward_static_analysis::analyze::StaticReport;
-use crateward_static_analysis::diff::VersionDiff;
-use crateward_static_analysis::findings::{Finding, FindingKind, Severity};
 
 pub use crateward_core::verdict::ANALYZER_VERSION;
 
@@ -954,8 +953,7 @@ pub fn score(inputs: &Inputs<'_>) -> Verdict {
 
 #[cfg(test)]
 mod tests {
-    use crateward_orchestrator::scratch::ScratchReport;
-    use crateward_orchestrator::trace::TraceSummary;
+    use crateward_core::report::trace::TraceSummary;
     use serde_json::json;
 
     use super::*;
@@ -1111,9 +1109,9 @@ mod tests {
             severity: Severity::High,
             file: file.into(),
             line: Some(1),
-            context: crateward_static_analysis::findings::CodeContext::BuildScript,
+            context: crateward_core::report::findings::CodeContext::BuildScript,
             cfg: None,
-            platform: crateward_static_analysis::findings::Platform::Any,
+            platform: crateward_core::report::findings::Platform::Any,
             evidence: "e".into(),
         }
     }
@@ -1121,13 +1119,13 @@ mod tests {
     fn report(findings: Vec<Finding>) -> StaticReport {
         StaticReport {
             analyzer_version: 6,
-            manifest: crateward_static_analysis::manifest::ManifestFacts::default(),
+            manifest: crateward_core::report::static_report::ManifestFacts::default(),
             files: 4,
             rust_files: 1,
             skipped: Vec::new(),
             findings,
             findings_dropped: 0,
-            library_platform: crateward_static_analysis::findings::Platform::Any,
+            library_platform: crateward_core::report::findings::Platform::Any,
             platforms: BTreeMap::new(),
         }
     }

@@ -7,7 +7,9 @@
 
 use yara_x::errors::CompileError;
 
-use crate::findings::{CodeContext, Finding, FindingKind, Platform, Severity, evidence};
+use crateward_core::report::findings::{
+    CodeContext, Finding, FindingKind, Platform, Severity, evidence,
+};
 
 /// The built in rule source.
 pub const BUILTIN_RULES: &str = include_str!("../rules/crateward.yar");
