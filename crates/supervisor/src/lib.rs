@@ -64,7 +64,7 @@ const TRIM_BATCH: i64 = 500;
 const BURST_STALL_SECS: i64 = 30 * 60;
 
 /// Everything one round needs.
-struct Supervisor<'a> {
+pub struct Supervisor<'a> {
     config: &'a Config,
     store: Store,
     policies: Policies,
@@ -74,8 +74,46 @@ struct Supervisor<'a> {
     burst_low: Option<(i64, i64)>,
 }
 
-impl Supervisor<'_> {
-    async fn round(&mut self) -> Result<(), StoreError> {
+impl<'a> Supervisor<'a> {
+    /// A supervisor on `store` that alerts through the configured notifier.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the retry policies are invalid or the HTTP client or
+    /// inotify cannot be set up.
+    pub fn new(config: &'a Config, store: Store) -> Result<Self, ComponentError> {
+        let client = reqwest::Client::builder()
+            .user_agent(notify::USER_AGENT)
+            .timeout(Duration::from_secs(20))
+            .https_only(true)
+            .build()
+            .map_err(fatal)?;
+
+        let interval = config
+            .supervisor
+            .integrity_interval_minutes
+            .saturating_mul(60);
+
+        Ok(Self {
+            config,
+            store,
+            policies: Policies::from_config(&config.stages).map_err(fatal)?,
+            notifier: Notifier::new(config.ntfy.as_ref(), &client),
+            integrity: integrity::Integrity::new(
+                &config.instance.data_dir,
+                Duration::from_secs(interval),
+            )
+            .map_err(fatal)?,
+            burst_low: None,
+        })
+    }
+
+    /// Runs every check once.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the store fails.
+    pub async fn round(&mut self) -> Result<(), StoreError> {
         let reaped = self.store.reap_expired(&self.policies).await?;
         if reaped > 0 {
             tracing::warn!(reaped, "reaped expired leases");
@@ -315,31 +353,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             .map_err(fatal)?;
 
         store.migrate().await.map_err(fatal)?;
-        let client = reqwest::Client::builder()
-            .user_agent(notify::USER_AGENT)
-            .timeout(Duration::from_secs(20))
-            .https_only(true)
-            .build()
-            .map_err(fatal)?;
-
-        let mut supervisor = Supervisor {
-            config,
-            store,
-            policies: Policies::from_config(&config.stages).map_err(fatal)?,
-            notifier: Notifier::new(config.ntfy.as_ref(), &client),
-            integrity: integrity::Integrity::new(
-                &config.instance.data_dir,
-                Duration::from_secs(
-                    config
-                        .supervisor
-                        .integrity_interval_minutes
-                        .saturating_mul(60),
-                ),
-            )
-            .map_err(fatal)?,
-            burst_low: None,
-        };
-
+        let mut supervisor = Supervisor::new(config, store)?;
         let stop = Stop::install().map_err(fatal)?;
 
         let interval = Duration::from_secs(config.supervisor.interval_secs);

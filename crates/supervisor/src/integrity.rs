@@ -200,3 +200,100 @@ fn host_processes() -> Vec<HostProcess> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use std::os::unix::fs::MetadataExt as _;
+
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cw-integrity-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        dir
+    }
+
+    #[test]
+    fn a_changed_file_breaks_the_manifest() {
+        let dir = scratch("manifest");
+        let file = dir.join("crateward-api");
+        std::fs::write(&file, "binary").unwrap();
+
+        let mut integrity = Integrity::new(&dir, Duration::ZERO).unwrap();
+        assert!(integrity.manifest().is_empty());
+        assert!(integrity.manifest().is_empty());
+
+        let manifest = dir.join(host::INTEGRITY_MANIFEST);
+        let recorded = integrity::record(std::slice::from_ref(&file)).unwrap();
+        std::fs::write(&manifest, recorded).unwrap();
+        assert!(integrity.manifest().is_empty());
+
+        std::fs::write(&file, "changed").unwrap();
+        let findings = integrity.manifest();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].starts_with(&file.display().to_string()));
+
+        std::fs::write(&manifest, "not a manifest\n").unwrap();
+        assert_eq!(integrity.manifest().len(), 1);
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_manifest_is_checked_once_per_interval() {
+        let dir = scratch("interval");
+        std::fs::write(dir.join(host::INTEGRITY_MANIFEST), "not a manifest\n").unwrap();
+
+        let mut integrity = Integrity::new(&dir, Duration::from_secs(3600)).unwrap();
+        assert_eq!(integrity.manifest().len(), 1);
+        assert!(integrity.manifest().is_empty());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn touching_a_decoy_is_reported_and_a_deleted_one_planted_again() {
+        let dir = scratch("decoys");
+        let decoy = dir.join("decoys/credentials");
+        let decoys = [decoy.clone()];
+
+        let mut integrity = Integrity::new(&dir, Duration::ZERO).unwrap();
+        assert!(integrity.decoys(&decoys).is_empty());
+
+        assert_eq!(std::fs::read(&decoy).unwrap(), DECOY);
+        let findings = integrity.decoys(&decoys);
+        assert!(!findings.is_empty());
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.starts_with(&decoy.display().to_string()))
+        );
+        assert!(integrity.decoys(&decoys).is_empty());
+
+        std::fs::remove_file(&decoy).unwrap();
+        assert!(!integrity.decoys(&decoys).is_empty());
+        assert!(decoy.exists());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_process_as_a_slot_uid_is_reported_from_the_second_scan() {
+        let dir = scratch("processes");
+        let uid = std::fs::metadata(&dir).unwrap().uid();
+
+        // This test runs as `uid` and is not a jailed Firecracker.
+        let mut integrity = Integrity::new(&dir, Duration::ZERO).unwrap();
+        assert!(integrity.processes(uid..=uid).is_empty());
+
+        let findings = integrity.processes(uid..=uid);
+        let me = format!("process {} ", std::process::id());
+        assert!(findings.iter().any(|f| f.starts_with(&me)));
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

@@ -22,5 +22,9 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+crateward_core = { workspace = true, features = ["testing"] }
+serde_json.workspace = true
+
 [lints]
 workspace = true
