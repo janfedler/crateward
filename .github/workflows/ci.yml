@@ -168,6 +168,7 @@ jobs:
       - run: cargo xtask docs-lint
       - run: cargo xtask commit-lint
       - run: cargo xtask blank-lines
+      - run: cargo xtask file-length
       - run: cargo xtask state-diagram
 
   supply-chain:

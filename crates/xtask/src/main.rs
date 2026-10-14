@@ -9,6 +9,7 @@ mod cyclonedx;
 mod deploy;
 mod diagram;
 mod docs_lint;
+mod file_length;
 mod firecracker;
 mod fuzz;
 mod guest_ebpf;
@@ -48,6 +49,8 @@ enum Task {
         #[arg(long)]
         write: bool,
     },
+    /// Check that no Rust source is longer than 1000 lines.
+    FileLength,
     /// Check or rewrite the generated state diagram in docs/ARCHITECTURE.md.
     StateDiagram {
         /// Rewrite the diagram instead of checking it.
@@ -130,6 +133,7 @@ fn main() -> ExitCode {
         Task::DocsLint => docs_lint(),
         Task::BlankLines { write } => blank_lines::run(&workspace_root(), write),
         Task::CommitLint => commit_lint::run(&workspace_root()),
+        Task::FileLength => file_length::run(&workspace_root()),
         Task::StateDiagram { write } => diagram::run(&workspace_root(), write),
         Task::GuestAgent => guest_agent(),
         Task::GuestEbpf => guest_ebpf::run(&workspace_root()),
@@ -325,6 +329,7 @@ fn ci() -> Result<(), TaskError> {
     fuzz::check(&workspace_root())?;
     docs_lint()?;
     blank_lines::run(&workspace_root(), false)?;
+    file_length::run(&workspace_root())?;
     commit_lint::run(&workspace_root())?;
     diagram::run(&workspace_root(), false)?;
     run("cargo", &["deny", "--locked", "check"], &[])?;

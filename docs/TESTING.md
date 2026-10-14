@@ -100,8 +100,9 @@ runs, in this order:
    `bpf-linker`
 7. the type check of the fuzz targets
 8. the documentation checks, the blank line rules of
-   [`CONTRIBUTING.md`](../CONTRIBUTING.md#blank-lines) and the commit
-   messages ([Conventional Commits](../CONTRIBUTING.md#commits))
+   [`CONTRIBUTING.md`](../CONTRIBUTING.md#blank-lines), the file length
+   limit and the commit messages
+   ([Conventional Commits](../CONTRIBUTING.md#commits))
 9. `cargo deny` for both lockfiles, `cargo audit` and `cargo vet`
 
 GitHub CI runs the same checks except the fuzz type check, which is too

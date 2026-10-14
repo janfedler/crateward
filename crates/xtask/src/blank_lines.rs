@@ -416,8 +416,9 @@ fn fix(text: &str) -> (String, BTreeMap<usize, &'static str>) {
     (out.join("\n"), missing)
 }
 
-/// The Rust sources the rules apply to.
-fn sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), TaskError> {
+/// The Rust sources the rules apply to, without fuzz corpora and test
+/// fixtures.
+pub fn sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), TaskError> {
     let entries = std::fs::read_dir(dir).map_err(|e| TaskError::Io(dir.to_path_buf(), e))?;
 
     for entry in entries.filter_map(Result::ok) {
@@ -434,13 +435,12 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), TaskError> {
     Ok(())
 }
 
-/// Checks every Rust source, or adds the missing blank lines with `write`.
+/// The Rust sources in `crates/` and `fuzz/`, sorted.
 ///
 /// # Errors
 ///
-/// Fails if a file cannot be read or written, or when a check finds a
-/// missing blank line.
-pub fn run(root: &Path, write: bool) -> Result<(), TaskError> {
+/// Fails if a directory cannot be read.
+pub fn rust_files(root: &Path) -> Result<Vec<PathBuf>, TaskError> {
     let mut files = Vec::new();
     for dir in ["crates", "fuzz"] {
         sources(&root.join(dir), &mut files)?;
@@ -448,8 +448,18 @@ pub fn run(root: &Path, write: bool) -> Result<(), TaskError> {
 
     files.sort();
 
+    Ok(files)
+}
+
+/// Checks every Rust source, or adds the missing blank lines with `write`.
+///
+/// # Errors
+///
+/// Fails if a file cannot be read or written, or when a check finds a
+/// missing blank line.
+pub fn run(root: &Path, write: bool) -> Result<(), TaskError> {
     let mut count = 0;
-    for path in files {
+    for path in rust_files(root)? {
         let text = std::fs::read_to_string(&path).map_err(|e| TaskError::Io(path.clone(), e))?;
         let (fixed, missing) = fix(&text);
         count += missing.len();

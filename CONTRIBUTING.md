@@ -24,8 +24,14 @@ checks enforce some of them. Reviewers ask for the rest.
 
 * Write short, imperative Rust: straight line code, early returns and `?`
   instead of `and_then` chains.
-* Keep functions small, under about 50 lines. Split a long function into
-  steps with names.
+* Keep functions at 100 lines or less, as clippy's `too_many_lines`
+  checks. Split a longer function into steps with names where the steps
+  stand on their own, not just to get under the limit.
+* Keep files at 1000 lines or less, tests included, as
+  `cargo xtask file-length` checks. Move a long unit test module into a
+  `tests.rs` next to its file (`mod tests;`), split long code into modules
+  by topic, and turn a long integration test into a directory with a
+  `main.rs`.
 * Add an abstraction only once it has a second user.
 
 ### Errors
