@@ -102,7 +102,9 @@ fn read_line<R: BufRead>(input: &mut R, limit: u64) -> Result<String, LaunchErro
     Ok(line)
 }
 
-fn say(line: &str) -> Result<(), LaunchError> {
+/// Sends one line to the orchestrator on stdout, the control channel until
+/// `exec`: `unshared`, `exec` or an error.
+fn tell_orchestrator(line: &str) -> Result<(), LaunchError> {
     let mut out = std::io::stdout().lock();
 
     writeln!(out, "{line}")
@@ -427,7 +429,7 @@ pub fn run() -> LaunchError {
         }
 
         unshare(Namespaces::User).map_err(step("unsharing the user namespace"))?;
-        say("unshared")?;
+        tell_orchestrator("unshared")?;
 
         if read_line(&mut input, 16)? != "mapped" {
             return Err(LaunchError {
@@ -443,7 +445,7 @@ pub fn run() -> LaunchError {
         // the orchestrator. The jail root itself is closed to everybody else.
         rustix::process::umask(rustix::fs::Mode::empty());
         drop_privileges()?;
-        say("exec")?;
+        tell_orchestrator("exec")?;
         rustix::stdio::dup2_stdin(&null).map_err(step("redirecting stdin"))?;
         rustix::stdio::dup2_stdout(&log).map_err(step("redirecting stdout"))?;
         rustix::stdio::dup2_stderr(&log).map_err(step("redirecting stderr"))?;
@@ -467,7 +469,7 @@ pub fn run() -> LaunchError {
         Err(error) => {
             // Before `exec` stdout is the control channel. After the
             // redirection this line lands in the log.
-            let _ = say(&format!("error: {error}"));
+            let _ = tell_orchestrator(&format!("error: {error}"));
             error
         }
     }
