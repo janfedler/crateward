@@ -27,6 +27,20 @@ ignore = [
     # model code only, which is not compiled in. Remove with the entries above
     # (fixed in 48.0.4 and 49.0.2).
     { id = "RUSTSEC-2026-0327", reason = "the wasmtime component model is not compiled in" },
+    # wasmtime 45: a guest module with a long chain of recursive types
+    # overflows the stack when its types are dropped. The only modules YARA-X
+    # runs are the ones it compiles from Crateward's embedded rules, never
+    # crate content, and a crash would end only the sandboxed analysis child.
+    # Remove with the entries above (fixed in 48.0.6 and 49.0.3).
+    { id = "RUSTSEC-2026-0359", reason = "wasmtime only runs modules compiled from embedded rules" },
+    # wasmtime 45: mixing async and sync calls into one store is not checked.
+    # YARA-X builds wasmtime without the `async` feature and calls it only
+    # synchronously. Remove with the entries above.
+    { id = "RUSTSEC-2026-0362", reason = "wasmtime async support is not compiled in" },
+    # wasmtime 45: component model handle tables are not charged to any
+    # limit. Component model code only, which is not compiled in. Remove with
+    # the entries above.
+    { id = "RUSTSEC-2026-0363", reason = "the wasmtime component model is not compiled in" },
     # bincode 2 is unmaintained. YARA-X uses it only to (de)serialize compiled
     # rules, which Crateward never loads from outside. Rules are compiled from
     # source embedded in the binary.
