@@ -82,7 +82,9 @@ fn step<E: std::fmt::Display>(step: &'static str) -> impl FnOnce(E) -> LaunchErr
     }
 }
 
-fn read_line<R: BufRead>(input: &mut R, limit: u64) -> Result<String, LaunchError> {
+/// Reads one line of at most `limit` bytes from the orchestrator on stdin:
+/// the jail specification, then `mapped`.
+fn read_from_orchestrator<R: BufRead>(input: &mut R, limit: u64) -> Result<String, LaunchError> {
     let mut line = String::new();
     let mut limited = input.by_ref().take(limit);
 
@@ -417,8 +419,9 @@ fn drop_privileges() -> Result<(), LaunchError> {
 pub fn run() -> LaunchError {
     let result = (|| -> Result<std::convert::Infallible, LaunchError> {
         let mut input = std::io::stdin().lock();
-        let spec: JailSpec = serde_json::from_str(&read_line(&mut input, MAX_SPEC_BYTES)?)
-            .map_err(step("parsing the jail specification"))?;
+        let spec: JailSpec =
+            serde_json::from_str(&read_from_orchestrator(&mut input, MAX_SPEC_BYTES)?)
+                .map_err(step("parsing the jail specification"))?;
 
         spec.validate()
             .map_err(step("validating the jail specification"))?;
@@ -431,7 +434,7 @@ pub fn run() -> LaunchError {
         unshare(Namespaces::User).map_err(step("unsharing the user namespace"))?;
         tell_orchestrator("unshared")?;
 
-        if read_line(&mut input, 16)? != "mapped" {
+        if read_from_orchestrator(&mut input, 16)? != "mapped" {
             return Err(LaunchError {
                 step: "waiting for the ID maps",
                 detail: "unexpected answer".into(),
