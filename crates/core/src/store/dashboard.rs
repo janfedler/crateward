@@ -1,6 +1,6 @@
 //! Read queries for the dashboard.
 
-use super::verdicts::needs_reprocessing;
+use super::verdicts::{STATIC_REPORT, needs_reprocessing};
 use super::{Store, StoreError};
 use crate::job::{JobId, JobState};
 use crate::verdict::{ANALYZER_VERSION, STATIC_ANALYZER_VERSION};
@@ -142,7 +142,7 @@ const UNREPORTED: &str = "v.review = 'confirmed'
 /// The job list's filters but the state, as `$1` to `$7`.
 fn filtered() -> String {
     format!(
-        "FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id
+        "FROM jobs j LEFT JOIN verdicts v ON v.job_id = j.id {STATIC_REPORT}
          WHERE ($1::text IS NULL OR j.canonical_name LIKE $1)
            AND ($2::text IS NULL OR v.level = $2)
            AND ($3::text IS NULL OR v.review = $3)
@@ -488,7 +488,8 @@ impl Store {
             .client
             .query_one(
                 &format!(
-                    "SELECT count(*) FROM jobs j JOIN verdicts v ON v.job_id = j.id WHERE {}",
+                    "SELECT count(*) FROM jobs j JOIN verdicts v ON v.job_id = j.id {STATIC_REPORT}
+                     WHERE {}",
                     needs_reprocessing("$1", "$2")
                 ),
                 &[&analyzer_version(), &STATIC_ANALYZER_VERSION],

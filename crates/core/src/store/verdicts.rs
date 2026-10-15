@@ -67,17 +67,21 @@ pub(super) fn needs_rescore(version: &str, static_version: &str) -> String {
     )
 }
 
+/// Joins a job's static report as `s`, for [`needs_reprocessing`]. A join
+/// instead of an `EXISTS` per verdict lets PostgreSQL hash `static_reports`
+/// once, and drops it when the condition is not needed.
+pub(super) const STATIC_REPORT: &str = "LEFT JOIN static_reports s ON s.sha256 = j.cksum";
+
 /// Like [`needs_rescore`], and also jobs whose static report an older static
 /// analysis wrote: they are rescored once it is refreshed. `static_version`
-/// is the SQL for the current static analysis version.
+/// is the SQL for the current static analysis version. Needs
+/// [`STATIC_REPORT`] in the `FROM` clause.
 pub(super) fn needs_reprocessing(version: &str, static_version: &str) -> String {
     format!(
         "{FINISHED}
          AND (v.analyzer_version < {version}
-              OR EXISTS (SELECT 1 FROM static_reports s
-                         WHERE s.sha256 = j.cksum
-                           AND (s.analyzed_at > v.scored_at
-                                OR s.analyzer_version < {static_version})))"
+              OR s.analyzed_at > v.scored_at
+              OR s.analyzer_version < {static_version})"
     )
 }
 
