@@ -1,16 +1,43 @@
 //! The job list: its filters, state counts and pages.
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use askama::Template;
 use axum::extract::{Query, State};
 use axum::response::Html;
 use crateward_core::job::JobState;
-use crateward_core::store::JobFilter;
+use crateward_core::store::{JobFilter, Store, StoreError};
 use serde::Deserialize;
 
 use crate::views::{JobsPage, PageLink, Row, StateCount};
 use crate::{AppState, Page, encode};
+
+/// How long the jobs page shows the same reprocessing backlog. Counting it
+/// reads every verdict, and it only changes when a new analyzer ships or a
+/// burst makes progress.
+const BACKLOG_TTL: Duration = Duration::from_secs(60);
+
+/// The reprocessing backlog, counted at most once a minute.
+/// Requests that arrive while it is counted wait for that count.
+#[derive(Debug, Default)]
+pub struct Backlog(tokio::sync::Mutex<Option<(Instant, i64)>>);
+
+impl Backlog {
+    async fn count(&self, store: &Store) -> Result<i64, StoreError> {
+        let mut cached = self.0.lock().await;
+        if let Some((at, count)) = *cached
+            && at.elapsed() < BACKLOG_TTL
+        {
+            return Ok(count);
+        }
+
+        let count = store.rescore_backlog().await?;
+        *cached = Some((Instant::now(), count));
+
+        Ok(count)
+    }
+}
 
 /// The job list's filters.
 #[derive(Debug, Deserialize)]
@@ -162,7 +189,7 @@ pub(crate) async fn jobs(State(state): State<Arc<AppState>>, Query(q): Query<Job
         .jobs(&filter, paging.offset, paging.per)
         .await?;
 
-    let backlog = state.reader.rescore_backlog().await?;
+    let backlog = state.backlog.count(&state.reader).await?;
 
     let at = |page: i64| selection.href(selection.state, page, paging.per);
 

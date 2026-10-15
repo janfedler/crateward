@@ -49,7 +49,7 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::job_detail::{job_href, job_page};
-use crate::jobs_list::jobs;
+use crate::jobs_list::{Backlog, jobs};
 use crate::views::{InboxPage, OverviewBody, OverviewData, OverviewPage, Row, ago};
 
 /// The component this package implements.
@@ -138,6 +138,8 @@ pub struct AppState {
     pub writer: Store,
     /// Ends the live updates, so a shutdown does not wait for open pages.
     pub stop: Stop,
+    /// The jobs page's reprocessing backlog.
+    pub backlog: Backlog,
 }
 
 /// Errors shown as a plain 500. Details go to the log only.
@@ -549,6 +551,7 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
             reader,
             writer,
             stop: stop.clone(),
+            backlog: Backlog::default(),
         });
 
         let listen = config.web.listen;

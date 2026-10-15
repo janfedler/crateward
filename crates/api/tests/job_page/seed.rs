@@ -4,6 +4,7 @@ use std::future::IntoFuture;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crateward_api::jobs_list::Backlog;
 use crateward_api::{AppState, router};
 use crateward_core::app::Stop;
 use crateward_core::job::{JobEvent, JobId, Stage, Triage};
@@ -33,6 +34,7 @@ impl Dashboard {
             reader: db.store().await,
             writer: db.store().await,
             stop: Stop::install().unwrap(),
+            backlog: Backlog::default(),
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

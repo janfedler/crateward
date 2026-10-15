@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crateward_api::jobs_list::Backlog;
 use crateward_api::{AppState, router};
 use crateward_core::app::Stop;
 use crateward_core::testing::TestDb;
@@ -28,6 +29,7 @@ async fn sigterm_ends_open_live_updates() {
         reader: db.store().await,
         writer: db.store().await,
         stop: stop.clone(),
+        backlog: Backlog::default(),
     };
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
