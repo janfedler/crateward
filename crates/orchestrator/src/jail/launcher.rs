@@ -82,11 +82,9 @@ fn step<E: std::fmt::Display>(step: &'static str) -> impl FnOnce(E) -> LaunchErr
     }
 }
 
-fn read_line<R: BufRead>(input: &mut R, limit: usize) -> Result<String, LaunchError> {
+fn read_line<R: BufRead>(input: &mut R, limit: u64) -> Result<String, LaunchError> {
     let mut line = String::new();
-    let mut limited = input
-        .by_ref()
-        .take(u64::try_from(limit).unwrap_or(u64::MAX));
+    let mut limited = input.by_ref().take(limit);
 
     limited
         .read_line(&mut line)

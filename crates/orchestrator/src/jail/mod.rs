@@ -50,7 +50,7 @@ pub const FIRECRACKER_IN_JAIL: &str = "/firecracker";
 pub const FAKE_INTERNET_IN_JAIL: &str = "/fake-internet";
 
 /// Largest specification the launcher reads.
-pub const MAX_SPEC_BYTES: usize = 64 * 1024;
+pub const MAX_SPEC_BYTES: u64 = 64 * 1024;
 
 /// One file bind mounted into the jail.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
