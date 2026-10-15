@@ -319,13 +319,32 @@ fn set_limit(resource: Resource, value: u64) -> Result<(), LaunchError> {
     rustix::process::setrlimit(resource, limit).map_err(step("setting a resource limit"))
 }
 
-/// Everything between the ID maps and `exec`.
+/// Everything between the ID maps and `exec`: step 3 and the limits of
+/// step 4 in the [module documentation](super), which ADR 0002 explains.
+/// Each step needs the one before it.
 fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
+    // The jail has no log, `/dev/null` or TLS authority of its own. They are
+    // opened while host paths are still visible and kept as descriptors.
     let files = open_host_files(spec)?;
+
+    // New mount, network, IPC and UTS namespaces, so that none of the steps
+    // below changes anything on the host.
     isolate(spec)?;
+
+    // Bind mounts what the VM needs into the jail root. This needs the
+    // private mount namespace and the host paths, so it comes in between.
     mount_root(spec)?;
+
+    // Creates the tap device and its nftables rules in the new network
+    // namespace. Runs the host's `ip` and `nft`, which the jail lacks.
     set_up_network(spec)?;
+
+    // Makes the jail root `/` and detaches the host's root. From here on
+    // no host path is reachable.
     pivot(&spec.root)?;
+
+    // Inherited by the fake internet and by Firecracker, so they are set
+    // before either of them starts.
     set_limit(Resource::Nofile, spec.max_open_files)?;
     set_limit(Resource::Fsize, spec.max_file_size)?;
 
