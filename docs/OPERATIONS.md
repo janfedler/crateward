@@ -98,6 +98,17 @@ The archive holds only what may be published: verdicts waiting for review
 and confirmed findings before their publication are refused
 ([DISCLOSURE.md](DISCLOSURE.md)). Honeytokens are redacted.
 
+`crateward archive --publish`, as root, puts the chosen reports on the
+public site under `reports/` instead, replacing the ones there, and saves
+the choice in `/etc/crateward/report-selection.json`. With
+`export.reports = true` (asked by `install.sh` on the first install) every
+export refreshes them from that choice, so new jobs that match it appear
+and reports that may no longer be published disappear. Every export
+replaces the site repository's history with a single commit
+([ADR 0013](adr/0013-job-reports-on-the-public-site.md)). Before editing
+the site repository by hand, fetch and reset to its branch, since a pull
+cannot merge a replaced history.
+
 ## SBOMs and findings documents
 
 Every finished job gets a CycloneDX SBOM of the crate and its locked
@@ -138,7 +149,7 @@ other unit sets `RestrictNamespaces=yes`.
 
 | Service | Purpose | Secret |
 |---------|---------|--------|
-| GitHub Pages (`janfedler/crateward-site`) | public site at crateward.com | deploy key for that repository only |
+| GitHub Pages (`janfedler/crateward-site`) | public site at crateward.com | deploy key for that repository only, allowed to force push |
 | ntfy.sh | alerts | topic name |
 
 ## Deploying a new build

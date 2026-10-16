@@ -37,7 +37,7 @@ fn a_bad_configuration_exits_78_and_says_why() {
 fn every_command_that_reads_the_configuration_exits_78_without_it() {
     let out = Path::new(env!("CARGO_TARGET_TMPDIR")).join("no-such-pack");
     let out = out.to_str().unwrap();
-    let commands: [&[&str]; 11] = [
+    let commands: [&[&str]; 12] = [
         &["config", "check", "--config", MISSING],
         &["status", "--config", MISSING],
         &["quarantine", "--config", MISSING, "lift"],
@@ -46,6 +46,7 @@ fn every_command_that_reads_the_configuration_exits_78_without_it() {
         &["egress", "--config", MISSING],
         &["evidence", "1", "--out", out, "--config", MISSING],
         &["archive", "--out", out, "--config", MISSING],
+        &["archive", "--publish", "--config", MISSING],
         &["sbom", "1", "--out", out, "--config", MISSING],
         &["disclosure", "--config", MISSING, "show", "1"],
         &["breaker", "--config", MISSING, "close", "sandbox"],
@@ -59,6 +60,19 @@ fn every_command_that_reads_the_configuration_exits_78_without_it() {
     }
 
     assert!(!Path::new(out).exists());
+}
+
+#[test]
+fn archive_needs_exactly_one_of_a_directory_and_the_site() {
+    for args in [
+        &["archive", "--config", MISSING][..],
+        &["archive", "--out", "x", "--publish", "--config", MISSING],
+    ] {
+        let ran = run(TOOL, None, args);
+
+        assert_eq!((ran.code, ran.out.as_str()), (2, ""), "{args:?}");
+        assert!(!ran.err.contains(MISSING), "{args:?}: {}", ran.err);
+    }
 }
 
 #[test]

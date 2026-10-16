@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crateward_api::archive::{self, ArchiveError};
+use crateward_api::export;
+use crateward_core::config::ExportConfig;
 use crateward_core::job::{JobEvent, JobId, Stage, Triage};
 use crateward_core::store::{DisclosureKind, NewJob, Review, Store};
 use crateward_core::testing::{TestDb, policies};
@@ -156,7 +158,7 @@ async fn chosen_jobs_become_static_pages_without_the_dashboard_parts() {
     let dir = scratch("pages");
     let selection = json!({"levels": ["critical"]});
     let ids = [evil.0, odd.0, benign.0];
-    let written = archive::write(&store, &ids, &dir, &selection).await;
+    let written = archive::write(&store, &ids, &dir, Some(&selection)).await;
     assert_eq!(written.unwrap(), 3);
 
     let index = read(&dir, "index.html");
@@ -219,7 +221,7 @@ async fn chosen_jobs_become_static_pages_without_the_dashboard_parts() {
     }
 
     // Writing again replaces the pages of the earlier archive.
-    let again = archive::write(&store, &[odd.0], &dir, &selection).await;
+    let again = archive::write(&store, &[odd.0], &dir, Some(&selection)).await;
     assert_eq!(again.unwrap(), 1);
     assert!(!dir.join("jobs/1.html").exists());
     assert!(dir.join("jobs/2.html").exists());
@@ -248,7 +250,7 @@ async fn unreviewed_and_unpublished_findings_are_refused_before_anything_is_writ
     let dir = scratch("refused");
     let none = json!({});
 
-    let error = archive::write(&store, &[pending.0], &dir, &none).await;
+    let error = archive::write(&store, &[pending.0], &dir, Some(&none)).await;
     assert!(matches!(
         error,
         Err(ArchiveError::Refused {
@@ -257,7 +259,7 @@ async fn unreviewed_and_unpublished_findings_are_refused_before_anything_is_writ
         })
     ));
 
-    let error = archive::write(&store, &[reported.0], &dir, &none).await;
+    let error = archive::write(&store, &[reported.0], &dir, Some(&none)).await;
     assert_eq!(
         error.unwrap_err().to_string(),
         format!(
@@ -266,7 +268,7 @@ async fn unreviewed_and_unpublished_findings_are_refused_before_anything_is_writ
         )
     );
 
-    let error = archive::write(&store, &[99], &dir, &none).await;
+    let error = archive::write(&store, &[99], &dir, Some(&none)).await;
     assert!(matches!(error, Err(ArchiveError::NotCandidate(99))));
     assert!(!dir.exists());
 
@@ -284,7 +286,7 @@ async fn versions_archived_together_are_compared() {
     let new = release(&mut store, "pair", "0.2.0", 40, 2).await;
 
     let dir = scratch("diff");
-    let written = archive::write(&store, &[new.0, old.0], &dir, &json!({})).await;
+    let written = archive::write(&store, &[new.0, old.0], &dir, Some(&json!({}))).await;
     assert_eq!(written.unwrap(), 2);
 
     let page = read(&dir, &format!("jobs/{}.html", new.0));
@@ -303,11 +305,147 @@ async fn versions_archived_together_are_compared() {
     assert!(!diff.contains("ghp_"));
 
     // Without the version before, there is nothing to compare with.
-    let alone = archive::write(&store, &[new.0], &dir, &json!({})).await;
+    let alone = archive::write(&store, &[new.0], &dir, Some(&json!({}))).await;
     assert_eq!(alone.unwrap(), 1);
     assert!(!dir.join(format!("jobs/{}-diff.html", new.0)).exists());
     assert!(!read(&dir, &format!("jobs/{}.html", new.0)).contains("Compare with"));
 
     std::fs::remove_dir_all(dir).unwrap();
+    db.drop().await;
+}
+
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "git {args:?}: {output:?}");
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// A bare site repository with one commit on `main`, pushed to over
+/// `file://`, so no SSH is involved.
+fn site_repository(root: &Path) -> ExportConfig {
+    std::fs::create_dir_all(root.join("seed")).unwrap();
+    git(
+        root,
+        &[
+            "init",
+            "--quiet",
+            "--bare",
+            "--initial-branch=main",
+            "site.git",
+        ],
+    );
+
+    let seed = root.join("seed");
+    git(&seed, &["init", "--quiet", "--initial-branch=main"]);
+    std::fs::write(seed.join("finding.html"), "by hand\n").unwrap();
+    git(&seed, &["add", "--all"]);
+    git(&seed, &["commit", "--quiet", "--message", "Seed"]);
+    git(&seed, &["push", "--quiet", "../site.git", "main"]);
+
+    ExportConfig {
+        repository: format!("file://{}", root.join("site.git").display()),
+        branch: "main".into(),
+        deploy_key: root.join("no-key"),
+        interval_hours: 24,
+        reports: true,
+    }
+}
+
+#[tokio::test]
+async fn published_reports_follow_the_saved_selection_without_history() {
+    let Some(db) = TestDb::new("archive_publish").await else {
+        return;
+    };
+
+    let mut store = db.migrated().await;
+    let evil = done(&mut store, "evil", 90, 1).await;
+    let other = done(&mut store, "other", 80, 2).await;
+
+    let root = scratch("publish");
+    let config = site_repository(&root);
+    let work = root.join("work");
+    let bare = root.join("site.git");
+
+    // The default selection takes both.
+    let saved = root.join("report-selection.json");
+    std::fs::write(&saved, "{}").unwrap();
+    let ids = export::saved_reports(&store, &saved)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(ids, [evil.0, other.0]);
+    assert!(
+        export::publish(&store, &config, &work, Some(&ids))
+            .await
+            .unwrap()
+    );
+
+    let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+
+    assert!(
+        files.contains(&format!("reports/jobs/{}.html", other.0)),
+        "{files}"
+    );
+    assert!(files.contains("reports/index.html"), "{files}");
+    assert!(!files.contains("selection.json"), "{files}");
+    assert!(files.contains("finding.html"), "{files}");
+    assert!(git(&bare, &["show", "main:index.html"]).contains("href=\"reports/\""));
+
+    let page = git(
+        &bare,
+        &["show", &format!("main:reports/jobs/{}.html", evil.0)],
+    );
+
+    assert!(!page.contains("ghp_"), "a honeytoken was published");
+
+    // Once a reviewer reopens `other`, the next export takes it down, and
+    // the history does not keep it.
+    assert!(
+        store
+            .set_review(other, Review::Pending, None)
+            .await
+            .unwrap()
+    );
+
+    let ids = export::saved_reports(&store, &saved)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(ids, [evil.0]);
+    assert!(
+        export::publish(&store, &config, &work, Some(&ids))
+            .await
+            .unwrap()
+    );
+
+    let files = git(&bare, &["ls-tree", "-r", "--name-only", "main"]);
+
+    assert!(
+        !files.contains(&format!("reports/jobs/{}.html", other.0)),
+        "{files}"
+    );
+    assert_eq!(git(&bare, &["rev-list", "--count", "main"]).trim(), "1");
+    assert_eq!(git(&bare, &["show", "main:finding.html"]), "by hand\n");
+
+    // Without a saved selection, the reports stay as they are.
+    let missing = root.join("missing.json");
+
+    assert!(
+        export::saved_reports(&store, &missing)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    std::fs::remove_dir_all(&root).unwrap();
     db.drop().await;
 }

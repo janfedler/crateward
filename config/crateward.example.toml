@@ -192,9 +192,13 @@ topic = "example_topic_replace_with_48_random_hex_chars"
 [export]
 repository = "git@github.com:example/crateward-site.git"
 branch = "main"
-# A deploy key with write access to the site repository only.
+# A deploy key with write access to the site repository only. Every export
+# force pushes a single commit, so the key must be allowed to force push.
 deploy_key = "/etc/crateward/site-deploy-key"
 interval_hours = 24
+# Refresh the job reports `crateward archive --publish` put on the site with
+# every export, from the selection it saved (ADR 0013).
+reports = false
 
 [web]
 # Loopback only: the maintainer reaches the dashboard through an SSH tunnel,

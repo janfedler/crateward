@@ -293,6 +293,28 @@ async fn archive_writes_a_saved_selection_and_needs_a_terminal_without_one() {
     assert_eq!(saved["levels"], json!(["medium"]));
     assert_eq!(saved["per_level"], json!(25));
 
+    // Without a public site there is nothing to publish to.
+    let config = std::fs::read_to_string(site.path("crateward.toml")).unwrap();
+    let start = config.find("\n[export]\n").unwrap();
+    let end = config[start + 1..].find("\n[").unwrap() + start + 1;
+    let local = site.path("local.toml");
+    std::fs::write(&local, format!("{}{}", &config[..start], &config[end..])).unwrap();
+
+    let ran = site.run(&[
+        "archive",
+        "--publish",
+        "--config",
+        local.to_str().unwrap(),
+        "--selection",
+        selection.to_str().unwrap(),
+    ]);
+
+    ran.expect(
+        1,
+        "",
+        "the configuration has no [export] table, so there is no public site\n",
+    );
+
     let missing = site.path("missing.json");
     let ran = site.run(&[
         "archive",

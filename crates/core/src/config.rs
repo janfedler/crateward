@@ -78,6 +78,10 @@ pub struct ExportConfig {
     pub deploy_key: PathBuf,
     /// Hours between two exports.
     pub interval_hours: u64,
+    /// Whether every export also refreshes the published job reports from
+    /// the selection `crateward archive --publish` saved.
+    #[serde(default)]
+    pub reports: bool,
 }
 
 /// Identity and directories of this installation.

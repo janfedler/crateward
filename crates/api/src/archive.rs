@@ -248,8 +248,10 @@ async fn chosen(store: &Store, ids: &[i64]) -> Result<Vec<ArchiveCandidate>, Arc
 
 /// Writes the archive of the jobs `ids` into `dir`: `index.html`, a page per
 /// job under `jobs/`, the stylesheet and fonts under `static/`, and
-/// `selection`, which says how the jobs were chosen. Nothing is written if a
-/// job may not be archived. Returns the number of job pages.
+/// `selection`, which says how the jobs were chosen, unless it is `None`
+/// (a published archive leaves it out, since it names the jobs left out
+/// by hand). Nothing is written if a job may not be archived. Returns the
+/// number of job pages.
 ///
 /// # Errors
 ///
@@ -259,7 +261,7 @@ pub async fn write(
     store: &Store,
     ids: &[i64],
     dir: &Path,
-    selection: &serde_json::Value,
+    selection: Option<&serde_json::Value>,
 ) -> Result<usize, ArchiveError> {
     let mut chosen = chosen(store, ids).await?;
     prepare(dir)?;
@@ -323,10 +325,12 @@ pub async fn write(
         include_bytes!("../static/OFL.txt"),
     )?;
 
-    std::fs::write(
-        dir.join(SELECTION),
-        serde_json::to_string_pretty(selection)? + "\n",
-    )?;
+    if let Some(selection) = selection {
+        std::fs::write(
+            dir.join(SELECTION),
+            serde_json::to_string_pretty(selection)? + "\n",
+        )?;
+    }
 
     // Static hosts such as GitHub Pages serve the files as they are.
     std::fs::write(dir.join(".nojekyll"), "")?;

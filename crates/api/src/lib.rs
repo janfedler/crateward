@@ -27,6 +27,7 @@ pub mod jobs_list;
 pub mod run_view;
 pub mod sbom;
 pub mod security;
+pub mod selection;
 pub mod views;
 
 use std::sync::Arc;

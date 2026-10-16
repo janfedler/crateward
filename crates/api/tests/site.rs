@@ -96,7 +96,7 @@ async fn the_site_shows_counts_canaries_and_published_findings_only() {
         .unwrap();
     store.mark_resolved(evil, None).await.unwrap().unwrap();
 
-    let unpublished = export::build(&store).await.unwrap();
+    let unpublished = export::build(&store, false).await.unwrap();
     let page = |files: &[(String, Vec<u8>)]| {
         String::from_utf8(
             files
@@ -125,7 +125,7 @@ async fn the_site_shows_counts_canaries_and_published_findings_only() {
         .await
         .unwrap();
 
-    let files = export::build(&store).await.unwrap();
+    let files = export::build(&store, false).await.unwrap();
     let index = page(&files);
     let stats: Value =
         serde_json::from_slice(&files.iter().find(|(n, _)| n == "stats.json").unwrap().1).unwrap();

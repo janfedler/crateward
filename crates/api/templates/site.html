@@ -52,6 +52,12 @@ was not built.</p>
 <h2>Self checks</h2>
 <p>{{ canaries }}</p>
 
+{% if reports %}
+<h2>Job reports</h2>
+<p><a href="reports/">The reports of chosen crate versions</a>, as
+Crateward's dashboard shows them.</p>
+{% endif %}
+
 <h2>Published findings</h2>
 {% if findings.is_empty() %}<p>None yet.</p>{% else %}
 <table>

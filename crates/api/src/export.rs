@@ -1,21 +1,31 @@
-//! The public site: a static export of aggregate statistics (ADR 0001).
+//! The public site: a static export of aggregate statistics (ADR 0001), and
+//! the job reports the maintainer chose to publish (ADR 0013).
 //!
 //! The server never serves the public. It renders a few static files and,
 //! when `[export]` is configured, pushes them to the site repository with a
 //! deploy key that can write to that repository only. GitHub Pages serves
 //! them. The export contains counts, and the crate names of findings only
 //! once the maintainer published them after disclosure (`crateward
-//! disclosure publish`, DISCLOSURE.md). No evidence, no undisclosed
-//! findings. The finding pages themselves are written by hand.
+//! disclosure publish`, DISCLOSURE.md). The finding pages themselves are
+//! written by hand.
+//!
+//! `crateward archive --publish` adds chosen job reports under `reports/`,
+//! with the archive's refusals (`crate::archive`). With `export.reports`,
+//! every export refreshes them from the saved selection, so a report that
+//! may no longer be published disappears. Every push replaces the branch
+//! with a single commit, so a removed report leaves no history behind.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use askama::Template;
 use crateward_core::config::ExportConfig;
-use crateward_core::paths::host;
+use crateward_core::paths::{host, site};
 use crateward_core::store::{PublicStats, PublishedFinding, Store, StoreError};
 use crateward_core::text::Utc;
+
+use crate::archive::{self, ArchiveError};
+use crate::selection::Selection;
 
 pub use crateward_core::paths::site::DOMAIN;
 
@@ -28,9 +38,13 @@ pub enum ExportError {
     /// A template did not render.
     #[error(transparent)]
     Template(#[from] askama::Error),
-    /// The statistics did not serialize.
+    /// The statistics did not serialize, or the saved selection did not
+    /// parse.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    /// The job reports could not be written.
+    #[error(transparent)]
+    Archive(#[from] ArchiveError),
     /// The site's files could not be written.
     #[error("cannot write the site files: {0}")]
     Files(#[from] std::io::Error),
@@ -68,6 +82,7 @@ struct SitePage {
     daily: Vec<(String, i64)>,
     canaries: String,
     findings: Vec<FindingLine>,
+    reports: bool,
     generated: String,
 }
 
@@ -96,7 +111,8 @@ fn coverage_label(kind: &str) -> String {
     }
 }
 
-/// The files of the site, by path.
+/// The files of the site, by path. `reports` says whether the site has job
+/// reports to link to.
 ///
 /// # Errors
 ///
@@ -105,6 +121,7 @@ pub fn render(
     stats: &PublicStats,
     canaries: &[(String, bool, i64)],
     findings: &[PublishedFinding],
+    reports: bool,
     generated: &str,
 ) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
     let total = stats.finished.max(1);
@@ -141,6 +158,7 @@ pub fn render(
                 slug: f.slug.clone(),
             })
             .collect(),
+        reports,
         generated: generated.to_owned(),
     };
 
@@ -242,17 +260,9 @@ async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportErro
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Pushes the files to the site repository: a fresh shallow clone, the
-/// files replaced, one commit if anything changed.
-///
-/// # Errors
-///
-/// Fails if a git step fails.
-pub async fn publish(
-    config: &ExportConfig,
-    work: &Path,
-    files: &[(String, Vec<u8>)],
-) -> Result<bool, ExportError> {
+/// Clones the site repository's branch into `work/checkout`, replacing an
+/// earlier checkout. Returns the checkout and the commit it is at.
+async fn clone(config: &ExportConfig, work: &Path) -> Result<(PathBuf, String), ExportError> {
     let checkout = work.join("checkout");
     let _ = std::fs::remove_dir_all(&checkout);
     std::fs::create_dir_all(work)?;
@@ -265,26 +275,99 @@ pub async fn publish(
         &[&clone[..], &[&config.repository, &target]].concat(),
     )
     .await?;
-    write(&checkout, files)?;
-    git(&checkout, key, &["add", "--all"]).await?;
 
-    if git(&checkout, key, &["status", "--porcelain"])
-        .await?
-        .trim()
-        .is_empty()
-    {
+    let head = git(&checkout, key, &["rev-parse", "HEAD"]).await?;
+
+    Ok((checkout, head.trim().to_owned()))
+}
+
+/// Replaces the branch with a single commit of the checkout's files, unless
+/// it already is one with these files. The force push is leased on `head`,
+/// so a commit pushed since the clone is not lost but fails the push.
+async fn push(config: &ExportConfig, checkout: &Path, head: &str) -> Result<bool, ExportError> {
+    let (key, branch) = (&config.deploy_key, &config.branch);
+    git(checkout, key, &["add", "--all"]).await?;
+
+    let tree = git(checkout, key, &["write-tree"]).await?;
+    let tree = tree.trim();
+    let current = git(checkout, key, &["rev-parse", "HEAD^{tree}"]).await?;
+
+    // The raw commit names its parents even in a shallow clone.
+    let raw = git(checkout, key, &["cat-file", "commit", "HEAD"]).await?;
+    let alone = !raw.lines().any(|line| line.starts_with("parent "));
+
+    if alone && current.trim() == tree {
         return Ok(false);
     }
 
-    git(
-        &checkout,
+    let commit = git(
+        checkout,
         key,
-        &["commit", "--quiet", "--message", "Update statistics"],
+        &["commit-tree", tree, "-m", "Update the site"],
     )
     .await?;
-    git(&checkout, key, &["push", "--quiet", "origin", branch]).await?;
+
+    let lease = format!("--force-with-lease=refs/heads/{branch}:{head}");
+    let target = format!("{}:refs/heads/{branch}", commit.trim());
+    git(
+        checkout,
+        key,
+        &["push", "--quiet", &lease, "origin", &target],
+    )
+    .await?;
 
     Ok(true)
+}
+
+/// Pushes the site to the site repository, and replaces its job reports
+/// with the jobs `reports` when given. Returns whether anything changed.
+///
+/// # Errors
+///
+/// Fails if a git step fails, a report may not be published, or the site
+/// does not render.
+pub async fn publish(
+    store: &Store,
+    config: &ExportConfig,
+    work: &Path,
+    reports: Option<&[i64]>,
+) -> Result<bool, ExportError> {
+    let (checkout, head) = clone(config, work).await?;
+    let dir = checkout.join(site::REPORTS);
+
+    if let Some(ids) = reports {
+        match std::fs::remove_dir_all(&dir) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(error.into());
+            }
+            _ => {}
+        }
+
+        archive::write(store, ids, &dir, None).await?;
+    }
+
+    let files = build(store, dir.join("index.html").is_file()).await?;
+    write(&checkout, &files)?;
+
+    push(config, &checkout, &head).await
+}
+
+/// The jobs of the saved report selection, or `None` without one.
+///
+/// # Errors
+///
+/// Fails if the selection cannot be read or parsed, or on database errors.
+pub async fn saved_reports(store: &Store, path: &Path) -> Result<Option<Vec<i64>>, ExportError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+
+    let selection: Selection = serde_json::from_slice(&bytes)?;
+    let candidates = store.archive_candidates(None).await?;
+
+    Ok(Some(selection.chosen(&candidates)))
 }
 
 /// Renders the site from the store.
@@ -292,13 +375,13 @@ pub async fn publish(
 /// # Errors
 ///
 /// Fails on database or template errors.
-pub async fn build(store: &Store) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
+pub async fn build(store: &Store, reports: bool) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
     let stats = store.public_stats().await?;
     let canaries = store.latest_canaries().await?;
     let findings = store.published_findings().await?;
     let now = store.now_epoch().await?;
 
-    render(&stats, &canaries, &findings, &format_utc(now))
+    render(&stats, &canaries, &findings, reports, &format_utc(now))
 }
 
 /// Seconds since the epoch as `YYYY-MM-DD HH:MM UTC`.
@@ -312,30 +395,42 @@ pub fn format_utc(secs: i64) -> String {
     )
 }
 
-/// Exports on a schedule until the process ends: writes the site below
-/// `dir`, and pushes it when `config` is set.
+/// Exports on a schedule until the process ends: pushes the site when
+/// `config` is set, and writes it below `dir` otherwise.
 pub async fn run(store: &Store, dir: PathBuf, config: Option<&ExportConfig>) {
     let interval = Duration::from_secs(config.map_or(24, |c| c.interval_hours) * 3600);
 
     loop {
-        match build(store).await {
-            Ok(files) => {
-                if let Err(error) = write(&dir.join("site"), &files) {
-                    tracing::warn!(%error, "cannot write the site");
-                } else if let Some(config) = config {
-                    match publish(config, &dir, &files).await {
-                        Ok(changed) => tracing::info!(changed, "public site exported"),
-                        Err(error) => tracing::warn!(%error, "public site not pushed"),
-                    }
-                } else {
-                    tracing::info!(dir = %dir.display(), "public site written locally");
-                }
-            }
-            Err(error) => tracing::warn!(%error, "cannot build the public site"),
+        match export(store, &dir, config).await {
+            Ok(Some(changed)) => tracing::info!(changed, "public site exported"),
+            Ok(None) => tracing::info!(dir = %dir.display(), "public site written locally"),
+            Err(error) => tracing::warn!(%error, "public site not exported"),
         }
 
         tokio::time::sleep(interval).await;
     }
+}
+
+/// One export. Returns whether the push changed the site, or `None` when
+/// the site was only written locally.
+async fn export(
+    store: &Store,
+    dir: &Path,
+    config: Option<&ExportConfig>,
+) -> Result<Option<bool>, ExportError> {
+    let Some(config) = config else {
+        write(&dir.join("site"), &build(store, false).await?)?;
+
+        return Ok(None);
+    };
+
+    let reports = if config.reports {
+        saved_reports(store, Path::new(host::REPORT_SELECTION)).await?
+    } else {
+        None
+    };
+
+    Ok(Some(publish(store, config, dir, reports.as_deref()).await?))
 }
 
 #[cfg(test)]
@@ -402,30 +497,99 @@ mod tests {
             branch: "main".into(),
             deploy_key: root.join("no-key"),
             interval_hours: 24,
+            reports: false,
         }
     }
 
+    /// What `publish` does, without the database: clone, write `files`,
+    /// push.
+    async fn push_files(config: &ExportConfig, work: &Path, files: &[(String, Vec<u8>)]) -> bool {
+        let (checkout, head) = clone(config, work).await.unwrap();
+        write(&checkout, files).unwrap();
+
+        push(config, &checkout, &head).await.unwrap()
+    }
+
     #[tokio::test]
-    async fn the_site_is_pushed_as_crateward_and_only_when_it_changed() {
+    async fn the_site_is_one_commit_by_crateward_pushed_only_when_it_changed() {
         let root = scratch("publish");
         let config = site_repository(&root);
         let work = root.join("work");
-        let files = vec![("index.html".to_owned(), b"<p>hello</p>".to_vec())];
-
-        assert!(publish(&config, &work, &files).await.unwrap());
-        assert!(!publish(&config, &work, &files).await.unwrap());
-
         let bare = root.join("site.git");
+        let first = vec![("index.html".to_owned(), b"<p>hello</p>".to_vec())];
+
+        assert!(push_files(&config, &work, &first).await);
+        assert!(!push_files(&config, &work, &first).await);
+
+        let second = vec![("index.html".to_owned(), b"<p>again</p>".to_vec())];
+
+        assert!(push_files(&config, &work, &second).await);
+
         let last = git_in(&bare, &["log", "-1", "--format=%an <%ae>: %s", "main"]);
 
         assert_eq!(
             last.trim(),
-            "Crateward <security@janfedler.de>: Update statistics"
+            "Crateward <security@janfedler.de>: Update the site"
         );
-        assert_eq!(git_in(&bare, &["rev-list", "--count", "main"]).trim(), "2");
 
-        let page = git_in(&bare, &["show", "main:index.html"]);
-        assert_eq!(page, "<p>hello</p>");
+        // The seed and the earlier pages are gone from the history, the
+        // seed's files stay.
+        assert_eq!(git_in(&bare, &["rev-list", "--count", "main"]).trim(), "1");
+        assert_eq!(git_in(&bare, &["show", "main:index.html"]), "<p>again</p>");
+        assert_eq!(git_in(&bare, &["show", "main:README"]), "seed\n");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_commit_pushed_after_the_clone_fails_the_push_and_stays() {
+        let root = scratch("lease");
+        let config = site_repository(&root);
+        let files = vec![("index.html".to_owned(), b"<p>hello</p>".to_vec())];
+        let (checkout, head) = clone(&config, &root.join("work")).await.unwrap();
+        write(&checkout, &files).unwrap();
+
+        // The maintainer pushes a finding page meanwhile.
+        let seed = root.join("seed");
+        std::fs::write(seed.join("finding.html"), "by hand\n").unwrap();
+        git_in(&seed, &["add", "--all"]);
+        git_in(
+            &seed,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--quiet",
+                "--message",
+                "Finding",
+            ],
+        );
+        git_in(
+            &seed,
+            &[
+                "push",
+                "--quiet",
+                &root.join("site.git").to_string_lossy(),
+                "main",
+            ],
+        );
+
+        let error = push(&config, &checkout, &head).await.unwrap_err();
+
+        assert!(
+            matches!(&error, ExportError::GitFailed { step, .. } if step == "push"),
+            "{error}"
+        );
+
+        let bare = root.join("site.git");
+
+        assert_eq!(git_in(&bare, &["show", "main:finding.html"]), "by hand\n");
+
+        // The next export starts from it and keeps it.
+        assert!(push_files(&config, &root.join("work"), &files).await);
+        assert_eq!(git_in(&bare, &["show", "main:finding.html"]), "by hand\n");
 
         std::fs::remove_dir_all(&root).unwrap();
     }
@@ -438,9 +602,10 @@ mod tests {
             branch: "main".into(),
             deploy_key: root.join("no-key"),
             interval_hours: 24,
+            reports: false,
         };
 
-        let error = publish(&config, &root.join("work"), &[]).await.unwrap_err();
+        let error = clone(&config, &root.join("work")).await.unwrap_err();
         assert!(
             matches!(&error, ExportError::GitFailed { step, stderr }
                 if step == "clone" && !stderr.is_empty()),
@@ -480,12 +645,21 @@ mod tests {
             daily: vec![("2026-09-25".into(), 8)],
         };
 
-        let files = render(&stats, &[("canary-exfil".into(), true, 0)], &[], "now").unwrap();
+        let files = render(
+            &stats,
+            &[("canary-exfil".into(), true, 0)],
+            &[],
+            false,
+            "now",
+        )
+        .unwrap();
+
         let index = String::from_utf8(files[0].1.clone()).unwrap();
 
         assert!(index.contains("Built and traced in a microVM on Linux"));
         assert!(index.contains("(25%)"));
         assert!(index.contains("expected results"));
+        assert!(!index.contains("reports/"), "no reports, no link");
 
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
@@ -543,7 +717,7 @@ mod tests {
             ..finding.clone()
         };
 
-        let files = render(&stats, &[], &[finding, removed], "now").unwrap();
+        let files = render(&stats, &[], &[finding, removed], false, "now").unwrap();
         let index = String::from_utf8(files[0].1.clone()).unwrap();
 
         assert!(index.contains(r#"<a href="findings/evil-0-1-0/">details</a>"#));
@@ -589,7 +763,7 @@ mod tests {
                 false,
             ),
         ] {
-            let files = render(&stats, &canaries, &[], "now").unwrap();
+            let files = render(&stats, &canaries, &[], false, "now").unwrap();
 
             assert!(index(&files).contains(text), "{text}");
             assert_eq!(stats_json(&files)["canaries_pass"], pass, "{text}");
@@ -598,7 +772,7 @@ mod tests {
 
     #[test]
     fn an_empty_store_renders_an_empty_site() {
-        let files = render(&PublicStats::default(), &[], &[], "now").unwrap();
+        let files = render(&PublicStats::default(), &[], &[], false, "now").unwrap();
         let index = index(&files);
 
         assert!(index.contains("<tr><th>Versions seen</th><td>0</td></tr>"));
@@ -634,7 +808,7 @@ mod tests {
             daily: vec![("2026-10-09".into(), 4), ("2026-10-08".into(), 5)],
         };
 
-        let files = render(&stats, &[], &[], "2026-10-09 08:00 UTC").unwrap();
+        let files = render(&stats, &[], &[], false, "2026-10-09 08:00 UTC").unwrap();
         let index = index(&files);
 
         for row in [
@@ -684,7 +858,7 @@ mod tests {
 
     #[test]
     fn the_page_loads_only_its_own_files() {
-        let files = render(&PublicStats::default(), &[], &[], "now").unwrap();
+        let files = render(&PublicStats::default(), &[], &[], false, "now").unwrap();
         let index = index(&files);
 
         assert!(index.contains(

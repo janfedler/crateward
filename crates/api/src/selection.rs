@@ -1,6 +1,6 @@
 //! Which jobs go into the archive: filters, a cap per level, and jobs
-//! added or removed by hand. It is saved next to the archive, so the same
-//! choice can be made again.
+//! added or removed by hand. It is saved with the archive, so the same
+//! choice can be made again, by hand or by the daily export.
 
 use std::collections::{BTreeSet, HashMap};
 

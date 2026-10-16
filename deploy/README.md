@@ -25,10 +25,12 @@ applies it as root. Nothing here runs automatically.
 3. As root on the server, prepare `/root/crateward` (mode 0700):
    * `allowed_signers` with one line, `crateward-release <release public key>`.
    * `site-deploy-key`, the site repository's deploy key, if it exists yet.
+     It needs write access, and the branch must allow force pushes
+     ([ADR 0013](../docs/adr/0013-job-reports-on-the-public-site.md)).
 4. Unpack the tarball anywhere and run `./install.sh` from it. The first
    run asks for your website and email address (crates.io wants them in the
-   user agent), the ntfy topic, the site repository and the dashboard
-   address, and writes `/root/crateward/crateward.toml` and
+   user agent), the ntfy topic, the site repository, whether every export
+   refreshes the published job reports, and the dashboard address, and writes `/root/crateward/crateward.toml` and
    `/root/crateward/vars.yml`. It refuses to run while another
    orchestrator runs on the host, such as a development pipeline.
 5. Reboot once, so the kernel command line applies. Then check the host

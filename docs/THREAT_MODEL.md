@@ -17,7 +17,7 @@ test. Nothing is marked Built before the code exists.
 | A4 | Isolation between jobs | One crate must not influence the verdict of another. |
 | A5 | Shared build cache and warm snapshot | Poisoning them would affect every later job. |
 | A6 | Admin access: SSH keys | Full control of the system. |
-| A7 | Deploy key of the public site repository | Allows defacing crateward.com. |
+| A7 | Deploy key of the public site repository | Allows defacing crateward.com and replacing its history. |
 | A8 | ntfy topic | Allows reading or forging alerts. |
 | A9 | Availability of the pipeline | Crateward is only useful if it keeps up. |
 | A10 | Reputation with crates.io | Violating the data access policy would get Crateward blocked. |
@@ -46,7 +46,7 @@ test. Nothing is marked Built before the code exists.
 | B5 | Crate archive to validation and static analysis | untrusted bytes into sandboxed subprocesses |
 | B6 | Warm build output to job VMs | read only images named by their BLAKE3 digest, built and used within one orchestrator process |
 | B7 | Server to internet | allowlisted egress per service user, and SSH inbound |
-| B8 | Server to public site | one way push of a sanitized static export |
+| B8 | Server to public site | one way force push of a sanitized static export |
 | B9 | Admin to control plane | SSH. The dashboard listens on loopback only and is reached through an SSH tunnel |
 
 ## Mitigations
@@ -145,7 +145,8 @@ test. Nothing is marked Built before the code exists.
 | Alerts carry no crate names or details before disclosure. Details stay on the server, behind SSH | Tested |
 | ntfy topic of at least 32 random characters. Configuration rejects shorter topics | Tested |
 | Secrets redacted from `Debug` output and logs | Tested |
-| Public site is a static export of aggregate statistics and disclosed findings only, pushed with a deploy key limited to one repository. A finding is listed only after it was reported and resolved. The database refuses to publish it earlier (`crateward disclosure`) | Tested (push waits for the repository) |
+| Public site is a static export of aggregate statistics and disclosed findings, pushed with a deploy key limited to one repository. A finding is listed only after it was reported and resolved. The database refuses to publish it earlier (`crateward disclosure`) | Tested (push waits for the repository) |
+| Job reports on the public site only as the archive allows them: no verdict waiting for review, no confirmed finding before its publication, honeytokens redacted. Each export refreshes them by the same rules and replaces the history with one commit, leased on the cloned commit ([ADR 0013](adr/0013-job-reports-on-the-public-site.md)) | Tested |
 
 A compromised external service can deface the public site, suppress alerts or
 forge them. It cannot reach the server or read undisclosed findings.

@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
-use super::selection::{COVERAGE, LEVELS, Mark, REVIEWS, Selection};
+use crateward_api::selection::{COVERAGE, LEVELS, Mark, REVIEWS, Selection};
 
 /// A line of the filter pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

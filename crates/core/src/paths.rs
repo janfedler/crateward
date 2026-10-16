@@ -10,6 +10,10 @@ pub mod site {
     /// The site's domain, written to `CNAME` for GitHub Pages and named as
     /// the creator of SBOMs.
     pub const DOMAIN: &str = "crateward.com";
+
+    /// The published job reports, a directory of the site repository
+    /// (`crateward archive --publish`).
+    pub const REPORTS: &str = "reports";
 }
 
 /// The installed server.
@@ -24,6 +28,12 @@ pub mod host {
     /// takes the home directory from the user database, not from `HOME`,
     /// so the export names this file.
     pub const EXPORT_KNOWN_HOSTS: &str = "/var/lib/crateward/api/.ssh/known_hosts";
+
+    /// The selection of the published job reports, saved by `crateward
+    /// archive --publish` and read by the daily export when
+    /// `export.reports` is set. In a directory only root writes, since root
+    /// saves it.
+    pub const REPORT_SELECTION: &str = "/etc/crateward/report-selection.json";
 
     /// The content addressed blob store, in `instance.data_dir`.
     pub const BLOBS: &str = "cas";

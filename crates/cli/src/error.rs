@@ -58,6 +58,12 @@ pub enum CliError {
     /// The archive could not be written.
     #[error(transparent)]
     Archive(#[from] crateward_api::archive::ArchiveError),
+    /// The reports could not be published.
+    #[error(transparent)]
+    Export(#[from] crateward_api::export::ExportError),
+    /// `--publish` without a public site.
+    #[error("the configuration has no [export] table, so there is no public site")]
+    NoExport,
     /// A saved selection cannot be read.
     #[error("{path}: {source}")]
     Selection {

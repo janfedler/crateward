@@ -105,12 +105,19 @@ enum Command {
         #[arg(long, env = "CRATEWARD_CONFIG", default_value = host::CONFIG)]
         config: PathBuf,
     },
-    /// Write chosen job pages as a static archive, for when the server is
-    /// gone. Opens a screen to choose them, unless `--selection` is given.
+    /// Write chosen job pages as a static archive, or publish them on the
+    /// public site. Opens a screen to choose them, unless `--selection` is
+    /// given.
     Archive {
         /// The archive's directory: new, empty, or an earlier archive.
-        #[arg(long)]
-        out: PathBuf,
+        #[arg(long, required_unless_present = "publish")]
+        out: Option<PathBuf>,
+        /// Publish the reports under `reports/` on the public site instead,
+        /// replacing the ones there, and save the selection for the daily
+        /// refresh (`export.reports`). Needs the `[export]` table, and
+        /// root for its deploy key.
+        #[arg(long, conflicts_with = "out")]
+        publish: bool,
         /// A saved selection (`selection.json` of an earlier archive) to
         /// use instead of the screen.
         #[arg(long)]
@@ -218,11 +225,20 @@ fn run(command: Command) -> Result<(), CliError> {
         }
         Command::Archive {
             out,
+            publish: _,
             selection,
             config,
-        } => with_store(&Config::load(&config)?, |store| async move {
-            archive::run(store, &out, selection.as_deref()).await
-        }),
+        } => {
+            let config = Config::load(&config)?;
+            let target = match out {
+                Some(dir) => archive::Target::Directory(dir),
+                None => archive::Target::Site(config.export.clone().ok_or(CliError::NoExport)?),
+            };
+
+            with_store(&config, |store| async move {
+                archive::run(store, &target, selection.as_deref()).await
+            })
+        }
         Command::Sbom { job, out, config } => {
             with_store(&Config::load(&config)?, |store| async move {
                 sbom::run(store, job, &out).await

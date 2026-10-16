@@ -25,3 +25,4 @@ changes go in the commit message, not in a record. New records use
 | [0010](0010-license.md) | MIT OR Apache-2.0, with GPL-2.0-only for the eBPF programs |
 | [0011](0011-version-diff-view.md) | A diff view against the previous version |
 | [0012](0012-cyclonedx-sbom-and-vex.md) | A CycloneDX SBOM and a separate findings document per job |
+| [0013](0013-job-reports-on-the-public-site.md) | Job reports on the public site, without history |

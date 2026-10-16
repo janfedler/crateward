@@ -8,10 +8,12 @@
 #   ./install.sh uninstall --purge   remove the state as well
 #
 # The first install asks for the operator's contact details, the ntfy topic,
-# the site repository and the dashboard address, and writes the
-# configuration. Without a terminal it reads CRATEWARD_CONTACT_URL,
-# CRATEWARD_CONTACT_EMAIL, CRATEWARD_NTFY_TOPIC, CRATEWARD_SITE_REPOSITORY
-# ("none" for no public site) and CRATEWARD_WEB_LISTEN instead.
+# the site repository, whether every export refreshes the published job
+# reports, and the dashboard address, and writes the configuration. Without
+# a terminal it reads CRATEWARD_CONTACT_URL, CRATEWARD_CONTACT_EMAIL,
+# CRATEWARD_NTFY_TOPIC, CRATEWARD_SITE_REPOSITORY ("none" for no public
+# site), CRATEWARD_SITE_REPORTS ("yes" or "no", only with a site) and
+# CRATEWARD_WEB_LISTEN instead.
 #
 # Everything the maintainer owns stays in CRATEWARD_STATE (default
 # /root/crateward), mode 0700:
@@ -43,7 +45,7 @@ say() {
 }
 
 usage() {
-    sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -139,6 +141,15 @@ write_config() {
     repository="$(ask CRATEWARD_SITE_REPOSITORY "site repository, git@github.com:owner/name.git, or none" "none")"
     [[ "$repository" == none || "$repository" =~ ^git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$ ]] ||
         die "the site repository must be git@github.com:owner/name.git or none"
+    # The job reports `crateward archive --publish` put on the site.
+    local reports=false
+    if [[ "$repository" != none ]]; then
+        case "$(ask CRATEWARD_SITE_REPORTS "refresh the published job reports with every export, yes or no" "no")" in
+            yes) reports=true ;;
+            no) ;;
+            *) die "answer yes or no" ;;
+        esac
+    fi
     listen="$(ask CRATEWARD_WEB_LISTEN "dashboard address, loopback only" "$(default_listen)")"
     [[ "$listen" =~ ^(127\.0\.0\.1|\[::1\]):[0-9]{1,5}$ ]] ||
         die "the dashboard address must be 127.0.0.1:<port> or [::1]:<port>"
@@ -147,6 +158,7 @@ write_config() {
     sed -e "s|^user_agent = .*|user_agent = \"crateward/0.1 (+$url; $email)\"|" \
         -e "s|^topic = .*|topic = \"$topic\"|" \
         -e "s|^repository = .*|repository = \"$repository\"|" \
+        -e "s|^reports = .*|reports = $reports|" \
         -e "s|^listen = .*|listen = \"$listen\"|" \
         "$BUNDLE/config/crateward.example.toml" |
         if [[ "$repository" == none ]]; then without_table export; else cat; fi > "$draft"

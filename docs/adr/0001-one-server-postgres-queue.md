@@ -22,8 +22,9 @@ host.
    heartbeats. A state change and the queue movement happen in one
    transaction.
 3. **Two external services, each with one narrow secret.** The public site
-   is a static export of counts, pushed to `janfedler/crateward-site` and
-   served by GitHub Pages. The server's deploy key writes to that
+   is a static export of counts, and of the job reports the maintainer
+   chose ([ADR 0013](0013-job-reports-on-the-public-site.md)), pushed to
+   `janfedler/crateward-site` and served by GitHub Pages. The server's deploy key writes to that
    repository only. Alerts go through ntfy.sh, whose topic name is the
    password, so configuration validation requires 32 to 64 random
    characters.
