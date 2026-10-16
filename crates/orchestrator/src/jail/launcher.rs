@@ -246,9 +246,15 @@ fn bind_device(root: &Path, device: &Path) -> Result<(), LaunchError> {
 fn mount_root(spec: &JailSpec) -> Result<(), LaunchError> {
     let root = &spec.root;
 
-    // pivot_root needs the new root to be a mount point.
+    // pivot_root needs the new root to be a mount point. Firecracker writes
+    // its sockets and snapshots there, so it stays writable, but nothing on
+    // it may be executed, be a device or gain privileges. The bind mounts
+    // below carry their own flags.
     rustix::mount::mount_bind(root, root).map_err(step("binding the jail root"))?;
     let hardened = MountFlags::NOSUID | MountFlags::NODEV;
+    rustix::mount::mount_remount(root, MountFlags::BIND | hardened | MountFlags::NOEXEC, "")
+        .map_err(step("restricting the jail root"))?;
+
     bind(
         &spec.firecracker,
         &root.join(FIRECRACKER_IN_JAIL.trim_start_matches('/')),

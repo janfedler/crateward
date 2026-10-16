@@ -22,7 +22,9 @@ affected by L1TF and MDS, and its memory has no ECC.
    * The slot's own subordinate UID through `newuidmap`. Switching every
      UID away from 0 clears the capabilities, and `no_new_privs` is set.
    * A new mount namespace with bind mounts of exactly the kernel, the
-     images and the device nodes, then `pivot_root`, no `/proc`.
+     images and the device nodes, then `pivot_root`, no `/proc`. The root
+     itself stays writable for Firecracker's sockets and snapshots, but is
+     `nosuid`, `nodev` and `noexec`.
    * The slot's cgroup in the orchestrator's delegated subtree.
    * A network namespace owned by the jail, with the tap device inside.
    * A PID namespace in which Firecracker is PID 1. The launcher's first

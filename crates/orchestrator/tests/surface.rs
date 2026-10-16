@@ -294,7 +294,7 @@ fn check_mounts(slot: &Slot) {
     let program = set(["ro", "nosuid", "nodev"]);
     let device = set(["rw", "nosuid", "noexec"]);
     let expected = BTreeMap::from([
-        ("/".to_owned(), set(["rw"])),
+        ("/".to_owned(), set(["rw", "nosuid", "nodev", "noexec"])),
         ("/firecracker".to_owned(), program.clone()),
         ("/fake-internet".to_owned(), program),
         ("/kernel".to_owned(), file.clone()),
