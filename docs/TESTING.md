@@ -18,7 +18,7 @@ server.
 | Integration tests | The feed against a mock crates.io, the job store, the static analysis worker, the analyzer, the supervisor, the dashboard, the public site and the `crateward` tool on a real PostgreSQL. The sandboxed children of the fetcher, static analysis and the orchestrator | `crates/*/tests/`, for example `crates/feed/tests/feed.rs`. The database tests need `CRATEWARD_TEST_DATABASE_URL` |
 | Canary tests | A known bad crate must be caught and a known good one must come out clean, built in a real microVM | `crates/orchestrator/tests/canary.rs` through `cargo xtask canary`, on the server. The orchestrator also runs them every `sandbox.canary_interval_minutes` |
 | Recall corpus | Inert samples that rebuild known malicious techniques, and legitimate patterns, each with what a VM run of it records. Static analysis and scoring must reach the level each sample names. Samples are only parsed, never built, and the known gaps are listed with their reason | `crates/static_analysis/tests/recall.rs`, samples in `tests/fixtures/recall` |
-| Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly). `cargo xtask ci` type checks them, `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
+| Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz` and `cargo afl`, pinned nightly). `cargo xtask ci` type checks them for both engines, `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release. [Long fuzzing runs](#long-fuzzing-runs) use AFL++ |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default and run on the server with `--ignored` |
 | Surface tests | Everything a jailed Firecracker can see from the host (credentials, mounts, descriptors, environment, limits, namespaces, cgroup, network, jail root) and everything its guest can see (identity, boot arguments, devices, mounts, routes, where traffic goes), each compared with an exhaustive list | `crates/orchestrator/tests/surface.rs` through `cargo xtask surface`, on the server |
 | SBOM validation | A sample SBOM and findings document pass the CycloneDX 1.6 schema, and the SBOM meets BSI TR-03183-2 v2.1.0 ([ADR 0012](adr/0012-cyclonedx-sbom-and-vex.md)) | `cargo xtask cyclonedx`, with pinned `cyclonedx-cli` and `sbomqs` |
@@ -116,6 +116,27 @@ cover the code that only runs with a real VM.
 GitHub CI runs the same checks except the fuzz type check, which is too
 slow there. It also runs `cargo xtask deploy-check`, which needs
 `ansible-playbook`, `systemd-analyze`, `nft` and `unshare` on the host.
+
+## Long fuzzing runs
+
+```sh
+cargo install cargo-afl --version 0.18.2 --locked
+(cd fuzz && cargo afl config --build)
+cargo xtask fuzz --engine afl --jobs 2
+```
+
+builds every target with AFL++ and fuzzes them in turn, one hour each
+(`--seconds`), round after round until interrupted with `Ctrl-C`. `--target` (repeatable)
+narrows the set, and `--jobs` sets the instances per target. Every target
+starts from its seed corpus and keeps its state in
+`fuzz/afl/<target>/out`, so a new run resumes the old one. Crashing inputs
+land in `fuzz/afl/<target>/out/*/crashes`, and xtask names each target
+that has any after its round.
+
+The fuzzers run at nice 19 and are not bound to a core, so on a production
+host the microVMs come first. Keep `--jobs` below the number of cores
+there. AFL++ reads at most 1 MiB of each input, so larger seeds such as the
+BTF target's `vmlinux` are cut.
 
 ## Coverage
 

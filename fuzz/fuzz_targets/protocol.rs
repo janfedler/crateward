@@ -1,7 +1,7 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
 use crateward_core::protocol::{Decoder, GuestMessage, HostMessage, Limits};
+use crateward_fuzz::fuzz_target;
 
 // The host decodes everything the guest sends: arbitrary bytes, split into
 // arbitrary chunks, must never panic or allocate beyond the budget.

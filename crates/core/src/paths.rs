@@ -198,6 +198,15 @@ pub mod repo {
 
     /// The fuzz targets, one file each.
     pub const FUZZ_TARGETS: &str = "fuzz/fuzz_targets";
+
+    /// The seed corpus, one directory per target.
+    pub const FUZZ_CORPUS: &str = "fuzz/corpus";
+
+    /// The AFL++ state, one output directory per target.
+    pub const FUZZ_AFL: &str = "fuzz/afl";
+
+    /// The targets built by `cargo afl build --release`.
+    pub const FUZZ_AFL_BINARIES: &str = "fuzz/target/release";
 }
 
 /// The build machine: outputs relative to the workspace root, which the

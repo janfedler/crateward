@@ -90,11 +90,22 @@ enum Task {
     /// Check deploy/: playbook syntax, unit files, firewall rules. Needs
     /// `ansible-playbook`, `systemd-analyze`, `nft` and `unshare`.
     DeployCheck,
-    /// Run every fuzz target for a while (needs `cargo fuzz`).
+    /// Run the fuzz targets with libFuzzer (`cargo fuzz`) for a while, or
+    /// with AFL++ (`cargo afl`) round after round until interrupted.
     Fuzz {
-        /// Seconds per target.
-        #[arg(long, default_value_t = 30)]
-        seconds: u32,
+        /// The fuzzing engine.
+        #[arg(long, value_enum, default_value_t = fuzz::Engine::Libfuzzer)]
+        engine: fuzz::Engine,
+        /// Seconds per target, or per target and round with AFL++.
+        /// Defaults to 30 with libFuzzer and 3600 with AFL++.
+        #[arg(long)]
+        seconds: Option<u32>,
+        /// Only these targets (repeatable). Defaults to every target.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        /// AFL++ instances per target: one main and the rest secondary.
+        #[arg(long, default_value_t = 1)]
+        jobs: u32,
     },
     /// Validate a sample SBOM and findings document against CycloneDX 1.6
     /// and BSI TR-03183-2 with pinned `cyclonedx-cli` and `sbomqs`.
@@ -155,7 +166,12 @@ fn main() -> ExitCode {
         Task::Surface => surface(),
         Task::Coverage => coverage::run_coverage(&workspace_root()),
         Task::DeployCheck => deploy::run(&workspace_root()),
-        Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
+        Task::Fuzz {
+            engine,
+            seconds,
+            targets,
+            jobs,
+        } => fuzz::run(&workspace_root(), engine, seconds, &targets, jobs),
     };
 
     match result {
@@ -278,7 +294,13 @@ fn output(dir: &Path, program: &str, args: &[&str]) -> Result<String, TaskError>
 /// file. The outer cargo exports its toolchain. Removing it lets the
 /// package's own `rust-toolchain.toml` choose.
 fn nested_cargo(dir: &Path) -> Command {
-    let mut command = Command::new("cargo");
+    nested("cargo", dir)
+}
+
+/// `program` in `dir`, without the outer cargo's toolchain (see
+/// [`nested_cargo`]), for a program that runs `cargo` itself.
+fn nested(program: &str, dir: &Path) -> Command {
+    let mut command = Command::new(program);
     command.current_dir(dir);
 
     for name in [

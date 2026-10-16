@@ -1,7 +1,7 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
 use crateward_core::cratesio::parse_feed;
+use crateward_fuzz::fuzz_target;
 
 // The RSS feeds from crates.io.
 fuzz_target!(|data: &[u8]| {

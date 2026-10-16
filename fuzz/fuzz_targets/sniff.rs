@@ -1,7 +1,7 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
 use crateward_fake_internet::sniff::{content_length, http_header_end, sniff};
+use crateward_fuzz::fuzz_target;
 
 // The first bytes of every guest connection.
 fuzz_target!(|data: &[u8]| {

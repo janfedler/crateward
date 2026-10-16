@@ -1,7 +1,7 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
 use crateward_fake_internet::dns::{answer, parse_query};
+use crateward_fuzz::fuzz_target;
 
 // Every DNS query of the guest reaches this parser.
 fuzz_target!(|data: &[u8]| {

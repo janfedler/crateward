@@ -1,6 +1,6 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
+use crateward_fuzz::fuzz_target;
 use std::sync::OnceLock;
 
 use crateward_static_analysis::analyze::{AnalyzeLimits, analyze};

@@ -1,7 +1,7 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
 use crateward_fetcher::resolve::locked_packages;
+use crateward_fuzz::fuzz_target;
 
 // Lockfiles cargo wrote for a hostile manifest.
 fuzz_target!(|data: &[u8]| {

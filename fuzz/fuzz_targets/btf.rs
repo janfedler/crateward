@@ -1,6 +1,6 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
+use crateward_fuzz::fuzz_target;
 use crateward_guest_agent::btf::Btf;
 
 // The agent trusts the running kernel's BTF, but a malformed blob must

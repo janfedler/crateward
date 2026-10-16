@@ -1,7 +1,7 @@
-#![no_main]
+#![cfg_attr(feature = "libfuzzer", no_main)]
 
-use libfuzzer_sys::fuzz_target;
 use crateward_fetcher::archive::{ArchiveLimits, validate};
+use crateward_fuzz::fuzz_target;
 
 // Crate archives: gzip and tar from any publisher.
 fuzz_target!(|data: &[u8]| {

@@ -12,8 +12,18 @@ cargo-fuzz = true
 # Its own workspace: it builds with the nightly pin and sanitizer flags.
 [workspace]
 
+[lib]
+path = "src/lib.rs"
+
+# Exactly one engine: libFuzzer for `cargo fuzz`, AFL++ for `cargo afl`.
+[features]
+default = ["libfuzzer"]
+libfuzzer = ["dep:libfuzzer-sys"]
+afl = ["dep:afl"]
+
 [dependencies]
-libfuzzer-sys = "0.4"
+afl = { version = "=0.18.2", optional = true }
+libfuzzer-sys = { version = "0.4", optional = true }
 ext4-view = { version = "1.0", features = ["std"] }
 crateward_core = { path = "../crates/core" }
 crateward_fake_internet = { path = "../crates/fake_internet" }
