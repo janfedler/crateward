@@ -29,9 +29,10 @@ applies it as root. Nothing here runs automatically.
      ([ADR 0013](../docs/adr/0013-job-reports-on-the-public-site.md)).
 4. Unpack the tarball anywhere and run `./install.sh` from it. The first
    run asks for your website and email address (crates.io wants them in the
-   user agent), the ntfy topic, the site repository, whether every export
-   refreshes the published job reports, and the dashboard address, and writes `/root/crateward/crateward.toml` and
-   `/root/crateward/vars.yml`. It refuses to run while another
+   user agent, and the public site shows the address), the ntfy topic, the
+   site repository, whether every export refreshes the published job
+   reports, and the dashboard address, and writes
+   `/root/crateward/crateward.toml` and `/root/crateward/vars.yml`. It refuses to run while another
    orchestrator runs on the host, such as a development pipeline.
 5. Reboot once, so the kernel command line applies. Then check the host
    with [the security checklist](../docs/SECURITY_CHECKLIST.md).

@@ -9,6 +9,9 @@
 [instance]
 # Name used in alerts and in the public export.
 name = "crateward"
+# The operator's address, shown on the public site and as the author of its
+# commits. The crates.io user agent below must name it too.
+contact_email = "security@example.com"
 # Durable state on disk: content addressed store, evidence, logs.
 data_dir = "/var/lib/crateward"
 # Volatile state in tmpfs: promoted images, sockets, per job scratch.

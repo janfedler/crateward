@@ -83,6 +83,7 @@ struct SitePage {
     canaries: String,
     findings: Vec<FindingLine>,
     reports: bool,
+    contact: String,
     generated: String,
 }
 
@@ -100,7 +101,9 @@ struct FindingLine {
 /// crates.io points here.
 #[derive(Template)]
 #[template(path = "about.html")]
-struct AboutPage;
+struct AboutPage<'a> {
+    contact: &'a str,
+}
 
 fn coverage_label(kind: &str) -> String {
     match kind {
@@ -111,8 +114,8 @@ fn coverage_label(kind: &str) -> String {
     }
 }
 
-/// The files of the site, by path. `reports` says whether the site has job
-/// reports to link to.
+/// The files of the site, by path. `contact` is the operator's email
+/// address, and `reports` says whether the site has job reports to link to.
 ///
 /// # Errors
 ///
@@ -121,6 +124,7 @@ pub fn render(
     stats: &PublicStats,
     canaries: &[(String, bool, i64)],
     findings: &[PublishedFinding],
+    contact: &str,
     reports: bool,
     generated: &str,
 ) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
@@ -159,6 +163,7 @@ pub fn render(
             })
             .collect(),
         reports,
+        contact: contact.to_owned(),
         generated: generated.to_owned(),
     };
 
@@ -182,7 +187,10 @@ pub fn render(
 
     let mut files: Vec<(String, Vec<u8>)> = vec![
         ("index.html".into(), page.render()?.into_bytes()),
-        ("about/index.html".into(), AboutPage.render()?.into_bytes()),
+        (
+            "about/index.html".into(),
+            AboutPage { contact }.render()?.into_bytes(),
+        ),
         ("stats.json".into(), serde_json::to_vec_pretty(&json)?),
         ("site.css".into(), SITE_CSS.as_bytes().to_vec()),
     ];
@@ -239,7 +247,6 @@ async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportErro
 
     let output = tokio::process::Command::new("git")
         .args(["-c", "user.name=Crateward"])
-        .args(["-c", "user.email=security@janfedler.de"])
         .args(args)
         .current_dir(dir)
         .env("GIT_SSH_COMMAND", ssh)
@@ -261,8 +268,13 @@ async fn git(dir: &Path, key: &Path, args: &[&str]) -> Result<String, ExportErro
 }
 
 /// Clones the site repository's branch into `work/checkout`, replacing an
-/// earlier checkout. Returns the checkout and the commit it is at.
-async fn clone(config: &ExportConfig, work: &Path) -> Result<(PathBuf, String), ExportError> {
+/// earlier checkout, with `contact` as its commits' email address. Returns
+/// the checkout and the commit it is at.
+async fn clone(
+    config: &ExportConfig,
+    contact: &str,
+    work: &Path,
+) -> Result<(PathBuf, String), ExportError> {
     let checkout = work.join("checkout");
     let _ = std::fs::remove_dir_all(&checkout);
     std::fs::create_dir_all(work)?;
@@ -276,6 +288,7 @@ async fn clone(config: &ExportConfig, work: &Path) -> Result<(PathBuf, String), 
     )
     .await?;
 
+    git(&checkout, key, &["config", "user.email", contact]).await?;
     let head = git(&checkout, key, &["rev-parse", "HEAD"]).await?;
 
     Ok((checkout, head.trim().to_owned()))
@@ -329,10 +342,11 @@ async fn push(config: &ExportConfig, checkout: &Path, head: &str) -> Result<bool
 pub async fn publish(
     store: &Store,
     config: &ExportConfig,
+    contact: &str,
     work: &Path,
     reports: Option<&[i64]>,
 ) -> Result<bool, ExportError> {
-    let (checkout, head) = clone(config, work).await?;
+    let (checkout, head) = clone(config, contact, work).await?;
     let dir = checkout.join(site::REPORTS);
 
     if let Some(ids) = reports {
@@ -346,7 +360,7 @@ pub async fn publish(
         archive::write(store, ids, &dir, None).await?;
     }
 
-    let files = build(store, dir.join("index.html").is_file()).await?;
+    let files = build(store, contact, dir.join("index.html").is_file()).await?;
     write(&checkout, &files)?;
 
     push(config, &checkout, &head).await
@@ -370,18 +384,29 @@ pub async fn saved_reports(store: &Store, path: &Path) -> Result<Option<Vec<i64>
     Ok(Some(selection.chosen(&candidates)))
 }
 
-/// Renders the site from the store.
+/// Renders the site from the store, naming `contact` as the operator.
 ///
 /// # Errors
 ///
 /// Fails on database or template errors.
-pub async fn build(store: &Store, reports: bool) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
+pub async fn build(
+    store: &Store,
+    contact: &str,
+    reports: bool,
+) -> Result<Vec<(String, Vec<u8>)>, ExportError> {
     let stats = store.public_stats().await?;
     let canaries = store.latest_canaries().await?;
     let findings = store.published_findings().await?;
     let now = store.now_epoch().await?;
 
-    render(&stats, &canaries, &findings, reports, &format_utc(now))
+    render(
+        &stats,
+        &canaries,
+        &findings,
+        contact,
+        reports,
+        &format_utc(now),
+    )
 }
 
 /// Seconds since the epoch as `YYYY-MM-DD HH:MM UTC`.
@@ -396,12 +421,13 @@ pub fn format_utc(secs: i64) -> String {
 }
 
 /// Exports on a schedule until the process ends: pushes the site when
-/// `config` is set, and writes it below `dir` otherwise.
-pub async fn run(store: &Store, dir: PathBuf, config: Option<&ExportConfig>) {
+/// `config` is set, and writes it below `dir` otherwise. `contact` is the
+/// operator's email address.
+pub async fn run(store: &Store, dir: PathBuf, config: Option<&ExportConfig>, contact: &str) {
     let interval = Duration::from_secs(config.map_or(24, |c| c.interval_hours) * 3600);
 
     loop {
-        match export(store, &dir, config).await {
+        match export(store, &dir, config, contact).await {
             Ok(Some(changed)) => tracing::info!(changed, "public site exported"),
             Ok(None) => tracing::info!(dir = %dir.display(), "public site written locally"),
             Err(error) => tracing::warn!(%error, "public site not exported"),
@@ -417,9 +443,10 @@ async fn export(
     store: &Store,
     dir: &Path,
     config: Option<&ExportConfig>,
+    contact: &str,
 ) -> Result<Option<bool>, ExportError> {
     let Some(config) = config else {
-        write(&dir.join("site"), &build(store, false).await?)?;
+        write(&dir.join("site"), &build(store, contact, false).await?)?;
 
         return Ok(None);
     };
@@ -430,12 +457,16 @@ async fn export(
         None
     };
 
-    Ok(Some(publish(store, config, dir, reports.as_deref()).await?))
+    Ok(Some(
+        publish(store, config, contact, dir, reports.as_deref()).await?,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const CONTACT: &str = "security@example.com";
 
     fn scratch(name: &str) -> PathBuf {
         let dir =
@@ -504,7 +535,7 @@ mod tests {
     /// What `publish` does, without the database: clone, write `files`,
     /// push.
     async fn push_files(config: &ExportConfig, work: &Path, files: &[(String, Vec<u8>)]) -> bool {
-        let (checkout, head) = clone(config, work).await.unwrap();
+        let (checkout, head) = clone(config, CONTACT, work).await.unwrap();
         write(&checkout, files).unwrap();
 
         push(config, &checkout, &head).await.unwrap()
@@ -529,7 +560,7 @@ mod tests {
 
         assert_eq!(
             last.trim(),
-            "Crateward <security@janfedler.de>: Update the site"
+            "Crateward <security@example.com>: Update the site"
         );
 
         // The seed and the earlier pages are gone from the history, the
@@ -546,7 +577,7 @@ mod tests {
         let root = scratch("lease");
         let config = site_repository(&root);
         let files = vec![("index.html".to_owned(), b"<p>hello</p>".to_vec())];
-        let (checkout, head) = clone(&config, &root.join("work")).await.unwrap();
+        let (checkout, head) = clone(&config, CONTACT, &root.join("work")).await.unwrap();
         write(&checkout, &files).unwrap();
 
         // The maintainer pushes a finding page meanwhile.
@@ -605,7 +636,9 @@ mod tests {
             reports: false,
         };
 
-        let error = clone(&config, &root.join("work")).await.unwrap_err();
+        let error = clone(&config, CONTACT, &root.join("work"))
+            .await
+            .unwrap_err();
         assert!(
             matches!(&error, ExportError::GitFailed { step, stderr }
                 if step == "clone" && !stderr.is_empty()),
@@ -649,6 +682,7 @@ mod tests {
             &stats,
             &[("canary-exfil".into(), true, 0)],
             &[],
+            CONTACT,
             false,
             "now",
         )
@@ -686,7 +720,7 @@ mod tests {
         assert!(!about.contains("<script"));
 
         // The user agent points at this page, which names the contact.
-        assert!(about.contains("security@janfedler.de"));
+        assert!(about.contains("security@example.com"));
     }
 
     #[test]
@@ -717,7 +751,7 @@ mod tests {
             ..finding.clone()
         };
 
-        let files = render(&stats, &[], &[finding, removed], false, "now").unwrap();
+        let files = render(&stats, &[], &[finding, removed], CONTACT, false, "now").unwrap();
         let index = String::from_utf8(files[0].1.clone()).unwrap();
 
         assert!(index.contains(r#"<a href="findings/evil-0-1-0/">details</a>"#));
@@ -763,7 +797,7 @@ mod tests {
                 false,
             ),
         ] {
-            let files = render(&stats, &canaries, &[], false, "now").unwrap();
+            let files = render(&stats, &canaries, &[], CONTACT, false, "now").unwrap();
 
             assert!(index(&files).contains(text), "{text}");
             assert_eq!(stats_json(&files)["canaries_pass"], pass, "{text}");
@@ -772,7 +806,7 @@ mod tests {
 
     #[test]
     fn an_empty_store_renders_an_empty_site() {
-        let files = render(&PublicStats::default(), &[], &[], false, "now").unwrap();
+        let files = render(&PublicStats::default(), &[], &[], CONTACT, false, "now").unwrap();
         let index = index(&files);
 
         assert!(index.contains("<tr><th>Versions seen</th><td>0</td></tr>"));
@@ -808,7 +842,7 @@ mod tests {
             daily: vec![("2026-10-09".into(), 4), ("2026-10-08".into(), 5)],
         };
 
-        let files = render(&stats, &[], &[], false, "2026-10-09 08:00 UTC").unwrap();
+        let files = render(&stats, &[], &[], CONTACT, false, "2026-10-09 08:00 UTC").unwrap();
         let index = index(&files);
 
         for row in [
@@ -858,7 +892,7 @@ mod tests {
 
     #[test]
     fn the_page_loads_only_its_own_files() {
-        let files = render(&PublicStats::default(), &[], &[], false, "now").unwrap();
+        let files = render(&PublicStats::default(), &[], &[], CONTACT, false, "now").unwrap();
         let index = index(&files);
 
         assert!(index.contains(
@@ -869,7 +903,7 @@ mod tests {
         for link in [
             r#"<a href="stats.json">"#,
             r#"<a href="about/">"#,
-            r#"<a href="mailto:security@janfedler.de">"#,
+            r#"<a href="mailto:security@example.com">"#,
         ] {
             assert!(index.contains(link), "{link}");
         }

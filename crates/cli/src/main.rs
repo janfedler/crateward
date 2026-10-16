@@ -232,7 +232,10 @@ fn run(command: Command) -> Result<(), CliError> {
             let config = Config::load(&config)?;
             let target = match out {
                 Some(dir) => archive::Target::Directory(dir),
-                None => archive::Target::Site(config.export.clone().ok_or(CliError::NoExport)?),
+                None => archive::Target::Site {
+                    export: config.export.clone().ok_or(CliError::NoExport)?,
+                    contact: config.instance.contact_email.clone(),
+                },
             };
 
             with_store(&config, |store| async move {

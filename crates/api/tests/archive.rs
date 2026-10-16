@@ -383,7 +383,7 @@ async fn published_reports_follow_the_saved_selection_without_history() {
 
     assert_eq!(ids, [evil.0, other.0]);
     assert!(
-        export::publish(&store, &config, &work, Some(&ids))
+        export::publish(&store, &config, "security@example.com", &work, Some(&ids))
             .await
             .unwrap()
     );
@@ -422,7 +422,7 @@ async fn published_reports_follow_the_saved_selection_without_history() {
 
     assert_eq!(ids, [evil.0]);
     assert!(
-        export::publish(&store, &config, &work, Some(&ids))
+        export::publish(&store, &config, "security@example.com", &work, Some(&ids))
             .await
             .unwrap()
     );

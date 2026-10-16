@@ -90,6 +90,9 @@ pub struct ExportConfig {
 pub struct InstanceConfig {
     /// Name used in alerts and the public export.
     pub name: String,
+    /// The operator's email address, shown on the public site and used as
+    /// the site commits' author. The user agent names it too.
+    pub contact_email: String,
     /// Durable state on disk (content addressed store, evidence).
     pub data_dir: PathBuf,
     /// Volatile state in tmpfs (promoted images, sockets, scratch).
@@ -567,6 +570,15 @@ impl Config {
             "instance.name",
             "must not be empty",
         );
+        let email = &self.instance.contact_email;
+        v.check(
+            email
+                .split_once('@')
+                .is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.'))
+                && !email.contains(|c: char| c.is_whitespace() || "<>\"".contains(c)),
+            "instance.contact_email",
+            "must be an email address",
+        );
         v.absolute(&self.instance.data_dir, "instance.data_dir");
         v.absolute(&self.instance.run_dir, "instance.run_dir");
         v.check(
@@ -586,9 +598,9 @@ impl Config {
         let c = &self.crates_io;
         v.check(
             c.user_agent.starts_with("crateward/")
-                && (c.user_agent.contains("http") || c.user_agent.contains('@')),
+                && c.user_agent.contains(self.instance.contact_email.as_str()),
             "crates_io.user_agent",
-            "must start with 'crateward/' and include contact details (a URL or an email address)",
+            "must start with 'crateward/' and name instance.contact_email",
         );
 
         for (url, key) in [

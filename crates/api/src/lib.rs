@@ -544,8 +544,9 @@ pub fn run(config: &Config) -> Result<(), ComponentError> {
         exporter.make_read_only().await.map_err(fatal)?;
         let export_dir = config.instance.run_dir.join(host::EXPORT_WORK);
         let export_config = config.export.clone();
+        let contact = config.instance.contact_email.clone();
         tokio::spawn(async move {
-            export::run(&exporter, export_dir, export_config.as_ref()).await;
+            export::run(&exporter, export_dir, export_config.as_ref(), &contact).await;
         });
         let stop = Stop::install().map_err(fatal)?;
         let state = Arc::new(AppState {

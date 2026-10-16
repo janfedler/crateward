@@ -143,6 +143,26 @@ fn instance_rules() {
         "instance.name",
         "must not be empty",
     );
+
+    // The user agent names each, so only the address is wrong.
+    for email in [
+        "",
+        "me",
+        "@example.com",
+        "me@localhost",
+        "me @example.com",
+        "<me@x.example>",
+    ] {
+        rule(
+            |c| {
+                c.instance.contact_email = email.into();
+                c.crates_io.user_agent = format!("crateward/0.1 ({email})");
+            },
+            "instance.contact_email",
+            "must be an email address",
+        );
+    }
+
     rule(
         |c| c.instance.data_dir = "data".into(),
         "instance.data_dir",
@@ -169,13 +189,13 @@ fn instance_rules() {
 
 #[test]
 fn crates_io_rules() {
-    let message =
-        "must start with 'crateward/' and include contact details (a URL or an email address)";
+    let message = "must start with 'crateward/' and name instance.contact_email";
     for agent in [
         "curl/8.0",
         "crateward/0.1",
-        "crateward/0.1 (no contact)",
-        "x crateward/0.1 (+https://x)",
+        "crateward/0.1 (+https://x.example)",
+        "crateward/0.1 (me@x.example)",
+        "x crateward/0.1 (+https://x; security@example.com)",
     ] {
         rule(
             |c| c.crates_io.user_agent = agent.into(),
@@ -185,8 +205,8 @@ fn crates_io_rules() {
     }
 
     for agent in [
-        "crateward/0.1 (+https://x.example)",
-        "crateward/0.1 (me@x.example)",
+        "crateward/0.1 (+https://x.example; security@example.com)",
+        "crateward/0.1 (security@example.com)",
     ] {
         accepted(|c| c.crates_io.user_agent = agent.into());
     }
@@ -577,6 +597,7 @@ fn ntfy_and_web_rules() {
 
 fn break_the_common_rules(c: &mut Config) {
     c.instance.name.clear();
+    c.instance.contact_email.clear();
     c.instance.data_dir = "data".into();
     c.instance.run_dir = "run".into();
     c.telemetry.log_filter.clear();
@@ -660,7 +681,7 @@ fn order(parts: &[&str]) -> Vec<String> {
 }
 
 const ORDER_BEFORE_SANDBOX: &str = concat!(
-    "instance.name instance.data_dir instance.run_dir telemetry.log_filter ",
+    "instance.name instance.contact_email instance.data_dir instance.run_dir telemetry.log_filter ",
     "database.url ",
     "crates_io.user_agent crates_io.index_url crates_io.static_url ",
     "crates_io.rss_updates_url crates_io.rss_new_crates_url crates_io.db_dump_url ",

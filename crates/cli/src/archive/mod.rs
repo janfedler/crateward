@@ -25,7 +25,12 @@ pub enum Target {
     Directory(PathBuf),
     /// The public site's `reports/`. The selection is saved where the daily
     /// export reads it.
-    Site(ExportConfig),
+    Site {
+        /// The site repository.
+        export: ExportConfig,
+        /// The operator's email address, which the site shows.
+        contact: String,
+    },
 }
 
 impl Target {
@@ -33,7 +38,7 @@ impl Target {
     fn selection(&self) -> PathBuf {
         match self {
             Self::Directory(out) => out.join(SELECTION),
-            Self::Site(_) => PathBuf::from(host::REPORT_SELECTION),
+            Self::Site { .. } => PathBuf::from(host::REPORT_SELECTION),
         }
     }
 
@@ -41,7 +46,7 @@ impl Target {
     fn name(&self) -> PathBuf {
         match self {
             Self::Directory(out) => out.clone(),
-            Self::Site(export) => {
+            Self::Site { export, .. } => {
                 PathBuf::from(format!("{} {}/", export.repository, site::REPORTS))
             }
         }
@@ -106,10 +111,10 @@ pub async fn run(store: Store, target: &Target, from: Option<&Path>) -> Result<(
                 out.join("index.html").display()
             );
         }
-        Target::Site(export) => {
+        Target::Site { export, contact } => {
             out!("publishing {} reports to {}", ids.len(), export.repository);
             let work = private_dir()?;
-            let published = export::publish(&store, export, &work, Some(&ids)).await;
+            let published = export::publish(&store, export, contact, &work, Some(&ids)).await;
             let _ = std::fs::remove_dir_all(&work);
 
             let changed = published?;

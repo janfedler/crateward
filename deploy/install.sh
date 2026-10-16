@@ -133,7 +133,7 @@ write_config() {
     # crates.io asks for a user agent that names a way to reach the operator.
     url="$(ask CRATEWARD_CONTACT_URL "operator website, sent in the user agent" "")"
     [[ "$url" == https://?* && ! "$url" =~ $unsafe ]] || die "the website must be an https:// URL"
-    email="$(ask CRATEWARD_CONTACT_EMAIL "operator email address, sent in the user agent" "")"
+    email="$(ask CRATEWARD_CONTACT_EMAIL "operator email address, sent in the user agent and shown on the public site" "")"
     [[ "$email" == ?*@?* && ! "$email" =~ $unsafe ]] || die "not an email address"
     topic="$(ask CRATEWARD_NTFY_TOPIC "ntfy topic (openssl rand -hex 24)" "")"
     [[ "$topic" =~ ^[A-Za-z0-9_-]{32,64}$ && "$topic" != example_* ]] ||
@@ -155,7 +155,8 @@ write_config() {
         die "the dashboard address must be 127.0.0.1:<port> or [::1]:<port>"
 
     local draft="$STATE/crateward.toml.new"
-    sed -e "s|^user_agent = .*|user_agent = \"crateward/0.1 (+$url; $email)\"|" \
+    sed -e "s|^contact_email = .*|contact_email = \"$email\"|" \
+        -e "s|^user_agent = .*|user_agent = \"crateward/0.1 (+$url; $email)\"|" \
         -e "s|^topic = .*|topic = \"$topic\"|" \
         -e "s|^repository = .*|repository = \"$repository\"|" \
         -e "s|^reports = .*|reports = $reports|" \
