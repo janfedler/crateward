@@ -68,13 +68,16 @@ pub struct HostProcess {
     pub name: String,
 }
 
+/// The jail launcher's name as the kernel reports it, cut to 15 bytes.
+const LAUNCHER: &str = "crateward-vmjai";
+
 /// Process IDs that run as a slot UID without being what the jail starts
-/// (ADR 0008). A slot runs exactly one `firecracker`, started by a process
-/// outside the slot range, and at most one `fake-internet` below it, with
-/// the same UID. Anything else has no business running as a slot UID: the
-/// jail launcher itself has that name only for the moment before it
-/// executes Firecracker, so the supervisor reports a process only when two
-/// scans in a row find it.
+/// (ADR 0008). A slot runs exactly one jail launcher, started by a process
+/// outside the slot range, one `firecracker` below it and at most one
+/// `fake-internet` below that, all with the same UID. Anything else has no
+/// business running as a slot UID: the launcher's second stage has its name
+/// only for the moment before it executes Firecracker, so the supervisor
+/// reports a process only when two scans in a row find it.
 #[must_use]
 pub fn stray_processes(
     processes: &[HostProcess],
@@ -84,46 +87,38 @@ pub fn stray_processes(
     let by_pid: std::collections::HashMap<i32, &HostProcess> =
         processes.iter().map(|p| (p.pid, p)).collect();
 
-    let mut firecrackers: std::collections::HashMap<u32, Vec<i32>> =
+    // Whether `p`'s parent is `name`, running as `uid` only.
+    let below = |p: &HostProcess, name: &str, uid: u32| {
+        by_pid
+            .get(&p.ppid)
+            .is_some_and(|q| q.name == name && q.uids.iter().all(|u| *u == uid))
+    };
+
+    // The processes of each slot, by name and UID.
+    let mut slots: std::collections::HashMap<(&str, u32), Vec<i32>> =
         std::collections::HashMap::new();
 
-    let mut sinks: std::collections::HashMap<u32, Vec<i32>> = std::collections::HashMap::new();
     let mut stray = Vec::new();
 
     for p in processes {
         let Some(uid) = slot_uid(p) else { continue };
         let uniform = p.uids.iter().all(|u| *u == uid);
-        let parent = by_pid.get(&p.ppid);
-        let ok = uniform
-            && match p.name.as_str() {
-                "firecracker" => {
-                    let outside = parent.is_some_and(|q| slot_uid(q).is_none());
-                    outside && {
-                        firecrackers.entry(uid).or_default().push(p.pid);
-                        true
-                    }
-                }
-                "fake-internet" => {
-                    let below = parent.is_some_and(|q| {
-                        q.name == "firecracker" && q.uids.iter().all(|u| *u == uid)
-                    });
+        let expected = match p.name.as_str() {
+            LAUNCHER => by_pid.get(&p.ppid).is_some_and(|q| slot_uid(q).is_none()),
+            "firecracker" => below(p, LAUNCHER, uid),
+            "fake-internet" => below(p, "firecracker", uid),
+            _ => false,
+        };
 
-                    below && {
-                        sinks.entry(uid).or_default().push(p.pid);
-                        true
-                    }
-                }
-                _ => false,
-            };
-        if !ok {
+        if uniform && expected {
+            slots.entry((p.name.as_str(), uid)).or_default().push(p.pid);
+        } else {
             stray.push(p.pid);
         }
     }
 
-    for pids in firecrackers.values().chain(sinks.values()) {
-        if pids.len() > 1 {
-            stray.extend(pids);
-        }
+    for pids in slots.values().filter(|pids| pids.len() > 1) {
+        stray.extend(pids);
     }
 
     stray.sort_unstable();
@@ -187,23 +182,31 @@ mod tests {
         let mut procs = vec![
             process(1, 0, 0, "systemd"),
             process(10, 1, 1000, "crateward-orche"),
-            process(20, 10, 160_010, "firecracker"),
-            process(21, 20, 160_010, "fake-internet"),
-            process(30, 10, 160_011, "firecracker"),
+            process(20, 10, 160_010, LAUNCHER),
+            process(21, 20, 160_010, "firecracker"),
+            process(22, 21, 160_010, "fake-internet"),
+            process(30, 10, 160_011, LAUNCHER),
+            process(31, 30, 160_011, "firecracker"),
         ];
 
         assert!(stray_processes(&procs, slots.clone()).is_empty());
 
-        // A shell below Firecracker, a second Firecracker of the same
-        // slot, and a Firecracker started from inside a slot.
-        procs.push(process(40, 20, 160_010, "sh"));
-        procs.push(process(41, 10, 160_011, "firecracker"));
-        procs.push(process(42, 21, 160_012, "firecracker"));
+        // A shell below Firecracker, a second Firecracker of the same slot,
+        // a Firecracker without the launcher, a launcher started from
+        // inside a slot, and a Firecracker below another slot's launcher.
+        procs.push(process(40, 21, 160_010, "sh"));
+        procs.push(process(41, 30, 160_011, "firecracker"));
+        procs.push(process(42, 10, 160_012, "firecracker"));
+        procs.push(process(43, 22, 160_012, LAUNCHER));
+        procs.push(process(44, 20, 160_013, "firecracker"));
 
-        assert_eq!(stray_processes(&procs, slots.clone()), vec![30, 40, 41, 42]);
+        assert_eq!(
+            stray_processes(&procs, slots.clone()),
+            vec![31, 40, 41, 42, 43, 44]
+        );
 
         // Mixed UIDs, for example after a setuid binary.
-        let mut mixed = process(50, 10, 160_013, "firecracker");
+        let mut mixed = process(50, 10, 160_013, LAUNCHER);
         mixed.uids[1] = 0;
 
         assert_eq!(stray_processes(&[mixed], slots), vec![50]);

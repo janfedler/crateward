@@ -37,7 +37,7 @@ about 49 kB, almost all of it the trace's process list.
    * A decoy credential in every jail root, its access time set to the
      epoch. A read ends the job as a suspected compromise.
    * A `/proc` scan for processes with a slot UID other than that slot's
-     Firecracker and fake internet.
+     jail launcher, Firecracker and fake internet.
    * Host decoys watched with inotify.
    * An integrity manifest (BLAKE3 of every binary and image the sandbox
      trusts), checked every hour. Every deploy records it again.
