@@ -20,6 +20,7 @@ server.
 | Recall corpus | Inert samples that rebuild known malicious techniques, and legitimate patterns, each with what a VM run of it records. Static analysis and scoring must reach the level each sample names. Samples are only parsed, never built, and the known gaps are listed with their reason | `crates/static_analysis/tests/recall.rs`, samples in `tests/fixtures/recall` |
 | Fuzz targets | Every host parser of hostile input: archives, static analysis, Rust sources, manifests, lockfiles, index lines, RSS, the scratch disk, BTF, the vsock protocol, trace records, the fake internet's DNS parser and sniffer | `fuzz/` (`cargo fuzz`, pinned nightly). `cargo xtask ci` type checks them, `cargo xtask fuzz` runs each target briefly, and at least 150 seconds each before a release |
 | Firecracker tests | Boot, run jobs through the agent, snapshot and restore twice with fresh state, clock and randomness | `crates/orchestrator/tests/firecracker.rs`, ignored by default and run on the server with `--ignored` |
+| Surface tests | Everything a jailed Firecracker can see from the host (credentials, mounts, descriptors, environment, limits, namespaces, cgroup, network, jail root) and everything its guest can see (identity, boot arguments, devices, mounts, routes, where traffic goes), each compared with an exhaustive list | `crates/orchestrator/tests/surface.rs` through `cargo xtask surface`, on the server |
 | SBOM validation | A sample SBOM and findings document pass the CycloneDX 1.6 schema, and the SBOM meets BSI TR-03183-2 v2.1.0 ([ADR 0012](adr/0012-cyclonedx-sbom-and-vex.md)) | `cargo xtask cyclonedx`, with pinned `cyclonedx-cli` and `sbomqs` |
 | Deployment checks | The playbooks parse, the units verify with `systemd-analyze`, the firewall loads in a throwaway network namespace. Unit tests keep the playbook's pins and unit list in sync | `cargo xtask deploy-check`, in CI |
 | Soak test | Sequential jailed jobs, a host side timeout and crash reconciliation, then checks for leaked processes, cgroups, directories, network interfaces, file descriptors and memory | `cargo xtask soak --jobs 50`, on the server |
@@ -52,6 +53,7 @@ cargo xtask firecracker     # pinned release, SHA-256 verified
 cargo xtask guest-kernel    # pinned source, fragment checked
 cargo xtask rootfs          # pinned Debian snapshot, agent as PID 1, eBPF programs
 cargo test -p crateward_orchestrator --test firecracker -- --ignored --test-threads 1
+cargo xtask surface         # what the jail and the guest can see, also in a user scope
 cargo xtask soak --jobs 50  # needs a delegated cgroup, so xtask starts a systemd user scope
 ```
 

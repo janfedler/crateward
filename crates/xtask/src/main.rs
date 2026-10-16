@@ -102,6 +102,9 @@ enum Task {
     /// Run the canary: a fixture crate that steals a honeytoken inside a
     /// microVM must be caught.
     Canary,
+    /// Check what a jailed Firecracker and its guest can see against what
+    /// they should see.
+    Surface,
     /// Measure the line coverage of the workspace tests (needs
     /// `cargo llvm-cov`).
     Coverage,
@@ -149,6 +152,7 @@ fn main() -> ExitCode {
         Task::Soak { jobs } => soak(jobs),
         Task::Cyclonedx => cyclonedx::run(&workspace_root()),
         Task::Canary => canary(),
+        Task::Surface => surface(),
         Task::Coverage => coverage::run_coverage(&workspace_root()),
         Task::DeployCheck => deploy::run(&workspace_root()),
         Task::Fuzz { seconds } => fuzz::run(&workspace_root(), seconds),
@@ -452,10 +456,8 @@ fn musl_cc() -> &'static str {
     }
 }
 
-/// Runs the canary test: a fixture crate that steals a honeytoken inside a
-/// microVM must be caught. Builds the static fake internet first. Needs the
-/// same environment as [`vm_test`].
-fn canary() -> Result<(), TaskError> {
+/// Builds the static fake internet that jailed microVM tests start.
+fn fake_internet() -> Result<(), TaskError> {
     run(
         "cargo",
         &[
@@ -471,9 +473,23 @@ fn canary() -> Result<(), TaskError> {
         // is no musl C compiler. The host gcc works for ring's freestanding
         // code. Installing `musl-tools` is the proper fix.
         &[("CC_x86_64_unknown_linux_musl", musl_cc())],
-    )?;
+    )
+}
+
+/// Runs the canary test: a fixture crate that steals a honeytoken inside a
+/// microVM must be caught. Needs the same environment as [`vm_test`].
+fn canary() -> Result<(), TaskError> {
+    fake_internet()?;
 
     vm_test("canary", &[])
+}
+
+/// Runs the surface tests: what a jailed Firecracker and its guest can see.
+/// Needs the same environment as [`vm_test`].
+fn surface() -> Result<(), TaskError> {
+    fake_internet()?;
+
+    vm_test("surface", &[])
 }
 
 fn vendor() -> Result<(), TaskError> {
