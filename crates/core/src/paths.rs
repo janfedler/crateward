@@ -196,6 +196,10 @@ pub mod repo {
     /// The fuzz package, with its own workspace.
     pub const FUZZ: &str = "fuzz";
 
+    /// The fuzz package's manifest, which pins the `afl` crate and so
+    /// `cargo-afl`.
+    pub const FUZZ_MANIFEST: &str = "fuzz/Cargo.toml";
+
     /// The fuzz targets, one file each.
     pub const FUZZ_TARGETS: &str = "fuzz/fuzz_targets";
 

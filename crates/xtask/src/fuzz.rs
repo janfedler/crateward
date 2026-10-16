@@ -9,7 +9,9 @@
 //! release every target runs for at least 150 seconds from the seed corpus
 //! (TESTING.md).
 //!
-//! With AFL++, it fuzzes the targets in turn, one round of `--seconds` each,
+//! With AFL++, it first installs the `cargo-afl` that matches the pinned
+//! `afl` crate and builds AFL++ for the pinned nightly, when either is
+//! missing. That needs `make` and a C compiler. Then it fuzzes the targets in turn, one round of `--seconds` each,
 //! until interrupted. Each target keeps its state in `fuzz/afl/<target>`,
 //! so every round and every new run resumes where the last one stopped.
 //! The fuzzers run at the lowest priority and are not bound to a core, so
@@ -19,8 +21,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use crateward_core::paths::repo;
+use serde::Deserialize;
 
-use crate::{TaskError, io, nested, nested_cargo, run_command};
+use crate::{TaskError, io, nested, nested_cargo, read_toml, run_command};
 
 /// A fuzzing engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -144,9 +147,71 @@ fn run_libfuzzer(root: &Path, targets: &[String], seconds: u32) -> Result<(), Ta
     }
 }
 
+/// The part of `fuzz/Cargo.toml` that pins the `afl` crate.
+#[derive(Debug, Deserialize)]
+struct Manifest {
+    dependencies: Dependencies,
+}
+
+#[derive(Debug, Deserialize)]
+struct Dependencies {
+    afl: Dependency,
+}
+
+#[derive(Debug, Deserialize)]
+struct Dependency {
+    version: String,
+}
+
+/// Installs the `cargo-afl` of the pinned `afl` crate unless it is there,
+/// and builds AFL++ for the fuzz package's toolchain unless it is built.
+fn install_afl(root: &Path) -> Result<(), TaskError> {
+    let fuzz = root.join(repo::FUZZ);
+    let manifest: Manifest = read_toml(root, repo::FUZZ_MANIFEST)?;
+    let version = manifest.dependencies.afl.version.trim_start_matches('=');
+    let installed = nested_cargo(&fuzz).args(["afl", "--version"]).output();
+
+    // Prints `cargo-afl <version>`, plus the AFL++ version once built.
+    let matches = installed.is_ok_and(|out| {
+        out.status.success()
+            && String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .nth(1)
+                == Some(version)
+    });
+
+    if !matches {
+        run_command(nested_cargo(&fuzz).args([
+            "install",
+            "cargo-afl",
+            "--version",
+            version,
+            "--locked",
+        ]))?;
+    }
+
+    eprintln!("xtask: building AFL++ for the fuzz toolchain unless it is built");
+    let built = nested_cargo(&fuzz)
+        .args(["afl", "config", "--build"])
+        .output()
+        .map_err(|error| TaskError::Command(format!("cannot start cargo afl: {error}")))?;
+
+    // The pinned `cargo-afl` refuses to build AFL++ twice with this message.
+    let stderr = String::from_utf8_lossy(&built.stderr);
+    if built.status.success() || stderr.contains("was already built") {
+        Ok(())
+    } else {
+        Err(TaskError::Command(format!(
+            "cargo afl config --build failed: {}",
+            stderr.trim()
+        )))
+    }
+}
+
 /// Builds every target with `cargo afl`, then fuzzes `targets` in turn
 /// forever, `seconds` each round with `jobs` instances.
 fn run_afl(root: &Path, targets: &[String], seconds: u32, jobs: u32) -> Result<(), TaskError> {
+    install_afl(root)?;
     run_command(nested_cargo(&root.join(repo::FUZZ)).args([
         "afl",
         "build",

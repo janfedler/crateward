@@ -120,12 +120,13 @@ slow there. It also runs `cargo xtask deploy-check`, which needs
 ## Long fuzzing runs
 
 ```sh
-cargo install cargo-afl --version 0.18.2 --locked
-(cd fuzz && cargo afl config --build)
 cargo xtask fuzz --engine afl --jobs 2
 ```
 
-builds every target with AFL++ and fuzzes them in turn, one hour each
+installs the `cargo-afl` that matches the `afl` crate pinned in
+`fuzz/Cargo.toml` and builds AFL++ for the fuzz toolchain, when either is
+missing, which needs `make` and a C compiler. It then builds every target
+with AFL++ and fuzzes them in turn, one hour each
 (`--seconds`), round after round until interrupted with `Ctrl-C`. `--target` (repeatable)
 narrows the set, and `--jobs` sets the instances per target. Every target
 starts from its seed corpus and keeps its state in
