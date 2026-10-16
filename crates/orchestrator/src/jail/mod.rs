@@ -31,7 +31,7 @@ pub mod decoy;
 pub mod host;
 pub mod launcher;
 
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +119,24 @@ fn is_simple_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
+/// Whether `path` names a device node under `/dev`: absolute, and every
+/// component after `/dev` a simple name, so `..` cannot leave `/dev` on the
+/// host or the jail root.
+fn is_device_path(path: &Path) -> bool {
+    let mut components = path.components();
+    let under_dev = components.next() == Some(Component::RootDir)
+        && components.next() == Some(Component::Normal("dev".as_ref()));
+
+    let names: Vec<_> = components.collect();
+
+    under_dev
+        && !names.is_empty()
+        && names.iter().all(|c| match c {
+            Component::Normal(name) => name.to_str().is_some_and(is_simple_name),
+            _ => false,
+        })
+}
+
 impl JailSpec {
     /// Checks the rules the launcher relies on: absolute host paths, simple
     /// names inside the jail, device nodes only under `/dev`, and no mount
@@ -171,12 +189,7 @@ impl JailSpec {
         }
 
         for device in &self.devices {
-            let under_dev = device.parent().is_some_and(|p| p.starts_with("/dev"));
-            let name_ok = device
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(is_simple_name);
-            if !device.is_absolute() || !under_dev || !name_ok {
+            if !is_device_path(device) {
                 return fail(format!("device {} is not allowed", device.display()));
             }
         }
@@ -229,10 +242,19 @@ mod tests {
             assert!(s.validate().is_err(), "{target:?}");
         }
 
-        let mut s = spec();
-        s.devices = vec!["/etc/shadow".into()];
+        for device in [
+            "/etc/shadow",
+            "/dev",
+            "dev/kvm",
+            "/dev/../etc/shadow",
+            "/dev/net/../../etc/shadow",
+            "/dev/../../../home/user/.ssh/id_ed25519",
+        ] {
+            let mut s = spec();
+            s.devices = vec![device.into()];
 
-        assert!(s.validate().is_err());
+            assert!(s.validate().is_err(), "{device:?}");
+        }
 
         let mut s = spec();
         s.mounts[0].source = "relative/path".into();
