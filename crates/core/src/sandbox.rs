@@ -44,19 +44,38 @@ pub enum Namespaces {
 }
 
 impl Namespaces {
-    fn flags(self) -> UnshareFlags {
+    /// The `unshare(2)` flags of this set. Every arm passes through
+    /// [`without_files`] in a `const` block, so a set that unshares the file
+    /// descriptor table does not compile.
+    const fn flags(self) -> UnshareFlags {
         match self {
-            Self::User => UnshareFlags::NEWUSER,
+            Self::User => const { without_files(UnshareFlags::NEWUSER) },
             Self::Isolation => {
-                UnshareFlags::NEWNS
-                    | UnshareFlags::NEWNET
-                    | UnshareFlags::NEWIPC
-                    | UnshareFlags::NEWUTS
+                const {
+                    without_files(
+                        UnshareFlags::NEWNS
+                            .union(UnshareFlags::NEWNET)
+                            .union(UnshareFlags::NEWIPC)
+                            .union(UnshareFlags::NEWUTS),
+                    )
+                }
             }
-            Self::Network => UnshareFlags::NEWNET,
-            Self::Pid => UnshareFlags::NEWPID,
+            Self::Network => const { without_files(UnshareFlags::NEWNET) },
+            Self::Pid => const { without_files(UnshareFlags::NEWPID) },
         }
     }
+}
+
+/// Returns `flags`, and fails the build when evaluated in a `const` block if
+/// they contain [`UnshareFlags::FILES`]. That is the safety argument of
+/// [`unshare`].
+const fn without_files(flags: UnshareFlags) -> UnshareFlags {
+    assert!(
+        !flags.contains(UnshareFlags::FILES),
+        "a namespace set must not unshare the file descriptor table"
+    );
+
+    flags
 }
 
 /// Moves the calling process into new namespaces.
@@ -66,9 +85,9 @@ impl Namespaces {
 /// Returns the `errno` of `unshare(2)`.
 pub fn unshare(namespaces: Namespaces) -> std::io::Result<()> {
     let flags = namespaces.flags();
-    debug_assert!(!flags.contains(UnshareFlags::FILES));
 
-    // SAFETY: `flags` never contains `UnshareFlags::FILES` (see `flags`),
+    // SAFETY: `flags` never contains `UnshareFlags::FILES`, checked at
+    // compile time (see `Namespaces::flags`),
     // which is the only reason `unshare_unsafe` is unsafe: unsharing the
     // file descriptor table could invalidate descriptors other threads use.
     // Callers are single threaded launchers or run this before starting
@@ -234,39 +253,4 @@ pub fn enter(limits: Limits, access: &FsAccess) -> Result<(), SandboxError> {
     limit(limits)?;
 
     restrict_fs(access)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const ALL: [Namespaces; 4] = [
-        Namespaces::User,
-        Namespaces::Isolation,
-        Namespaces::Network,
-        Namespaces::Pid,
-    ];
-
-    /// Whether `namespaces` is in [`ALL`]. The match does not compile until
-    /// a new variant is listed, so the test below cannot miss one.
-    fn listed(namespaces: Namespaces) -> bool {
-        match namespaces {
-            Namespaces::User | Namespaces::Isolation | Namespaces::Network | Namespaces::Pid => {
-                ALL.contains(&namespaces)
-            }
-        }
-    }
-
-    /// The safety argument of [`unshare`]: no namespace set unshares the
-    /// file descriptor table.
-    #[test]
-    fn no_namespace_set_unshares_the_file_table() {
-        for namespaces in ALL {
-            assert!(listed(namespaces));
-            assert!(
-                !namespaces.flags().contains(UnshareFlags::FILES),
-                "{namespaces:?}"
-            );
-        }
-    }
 }
