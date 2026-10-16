@@ -32,8 +32,8 @@ PostgreSQL clusters are created with data checksums enabled.
 |----------|--------|
 | Host services and Postgres | about 12 GiB |
 | Image tmpfs | 14 GiB |
-| MicroVMs | 3 × 4 GiB |
-| Scratch tmpfs | 3 × 4 GiB cap |
+| MicroVMs | `sandbox.memory_mib_per_slot` (4 GiB) per slot |
+| Scratch tmpfs | at most `sandbox.scratch_mib_per_slot` (4 GiB) per slot |
 | Headroom and page cache | the rest |
 
 ## Capacity

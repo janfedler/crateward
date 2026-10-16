@@ -5,7 +5,7 @@ did, and what to do. The list matches `crateward_core::escalation`
 exactly. An alert that is not listed here is a bug.
 
 Alerts arrive through ntfy with minimal text. Details are on the dashboard,
-behind SSH. Milestone markers show when a step becomes available.
+behind SSH.
 
 ## Stage failing after retries
 
