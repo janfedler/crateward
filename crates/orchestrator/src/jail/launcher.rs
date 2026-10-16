@@ -326,11 +326,24 @@ fn set_up_network(spec: &JailSpec) -> Result<(), LaunchError> {
 /// whatever the orchestrator or a library left open. Rust opens every
 /// descriptor with close on exec, so this only fails on a bug.
 fn check_close_on_exec() -> Result<(), LaunchError> {
+    match inherited()?.first() {
+        Some(fd) => Err(LaunchError {
+            step: "checking inherited descriptors",
+            detail: format!("descriptor {fd} is not close on exec"),
+        }),
+        None => Ok(()),
+    }
+}
+
+/// The descriptors besides stdin, stdout and stderr that would survive
+/// `exec`, in ascending order.
+fn inherited() -> Result<Vec<u32>, LaunchError> {
     let fail = |detail: String| LaunchError {
         step: "checking inherited descriptors",
         detail,
     };
 
+    let mut inherited = Vec::new();
     let entries = std::fs::read_dir("/proc/self/fdinfo").map_err(step("listing descriptors"))?;
     for entry in entries {
         let entry = entry.map_err(step("listing descriptors"))?;
@@ -358,11 +371,13 @@ fn check_close_on_exec() -> Result<(), LaunchError> {
             .ok_or_else(|| fail(format!("no flags for descriptor {fd}")))?;
 
         if flags & OFlags::CLOEXEC.bits() == 0 {
-            return Err(fail(format!("descriptor {fd} is not close on exec")));
+            inherited.push(fd);
         }
     }
 
-    Ok(())
+    inherited.sort_unstable();
+
+    Ok(inherited)
 }
 
 /// Swaps the root: the old one is stacked under the new one and then
@@ -662,14 +677,22 @@ pub fn run_second_stage() -> LaunchError {
 
 #[cfg(test)]
 mod tests {
+    use std::os::fd::AsRawFd;
+
     use super::*;
 
     #[test]
-    fn a_descriptor_without_close_on_exec_is_refused() {
-        check_close_on_exec().unwrap();
-
+    fn a_descriptor_without_close_on_exec_is_found() {
+        // The test runner or a test running in parallel may hold such
+        // descriptors already, so only this one is checked.
         let file = File::open("/dev/null").unwrap();
+        let fd = u32::try_from(file.as_raw_fd()).unwrap();
+
+        assert!(!inherited().unwrap().contains(&fd));
+
         rustix::io::fcntl_setfd(&file, rustix::io::FdFlags::empty()).unwrap();
+
+        assert!(inherited().unwrap().contains(&fd));
         let error = check_close_on_exec().unwrap_err();
 
         assert!(
