@@ -10,6 +10,7 @@
 //! paths, which is what lets one snapshot restore into any slot: every
 //! jail offers the same paths, backed by different host files.
 
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -17,6 +18,8 @@ use std::time::Duration;
 use crateward_core::paths::host;
 use crateward_core::protocol::{AGENT_PORT, Limits};
 use crateward_core::report::network::{GUEST_ADDRESS, HOST_ADDRESS};
+use rustix::process::Signal;
+use tokio::io::unix::AsyncFd;
 use tokio::process::{Child, Command};
 use tokio::time::Instant;
 
@@ -26,7 +29,7 @@ use super::api::{
     NetworkInterface, RateLimiter, Serial, SnapshotCreate, SnapshotLoad, TokenBucket, VmState,
     Vsock, VsockOverride,
 };
-use crate::jail::host::{IdMap, JailError};
+use crate::jail::host::{IdMap, JailError, Jailed};
 use crate::jail::{BindMount, JailSpec, Sinks};
 
 /// Guest context ID. Every VM uses the same one: Firecracker's vsock is
@@ -231,6 +234,8 @@ pub struct Snapshot {
 #[derive(Debug)]
 pub struct Vm {
     child: Child,
+    /// Firecracker's pidfd when jailed, where `child` is the launcher.
+    jailed: Option<AsyncFd<OwnedFd>>,
     api: Api,
     dir: PathBuf,
     /// The jail root on the host, if jailed.
@@ -350,7 +355,7 @@ impl Launch {
         jail: &JailConfig,
         files: &[Exposed],
         log: PathBuf,
-    ) -> Result<Child, VmError> {
+    ) -> Result<Jailed, VmError> {
         crate::jail::host::prepare_root(&self.jail_root(), jail.vm_uid)?;
         let spec = self.jail_spec(jail, files, log);
         let ids = IdMap::for_slot(jail.vm_uid, jail.vm_gid);
@@ -366,17 +371,21 @@ impl Vm {
             .await
             .map_err(io_error(format!("creating {}", launch.dir.display())))?;
         let log = launch.dir.join("firecracker.log");
-        let (child, root) = match &launch.isolation {
-            Isolation::Direct => (launch.spawn_direct(&log)?, None),
+        let (child, jailed, root) = match &launch.isolation {
+            Isolation::Direct => (launch.spawn_direct(&log)?, None, None),
             Isolation::Jail(jail) => {
-                let child = launch.spawn_jailed(jail, files, log).await?;
-                (child, Some(launch.jail_root()))
+                let jailed = launch.spawn_jailed(jail, files, log).await?;
+                let firecracker =
+                    AsyncFd::new(jailed.firecracker).map_err(io_error("watching firecracker"))?;
+
+                (jailed.launcher, Some(firecracker), Some(launch.jail_root()))
             }
         };
 
         let socket = launch.host_created(API);
         let mut vm = Self {
             child,
+            jailed,
             api: Api::new(&socket),
             dir: launch.dir.clone(),
             root,
@@ -676,7 +685,9 @@ impl Vm {
         self.root.as_deref()
     }
 
-    /// Process ID of the Firecracker process, while it runs.
+    /// Process ID of the Firecracker process, while it runs. In a jail it
+    /// is the launcher's first stage, Firecracker's parent outside the
+    /// jail's PID namespace.
     #[must_use]
     pub fn pid(&self) -> Option<u32> {
         self.child.id()
@@ -699,6 +710,21 @@ impl Vm {
     ///
     /// Fails if the process cannot be polled or reaped.
     pub async fn kill(&mut self) -> Result<(), VmError> {
+        // The launcher's first stage ends once Firecracker has, so this
+        // returns only when no process of the VM remains.
+        if let Some(firecracker) = &self.jailed {
+            // Fails only if Firecracker has already ended.
+            let _ = rustix::process::pidfd_send_signal(firecracker.get_ref(), Signal::KILL);
+
+            // A pidfd becomes readable when its process has ended.
+            drop(
+                firecracker
+                    .readable()
+                    .await
+                    .map_err(io_error("waiting for firecracker"))?,
+            );
+        }
+
         if self
             .child
             .try_wait()

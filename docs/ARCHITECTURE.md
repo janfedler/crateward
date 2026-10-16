@@ -245,7 +245,9 @@ starts it in a rootless jail ([ADR 0002](adr/0002-firecracker-rootless-jail.md))
   each VM:
   1. It joins the slot's cgroup.
   2. It creates a user namespace in which the slot's own subordinate UID
-     stands for Firecracker, then mount, network, IPC and UTS namespaces.
+     stands for Firecracker, then a PID namespace. A second stage of the
+     launcher runs in it as PID 1 and creates mount, network, IPC and UTS
+     namespaces. The first stage waits outside, without privileges.
   3. It bind mounts exactly the kernel, the images and `/dev/kvm`, and
      creates the slot's tap device.
   4. It calls `pivot_root`, drops every capability, sets `no_new_privs` and

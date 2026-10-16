@@ -30,7 +30,7 @@ semver.workspace = true
 tar.workspace = true
 # Rewrites manifests into stubs for the warm build (ADR 0006).
 toml.workspace = true
-rustix = { workspace = true, features = ["fs", "mount", "process", "system", "thread", "stdio"] }
+rustix = { workspace = true, features = ["event", "fs", "mount", "process", "system", "thread", "stdio"] }
 hyper.workspace = true
 hyper-util.workspace = true
 serde.workspace = true

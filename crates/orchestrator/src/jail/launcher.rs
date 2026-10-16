@@ -1,29 +1,39 @@
 //! The launcher side of the jail: runs in `crateward-vmjail`, single
-//! threaded, and ends by executing Firecracker.
+//! threaded, in the two stages the [module documentation](super) describes.
+//! The second stage ends by executing Firecracker.
 //!
 //! Control protocol with the orchestrator, one line each over stdin and
 //! stdout: the orchestrator sends the [`JailSpec`] as JSON. The launcher
 //! answers `unshared` once it is in its new user namespace. The orchestrator
-//! writes the ID maps and answers `mapped`. The launcher answers `exec` right
-//! before it replaces itself with Firecracker, or `error: <reason>` if a
-//! step fails. From then on Firecracker's stdout and stderr go to the log.
+//! writes the ID maps and answers `mapped`. The second stage, which shares
+//! stdout with the first, answers `exec` right before it replaces itself
+//! with Firecracker. Either stage answers `error: <reason>` if one of its
+//! steps fails. From then on Firecracker's stdout and stderr go to the log.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, ChildStdin, Command, ExitCode, ExitStatus, Stdio};
 
-use rustix::fs::{Gid, Uid};
+use rustix::event::{PollFd, PollFlags, Timespec};
+use rustix::fs::{Gid, OFlags, Uid};
 use rustix::mount::{MountFlags, MountPropagationFlags, UnmountFlags};
-use rustix::process::{Resource, Rlimit};
+use rustix::process::{Resource, Rlimit, Signal};
 
 use super::{FAKE_INTERNET_IN_JAIL, FIRECRACKER_IN_JAIL, INSIDE_VM_ID, JailSpec, MAX_SPEC_BYTES};
 use crate::firecracker::vm::PREFIX_LEN;
 use crateward_core::paths::host::{IP, NFT};
 use crateward_core::report::network::HOST_ADDRESS;
 use crateward_core::sandbox::{Namespaces, unshare};
+
+/// The argument that starts the launcher's second stage.
+pub const SECOND_STAGE: &str = "--second-stage";
+
+/// The launcher's own binary, for the second stage. The magic link executes
+/// the same file even if it was replaced on disk since.
+const OWN_BINARY: &str = "/proc/self/exe";
 
 /// Redirects everything the guest sends to the fake internet's ports
 /// (`crateward_fake_internet::server::SlotConfig::default`). The namespace
@@ -46,7 +56,7 @@ fn run_nft(rules: &str) -> Result<(), LaunchError> {
     let mut child = Command::new(NFT)
         .args(["-f", "-"])
         .env_clear()
-        .stdin(std::process::Stdio::piped())
+        .stdin(Stdio::piped())
         .spawn()
         .map_err(step("running nft"))?;
     if let Some(mut stdin) = child.stdin.take() {
@@ -83,7 +93,8 @@ fn step<E: std::fmt::Display>(step: &'static str) -> impl FnOnce(E) -> LaunchErr
 }
 
 /// Reads one line of at most `limit` bytes from the orchestrator on stdin:
-/// the jail specification, then `mapped`.
+/// the jail specification, then `mapped`. The second stage reads the
+/// specification as the first stage relays it.
 fn read_from_orchestrator<R: BufRead>(input: &mut R, limit: u64) -> Result<String, LaunchError> {
     let mut line = String::new();
     let mut limited = input.by_ref().take(limit);
@@ -304,6 +315,50 @@ fn set_up_network(spec: &JailSpec) -> Result<(), LaunchError> {
     Ok(())
 }
 
+/// Fails if a descriptor besides stdin, stdout and stderr would survive
+/// `exec`. The fake internet and Firecracker must inherit nothing else,
+/// whatever the orchestrator or a library left open. Rust opens every
+/// descriptor with close on exec, so this only fails on a bug.
+fn check_close_on_exec() -> Result<(), LaunchError> {
+    let fail = |detail: String| LaunchError {
+        step: "checking inherited descriptors",
+        detail,
+    };
+
+    let entries = std::fs::read_dir("/proc/self/fdinfo").map_err(step("listing descriptors"))?;
+    for entry in entries {
+        let entry = entry.map_err(step("listing descriptors"))?;
+        let name = entry.file_name();
+        let fd: u32 = name
+            .to_str()
+            .and_then(|n| n.parse().ok())
+            .ok_or_else(|| fail(format!("unexpected entry {name:?}")))?;
+
+        if fd <= 2 {
+            continue;
+        }
+
+        let info = match std::fs::read_to_string(entry.path()) {
+            Ok(info) => info,
+            // The listing's own descriptor, closed by now.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(step("reading a descriptor's flags")(e)),
+        };
+
+        let flags = info
+            .lines()
+            .find_map(|line| line.strip_prefix("flags:"))
+            .and_then(|octal| u32::from_str_radix(octal.trim(), 8).ok())
+            .ok_or_else(|| fail(format!("no flags for descriptor {fd}")))?;
+
+        if flags & OFlags::CLOEXEC.bits() == 0 {
+            return Err(fail(format!("descriptor {fd} is not close on exec")));
+        }
+    }
+
+    Ok(())
+}
+
 /// Swaps the root: the old one is stacked under the new one and then
 /// detached, so no host path remains reachable.
 fn pivot(root: &Path) -> Result<(), LaunchError> {
@@ -323,8 +378,8 @@ fn set_limit(resource: Resource, value: u64) -> Result<(), LaunchError> {
     rustix::process::setrlimit(resource, limit).map_err(step("setting a resource limit"))
 }
 
-/// Everything between the ID maps and `exec`: step 3 and the limits of
-/// step 4 in the [module documentation](super), which ADR 0002 explains.
+/// Everything in the second stage before it drops privileges: step 4 and
+/// the limits of step 5 in the [module documentation](super), which ADR 0002 explains.
 /// Each step needs the one before it.
 fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
     // The jail has no log, `/dev/null` or TLS authority of its own. They are
@@ -342,6 +397,10 @@ fn build_jail(spec: &JailSpec) -> Result<(File, File), LaunchError> {
     // Creates the tap device and its nftables rules in the new network
     // namespace. Runs the host's `ip` and `nft`, which the jail lacks.
     set_up_network(spec)?;
+
+    // Reads `/proc`, so it comes before the root switch. Nothing after it
+    // opens a descriptor without close on exec.
+    check_close_on_exec()?;
 
     // Makes the jail root `/` and detaches the host's root. From here on
     // no host path is reachable.
@@ -375,7 +434,7 @@ fn start_sinks(
     // The jail has no /dev/null to open. Reuse the one opened before. With
     // an authority, stdin is a pipe that carries it and is then closed.
     let stdin = match authority {
-        Some(_) => std::process::Stdio::piped(),
+        Some(_) => Stdio::piped(),
         None => null
             .try_clone()
             .map_err(step("duplicating /dev/null"))?
@@ -415,39 +474,161 @@ fn drop_privileges() -> Result<(), LaunchError> {
     Ok(())
 }
 
-/// Runs the launcher. Returns only on failure.
-pub fn run() -> LaunchError {
+/// Reads and checks the jail specification, one JSON line.
+fn parse_spec(line: &str) -> Result<JailSpec, LaunchError> {
+    let spec: JailSpec =
+        serde_json::from_str(line).map_err(step("parsing the jail specification"))?;
+
+    spec.validate()
+        .map_err(step("validating the jail specification"))?;
+
+    Ok(spec)
+}
+
+/// Tells the orchestrator why the launcher failed, and returns the error.
+fn report(error: LaunchError) -> LaunchError {
+    // Before `exec` stdout is the control channel. After the redirection
+    // this line lands in the log.
+    let _ = tell_orchestrator(&format!("error: {error}"));
+
+    error
+}
+
+/// Steps 1 to 3 of the [module documentation](super): everything up to
+/// the second stage, PID 1 of a new PID namespace. Returns the second stage and the
+/// pipe it reads the jail specification from.
+fn start_second_stage() -> Result<(Child, ChildStdin), LaunchError> {
+    let mut input = std::io::stdin().lock();
+    let line = read_from_orchestrator(&mut input, MAX_SPEC_BYTES)?;
+    let spec = parse_spec(&line)?;
+
+    if let Some(cgroup) = &spec.cgroup {
+        std::fs::write(cgroup.join("cgroup.procs"), std::process::id().to_string())
+            .map_err(step("joining the cgroup"))?;
+    }
+
+    unshare(Namespaces::User).map_err(step("unsharing the user namespace"))?;
+    tell_orchestrator("unshared")?;
+
+    if read_from_orchestrator(&mut input, 16)? != "mapped" {
+        return Err(LaunchError {
+            step: "waiting for the ID maps",
+            detail: "unexpected answer".into(),
+        });
+    }
+
+    // The next process this one starts is PID 1 of the new namespace.
+    unshare(Namespaces::Pid).map_err(step("unsharing the PID namespace"))?;
+    let mut jail = Command::new(OWN_BINARY)
+        .arg(SECOND_STAGE)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(step("starting the second stage"))?;
+
+    let mut pipe = jail.stdin.take().ok_or_else(|| LaunchError {
+        step: "starting the second stage",
+        detail: "no stdin".into(),
+    })?;
+
+    writeln!(pipe, "{line}").map_err(step("passing the jail specification"))?;
+
+    Ok((jail, pipe))
+}
+
+/// Runs the launcher's first stage: everything up to the ID maps, then the
+/// second stage, which builds the jail and becomes Firecracker. This stage
+/// stays outside the jail's PID namespace as the orchestrator's handle on
+/// it, without privileges, and returns Firecracker's exit.
+///
+/// # Errors
+///
+/// Fails if a step fails. The orchestrator has then been told why, and the
+/// second stage, if it started, is killed.
+pub fn run() -> Result<ExitStatus, LaunchError> {
+    let (mut jail, pipe) = start_second_stage().map_err(report)?;
+
+    // From here on the second stage talks to the orchestrator.
+    if let Err(error) = drop_privileges() {
+        let _ = jail.kill();
+        let _ = jail.wait();
+        return Err(report(error));
+    }
+
+    let status = jail.wait().map_err(step("waiting for firecracker"));
+
+    // Open until here, so the second stage can tell whether this stage
+    // still runs.
+    drop(pipe);
+
+    status
+}
+
+/// Ends this process the way Firecracker ended, with its exit code or by
+/// its signal, so the orchestrator classifies the exit as if it had
+/// started Firecracker itself.
+#[must_use]
+pub fn exit_like(status: ExitStatus) -> ExitCode {
+    let signal = status.signal();
+    if let Some(signal) = signal.and_then(Signal::from_named_raw) {
+        let _ = rustix::process::kill_process(rustix::process::getpid(), signal);
+    }
+
+    // Reached for an exit code, or a signal that does not end this process.
+    status
+        .code()
+        .or(signal.map(|s| 128 + s))
+        .and_then(|code| u8::try_from(code).ok())
+        .map_or(ExitCode::FAILURE, ExitCode::from)
+}
+
+/// Fails if the first stage has ended. Its end of stdin is then closed.
+/// After this check the parent death signal covers the rest.
+fn check_first_stage() -> Result<(), LaunchError> {
+    let stdin = std::io::stdin();
+    let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+    rustix::event::poll(&mut fds, Some(&Timespec::default()))
+        .map_err(step("checking the first stage"))?;
+
+    // The first stage never writes after the specification, so any event
+    // means its end closed.
+    let [fd] = &fds;
+
+    if fd.revents().is_empty() {
+        Ok(())
+    } else {
+        Err(LaunchError {
+            step: "checking the first stage",
+            detail: "it has ended".into(),
+        })
+    }
+}
+
+/// Runs the launcher's second stage, PID 1 of the jail's PID namespace:
+/// steps 4 and 5 of the [module documentation](super), then `exec` of
+/// Firecracker, which stays PID 1. Returns only on failure.
+pub fn run_second_stage() -> LaunchError {
     let result = (|| -> Result<std::convert::Infallible, LaunchError> {
-        let mut input = std::io::stdin().lock();
-        let spec: JailSpec =
-            serde_json::from_str(&read_from_orchestrator(&mut input, MAX_SPEC_BYTES)?)
-                .map_err(step("parsing the jail specification"))?;
-
-        spec.validate()
-            .map_err(step("validating the jail specification"))?;
-
-        if let Some(cgroup) = &spec.cgroup {
-            std::fs::write(cgroup.join("cgroup.procs"), std::process::id().to_string())
-                .map_err(step("joining the cgroup"))?;
-        }
-
-        unshare(Namespaces::User).map_err(step("unsharing the user namespace"))?;
-        tell_orchestrator("unshared")?;
-
-        if read_from_orchestrator(&mut input, 16)? != "mapped" {
-            return Err(LaunchError {
-                step: "waiting for the ID maps",
-                detail: "unexpected answer".into(),
-            });
-        }
+        // The first stage relays the orchestrator's specification.
+        let spec = parse_spec(&read_from_orchestrator(
+            &mut std::io::stdin().lock(),
+            MAX_SPEC_BYTES,
+        )?)?;
 
         let (log, null) = build_jail(&spec)?;
-        drop(input);
 
         // Sockets and snapshot files Firecracker creates must be usable by
         // the orchestrator. The jail root itself is closed to everybody else.
         rustix::process::umask(rustix::fs::Mode::empty());
         drop_privileges()?;
+
+        // Kills the jail with the first stage, the process the orchestrator
+        // kills. Set after the switch of user, which clears it, and checked
+        // once, for a first stage that ended before.
+        rustix::process::set_parent_process_death_signal(Some(Signal::KILL))
+            .map_err(step("setting the parent death signal"))?;
+        check_first_stage()?;
+
         tell_orchestrator("exec")?;
         rustix::stdio::dup2_stdin(&null).map_err(step("redirecting stdin"))?;
         rustix::stdio::dup2_stdout(&log).map_err(step("redirecting stdout"))?;
@@ -469,11 +650,25 @@ pub fn run() -> LaunchError {
 
     match result {
         Ok(never) => match never {},
-        Err(error) => {
-            // Before `exec` stdout is the control channel. After the
-            // redirection this line lands in the log.
-            let _ = tell_orchestrator(&format!("error: {error}"));
-            error
-        }
+        Err(error) => report(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_descriptor_without_close_on_exec_is_refused() {
+        check_close_on_exec().unwrap();
+
+        let file = File::open("/dev/null").unwrap();
+        rustix::io::fcntl_setfd(&file, rustix::io::FdFlags::empty()).unwrap();
+        let error = check_close_on_exec().unwrap_err();
+
+        assert!(
+            error.to_string().contains("is not close on exec"),
+            "{error}"
+        );
     }
 }

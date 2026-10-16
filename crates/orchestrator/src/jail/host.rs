@@ -1,9 +1,12 @@
 //! The orchestrator side of the jail: starts `crateward-vmjail`, writes the
 //! ID maps, and hands back the process that becomes Firecracker.
 
+use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
+
+use rustix::process::{Pid, PidfdFlags};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdout, Command};
@@ -110,6 +113,50 @@ async fn write_map(tool: &'static str, pid: u32, setup: u32, vm: u32) -> Result<
     }
 }
 
+/// A jailed Firecracker.
+#[derive(Debug)]
+pub struct Jailed {
+    /// The launcher's first stage, which ends with Firecracker's exit.
+    pub launcher: Child,
+    /// A pidfd of Firecracker, PID 1 of the jail's PID namespace. It is not
+    /// the orchestrator's child, so it is killed and waited for through this.
+    pub firecracker: OwnedFd,
+}
+
+/// The children of `pid`, from `/proc`.
+fn children(pid: u32) -> Result<Vec<String>, JailError> {
+    let list = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+        .map_err(io("listing the launcher's children"))?;
+
+    Ok(list.split_whitespace().map(str::to_owned).collect())
+}
+
+/// Opens a pidfd of the launcher's only child, Firecracker.
+fn open_firecracker(launcher: u32) -> Result<OwnedFd, JailError> {
+    let unexpected = |found: &[String]| JailError::Launcher(format!("children {found:?}"));
+    let found = children(launcher)?;
+    let [child] = found.as_slice() else {
+        return Err(unexpected(&found));
+    };
+
+    let pid = child
+        .parse()
+        .ok()
+        .and_then(Pid::from_raw)
+        .ok_or_else(|| unexpected(&found))?;
+
+    let pidfd = rustix::process::pidfd_open(pid, PidfdFlags::empty())
+        .map_err(|e| io("opening firecracker's pidfd")(e.into()))?;
+
+    // Still the launcher's child after the pidfd was opened, so the PID was
+    // not reused by another process in between.
+    if children(launcher)? == found {
+        Ok(pidfd)
+    } else {
+        Err(JailError::Launcher("firecracker exited at once".into()))
+    }
+}
+
 /// Starts a jailed Firecracker. When this returns, the process has executed
 /// Firecracker inside the jail. Its API socket appears in the jail root.
 ///
@@ -117,7 +164,7 @@ async fn write_map(tool: &'static str, pid: u32, setup: u32, vm: u32) -> Result<
 ///
 /// Fails if the specification is invalid, the ID maps are refused, or any
 /// step of the launcher fails. The launcher process is killed on failure.
-pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child, JailError> {
+pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Jailed, JailError> {
     spec.validate()?;
     let mut child = Command::new(launcher)
         .env_clear()
@@ -159,11 +206,16 @@ pub async fn spawn(launcher: &Path, spec: &JailSpec, ids: IdMap) -> Result<Child
             .write_all(b"mapped\n")
             .await
             .map_err(io("confirming the ID maps"))?;
-        expect_line(&mut stdout, "exec").await
+        expect_line(&mut stdout, "exec").await?;
+
+        open_firecracker(pid)
     };
 
     match tokio::time::timeout(LAUNCH_TIMEOUT, handshake).await {
-        Ok(Ok(())) => Ok(child),
+        Ok(Ok(firecracker)) => Ok(Jailed {
+            launcher: child,
+            firecracker,
+        }),
         Ok(Err(error)) => {
             let _ = child.kill().await;
             Err(error)

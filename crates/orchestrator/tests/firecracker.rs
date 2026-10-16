@@ -102,6 +102,23 @@ fn status_field(pid: u32, field: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Firecracker's host PID in a jail: the only child of the launcher's first
+/// stage.
+fn jailed_firecracker(vm: &Vm) -> u32 {
+    let launcher = vm.pid().unwrap();
+    let children =
+        std::fs::read_to_string(format!("/proc/{launcher}/task/{launcher}/children")).unwrap();
+
+    let pids: Vec<u32> = children
+        .split_whitespace()
+        .map(|pid| pid.parse().unwrap())
+        .collect();
+
+    assert_eq!(pids.len(), 1, "the launcher has children {children:?}");
+
+    pids[0]
+}
+
 async fn boot_run_shutdown(jailed: bool) {
     let launch = launch(if jailed { "boot-jail" } else { "boot-direct" }, jailed, 0);
     let started = Instant::now();
@@ -114,16 +131,24 @@ async fn boot_run_shutdown(jailed: bool) {
     let boot_time = started.elapsed();
 
     if jailed {
-        let pid = vm.pid().unwrap();
+        let launcher = vm.pid().unwrap();
+        let firecracker = jailed_firecracker(&vm);
         let uid = TEST_SUBID_BASE.to_string();
-
-        assert_eq!(status_field(pid, "Uid"), format!("{uid} {uid} {uid} {uid}"));
-        assert_eq!(status_field(pid, "CapEff"), "0000000000000000");
-        assert_eq!(status_field(pid, "CapPrm"), "0000000000000000");
-        assert_eq!(status_field(pid, "NoNewPrivs"), "1");
+        for pid in [launcher, firecracker] {
+            assert_eq!(status_field(pid, "Uid"), format!("{uid} {uid} {uid} {uid}"));
+            assert_eq!(status_field(pid, "CapEff"), "0000000000000000");
+            assert_eq!(status_field(pid, "CapPrm"), "0000000000000000");
+            assert_eq!(status_field(pid, "NoNewPrivs"), "1");
+        }
 
         // 2 means a seccomp filter is installed (Firecracker's own).
-        assert_eq!(status_field(pid, "Seccomp"), "2");
+        assert_eq!(status_field(firecracker, "Seccomp"), "2");
+
+        // Firecracker is PID 1 of its own PID namespace.
+        assert_eq!(
+            status_field(firecracker, "NSpid"),
+            format!("{firecracker} 1")
+        );
 
         // The tap device lives only in the jail's network namespace.
         let host_links = std::process::Command::new(host::IP)
@@ -247,7 +272,23 @@ async fn snapshot_and_restore_twice(jailed: bool) {
         );
 
         drop(agent);
+
+        // Killing only the launcher, as when the orchestrator dies, kills
+        // the jail with it.
+        if jailed {
+            let pid = jailed_firecracker(&vm);
+            let launcher = rustix::process::Pid::from_raw(vm.pid().unwrap() as i32).unwrap();
+            rustix::process::kill_process(launcher, rustix::process::Signal::KILL).unwrap();
+
+            let gone = Instant::now() + Duration::from_secs(2);
+            while std::path::Path::new(&format!("/proc/{pid}")).exists() {
+                assert!(Instant::now() < gone, "firecracker outlived its launcher");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+
         vm.destroy().await.unwrap();
+
         eprintln!("jailed={jailed}: restore {round} to agent ready: {restore_time:?}");
     }
 

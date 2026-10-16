@@ -38,6 +38,9 @@ pub enum Namespaces {
     Isolation,
     /// Only a new network namespace.
     Network,
+    /// A new PID namespace for the caller's next child, which becomes its
+    /// PID 1. The caller itself stays in its own.
+    Pid,
 }
 
 impl Namespaces {
@@ -51,6 +54,7 @@ impl Namespaces {
                     | UnshareFlags::NEWUTS
             }
             Self::Network => UnshareFlags::NEWNET,
+            Self::Pid => UnshareFlags::NEWPID,
         }
     }
 }
@@ -236,13 +240,18 @@ pub fn enter(limits: Limits, access: &FsAccess) -> Result<(), SandboxError> {
 mod tests {
     use super::*;
 
-    const ALL: [Namespaces; 3] = [Namespaces::User, Namespaces::Isolation, Namespaces::Network];
+    const ALL: [Namespaces; 4] = [
+        Namespaces::User,
+        Namespaces::Isolation,
+        Namespaces::Network,
+        Namespaces::Pid,
+    ];
 
     /// Whether `namespaces` is in [`ALL`]. The match does not compile until
     /// a new variant is listed, so the test below cannot miss one.
     fn listed(namespaces: Namespaces) -> bool {
         match namespaces {
-            Namespaces::User | Namespaces::Isolation | Namespaces::Network => {
+            Namespaces::User | Namespaces::Isolation | Namespaces::Network | Namespaces::Pid => {
                 ALL.contains(&namespaces)
             }
         }

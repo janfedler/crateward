@@ -5,9 +5,23 @@
 
 use std::process::ExitCode;
 
-fn main() -> ExitCode {
-    let error = crateward_orchestrator::jail::launcher::run();
-    eprintln!("crateward-vmjail: {error}");
+use crateward_orchestrator::jail::launcher;
 
-    ExitCode::FAILURE
+fn main() -> ExitCode {
+    let result = if std::env::args_os()
+        .nth(1)
+        .is_some_and(|a| a == launcher::SECOND_STAGE)
+    {
+        Err(launcher::run_second_stage())
+    } else {
+        launcher::run()
+    };
+
+    match result {
+        Ok(status) => launcher::exit_like(status),
+        Err(error) => {
+            eprintln!("crateward-vmjail: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }

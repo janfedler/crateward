@@ -10,11 +10,18 @@
 //!    the setuid helpers `newuidmap` and `newgidmap`: inside UID 0 is the
 //!    orchestrator's own user (for setup only), inside UID 1 is the slot's
 //!    own subordinate UID, which no other slot shares.
-//! 3. It creates mount, network, IPC and UTS namespaces, bind mounts exactly
+//! 3. It creates a PID namespace and starts itself again in it, as PID 1.
+//!    This second stage does the steps below and becomes Firecracker, which
+//!    therefore sees no process outside the jail. The first stage switches
+//!    to inside UID 1 as well and only waits. It is the orchestrator's
+//!    handle on the jail: when it dies, the parent death signal kills
+//!    Firecracker, and with it every process in the namespace.
+//! 4. It creates mount, network, IPC and UTS namespaces, bind mounts exactly
 //!    the files the VM needs into the slot's root directory, creates the
-//!    slot's tap device, and `pivot_root`s into that directory. No `/proc`
-//!    and no other host path exists inside.
-//! 4. It sets resource limits, switches to inside UID 1 (which clears every
+//!    slot's tap device, checks that no descriptor but stdin, stdout and
+//!    stderr survives `exec`, and `pivot_root`s into that directory. No
+//!    `/proc` and no other host path exists inside.
+//! 5. It sets resource limits, switches to inside UID 1 (which clears every
 //!    capability), sets `no_new_privs`, and executes Firecracker, whose own
 //!    seccomp filter then applies.
 //!

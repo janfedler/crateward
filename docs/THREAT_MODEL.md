@@ -56,7 +56,7 @@ test. Nothing is marked Built before the code exists.
 | Mitigation | Status |
 |------------|--------|
 | Fresh microVM per job from a clean snapshot. Never reused | Built |
-| Firecracker always started in the rootless jail: distinct subordinate UID per slot, mount, network, IPC and UTS namespaces, `pivot_root` with only the needed files, no capabilities, `no_new_privs` ([ADR 0002](adr/0002-firecracker-rootless-jail.md)) | Tested |
+| Firecracker always started in the rootless jail: distinct subordinate UID per slot, mount, network, IPC, UTS and PID namespaces, only stdio inherited, `pivot_root` with only the needed files, no capabilities, `no_new_privs` ([ADR 0002](adr/0002-firecracker-rootless-jail.md)) | Tested |
 | Firecracker's default seccomp filters. Never `--no-seccomp` | Tested |
 | No process runs as root for the sandbox. The orchestrator and the launcher are unprivileged | Built |
 | Serial console output rate limited, since it carries guest controlled text into the host log | Built |

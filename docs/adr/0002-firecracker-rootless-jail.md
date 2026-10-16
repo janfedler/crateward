@@ -1,7 +1,7 @@
 # 0002: Firecracker microVMs in a rootless jail
 
 * Status: Accepted
-* Date: 2026-09-24, updated 2026-09-26
+* Date: 2026-09-24, updated 2026-10-16
 
 ## Context
 
@@ -25,11 +25,16 @@ affected by L1TF and MDS, and its memory has no ECC.
      images and the device nodes, then `pivot_root`, no `/proc`.
    * The slot's cgroup in the orchestrator's delegated subtree.
    * A network namespace owned by the jail, with the tap device inside.
+   * A PID namespace in which Firecracker is PID 1. The launcher's first
+     stage waits outside it without privileges, and the jail dies with it.
+   * Only stdin, stdout and stderr cross `exec`. The launcher refuses to
+     start Firecracker if any other descriptor lacks close on exec.
    * Resource limits and an empty environment. Firecracker's own seccomp
      filter stays.
    Tests check from the host on every run: the slot's UID, `CapEff` and
-   `CapPrm` zero, `NoNewPrivs` 1, `Seccomp` 2, and no tap device in the
-   host's namespace.
+   `CapPrm` zero, `NoNewPrivs` 1, `Seccomp` 2, Firecracker as PID 1 of its
+   namespace, no tap device in the host's namespace, and that killing the
+   launcher kills Firecracker.
 3. **SMT off** (`nosmt`, `mds=full,nosmt`, `l1tf=full,force`): one core
    for the host and the others for VM slots of one vCPU each. **Hot path in
    RAM:** images, the snapshot and the scratch disks live in tmpfs, copied
